@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# VN-Agent pre-commit hook
+# 在每次 commit 前自动更新开发文档和产品文档
+
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# 使用 Python 运行更新脚本
+# 优先使用虚拟环境中的 Python，否则回退到系统 Python
+if [ -f "$REPO_ROOT/.venv/bin/python" ]; then
+    PYTHON="$REPO_ROOT/.venv/bin/python"
+elif [ -f "$REPO_ROOT/.venv/Scripts/python.exe" ]; then
+    PYTHON="$REPO_ROOT/.venv/Scripts/python.exe"
+elif command -v python3 &>/dev/null; then
+    PYTHON="python3"
+elif command -v python &>/dev/null; then
+    PYTHON="python"
+else
+    echo "⚠️  未找到 Python，跳过文档更新"
+    exit 0
+fi
+
+"$PYTHON" "$REPO_ROOT/scripts/update_docs.py"

@@ -1,0 +1,74 @@
+"""Configuration loading with pydantic-settings."""
+from pathlib import Path
+from functools import lru_cache
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+import yaml
+
+
+ROOT = Path(__file__).parent.parent.parent
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=ROOT / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # API Keys
+    anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
+    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
+    stability_api_key: str = Field(default="", alias="STABILITY_API_KEY")
+    suno_api_key: str = Field(default="", alias="SUNO_API_KEY")
+
+    # Loaded from settings.yaml
+    llm_provider: str = "anthropic"
+    llm_model: str = "claude-opus-4-6"
+    llm_temperature: float = 0.7
+    llm_max_tokens: int = 4096
+    llm_max_retries: int = 3
+
+    image_provider: str = "openai"
+    image_model: str = "dall-e-3"
+
+    music_strategy: str = "library"
+    music_library_path: str = "config/music_library.yaml"
+    music_audio_format: str = "ogg"
+
+    max_scenes: int = 20
+    max_revision_rounds: int = 3
+    min_dialogue_lines: int = 5
+    max_dialogue_lines: int = 20
+
+
+def _load_yaml_settings() -> dict:
+    config_path = ROOT / "config" / "settings.yaml"
+    if not config_path.exists():
+        return {}
+    with open(config_path, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    # Flatten nested yaml into flat Settings fields
+    flat: dict = {}
+    for section, values in data.items():
+        if isinstance(values, dict):
+            for k, v in values.items():
+                flat[f"{section}_{k}"] = v
+        else:
+            flat[section] = values
+    return flat
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    yaml_data = _load_yaml_settings()
+    return Settings(**yaml_data)
+
+
+def get_music_library() -> dict:
+    settings = get_settings()
+    path = ROOT / settings.music_library_path
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}

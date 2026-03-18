@@ -1,0 +1,78 @@
+# Free BGM library - mood to track mapping
+# Files should be placed in game/audio/bgm/
+tracks:
+  peaceful:
+    - id: peaceful_morning
+      title: "Peaceful Morning"
+      filename: peaceful_morning.ogg
+      description: "Soft piano, gentle awakening"
+    - id: tranquil_garden
+      title: "Tranquil Garden"
+      filename: tranquil_garden.ogg
+      description: "Acoustic guitar, nature sounds"
+
+  romantic:
+    - id: romantic_waltz
+      title: "Romantic Waltz"
+      filename: romantic_waltz.ogg
+      description: "Orchestral waltz, tender melody"
+    - id: love_theme
+      title: "Love Theme"
+      filename: love_theme.ogg
+      description: "Piano and strings, warm feeling"
+
+  tense:
+    - id: tense_confrontation
+      title: "Tense Confrontation"
+      filename: tense_confrontation.ogg
+      description: "Staccato strings, rising tension"
+    - id: dark_discovery
+      title: "Dark Discovery"
+      filename: dark_discovery.ogg
+      description: "Low brass, ominous undertones"
+
+  melancholic:
+    - id: rainy_memories
+      title: "Rainy Memories"
+      filename: rainy_memories.ogg
+      description: "Slow piano, minor key, rain ambience"
+    - id: farewell
+      title: "Farewell"
+      filename: farewell.ogg
+      description: "Solo cello, bittersweet"
+
+  joyful:
+    - id: celebration
+      title: "Celebration"
+      filename: celebration.ogg
+      description: "Upbeat orchestral, triumphant"
+    - id: happy_days
+      title: "Happy Days"
+      filename: happy_days.ogg
+      description: "Light acoustic, cheerful rhythm"
+
+  mysterious:
+    - id: hidden_secrets
+      title: "Hidden Secrets"
+      filename: hidden_secrets.ogg
+      description: "Ambient synth, curious and eerie"
+    - id: whispered_clues
+      title: "Whispered Clues"
+      filename: whispered_clues.ogg
+      description: "Pizzicato strings, puzzle-like"
+
+  epic:
+    - id: grand_finale
+      title: "Grand Finale"
+      filename: grand_finale.ogg
+      description: "Full orchestra, climactic"
+    - id: heroes_march
+      title: "Heroes March"
+      filename: heroes_march.ogg
+      description: "Brass fanfare, determined march"
+
+  neutral:
+    - id: ambient_space
+      title: "Ambient Space"
+      filename: ambient_space.ogg
+      description: "Subtle ambient, unobtrusive background"

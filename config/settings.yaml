@@ -1,0 +1,24 @@
+llm:
+  default_provider: anthropic
+  model: claude-opus-4-6
+  temperature: 0.7
+  max_tokens: 4096
+  max_retries: 3
+  retry_wait: 2.0
+
+image_gen:
+  provider: openai  # openai | stability
+  model: dall-e-3
+  size: "1024x1024"
+  quality: standard
+
+music:
+  strategy: library  # library | suno | hybrid
+  library_path: config/music_library.yaml
+  audio_format: ogg
+
+generation:
+  max_scenes: 20
+  max_revision_rounds: 3
+  min_dialogue_lines: 5
+  max_dialogue_lines: 20
