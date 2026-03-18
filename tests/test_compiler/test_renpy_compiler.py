@@ -121,3 +121,9 @@ class TestRenPyCompiler:
         chars_rpy = files["game/characters.rpy"]
         assert "define char_sakura" in chars_rpy
         assert "Sakura" in chars_rpy
+
+    def test_contains_start_label(self):
+        script, chars = make_simple_script()
+        result = compile_to_string(script, chars)
+        assert "label start:" in result
+        assert "jump ch1_start" in result

@@ -28,7 +28,9 @@ dependencies = [
 vn-agent = "vn_agent.cli:app"
 
 [tool.uv]
-dev-dependencies = [
+
+[dependency-groups]
+dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-mock>=3.12",

@@ -34,6 +34,28 @@ def _should_revise(state: AgentState) -> str:
     return "revise"
 
 
+def _after_review(state: AgentState) -> str:
+    """Conditional edge after reviewer: text_only goes to END, otherwise asset generation."""
+    settings = get_settings()
+
+    # Check if we should revise first
+    if not state.get("review_passed") and state.get("revision_count", 0) < settings.max_revision_rounds:
+        logger.info(f"Reviewer FAILED (round {state.get('revision_count', 0)}) - revising")
+        return "revise"
+
+    if state.get("text_only"):
+        logger.info("text_only=True - skipping asset generation, going to END")
+        return "end"
+
+    if state.get("review_passed"):
+        logger.info("Reviewer PASSED - proceeding to asset generation")
+    else:
+        logger.warning(
+            f"Max revisions ({settings.max_revision_rounds}) reached - proceeding anyway"
+        )
+    return "proceed"
+
+
 def build_graph() -> StateGraph:
     """Build the full VN generation pipeline."""
     graph = StateGraph(AgentState)
@@ -51,13 +73,14 @@ def build_graph() -> StateGraph:
     graph.add_edge("director", "writer")
     graph.add_edge("writer", "reviewer")
 
-    # Conditional: reviewer either approves or sends back to writer
+    # Conditional: reviewer either approves (with text_only check), or sends back to writer
     graph.add_conditional_edges(
         "reviewer",
-        _should_revise,
+        _after_review,
         {
             "proceed": "character_designer",
             "revise": "writer",
+            "end": END,
         },
     )
 

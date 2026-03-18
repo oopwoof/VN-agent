@@ -25,6 +25,9 @@ class AgentState(dict):
         output_dir: Target output directory for compiled project
         messages: LangGraph message history (for debugging)
         errors: List of non-fatal errors encountered
+        text_only: Skip image and music generation when True
+        max_scenes: Maximum number of scenes to generate
+        num_characters: Number of characters to create
     """
     theme: str
     vn_script: VNScript | None
@@ -36,9 +39,18 @@ class AgentState(dict):
     output_dir: str
     messages: Annotated[list[BaseMessage], add_messages]
     errors: list[str]
+    text_only: bool
+    max_scenes: int
+    num_characters: int
 
 
-def initial_state(theme: str, output_dir: str) -> dict:
+def initial_state(
+    theme: str,
+    output_dir: str,
+    text_only: bool = False,
+    max_scenes: int = 10,
+    num_characters: int = 3,
+) -> dict:
     """Create the initial state for a new VN generation pipeline."""
     return {
         "theme": theme,
@@ -51,4 +63,7 @@ def initial_state(theme: str, output_dir: str) -> dict:
         "output_dir": output_dir,
         "messages": [],
         "errors": [],
+        "text_only": text_only,
+        "max_scenes": max_scenes,
+        "num_characters": num_characters,
     }

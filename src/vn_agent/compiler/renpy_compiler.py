@@ -55,6 +55,12 @@ def compile_script(
         script=script,
     )
 
+    # init.rpy
+    init_template = env.get_template("init.rpy.j2")
+    files["game/init.rpy"] = init_template.render(
+        script=script,
+    )
+
     return files
 
 

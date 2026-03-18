@@ -42,6 +42,54 @@
 
 ## 开发记录
 
+### 2026-03-18 | 实现 - 2026-03-18 00:22
+
+**变更文件** (14 个):
+**源码变更** (7 文件):
+  - `src/vn_agent/agents/director.py`
+  - `src/vn_agent/agents/graph.py`
+  - `src/vn_agent/agents/state.py`
+  - `src/vn_agent/cli.py`
+  - `src/vn_agent/compiler/renpy_compiler.py`
+  - `src/vn_agent/compiler/templates/init.rpy.j2`
+  - `src/vn_agent/compiler/templates/script.rpy.j2`
+
+**测试变更** (3 文件):
+  - `tests/test_compiler/test_renpy_compiler.py`
+  - `tests/test_integration/__init__.py`
+  - `tests/test_integration/test_pipeline.py`
+
+**配置变更** (1 文件):
+  - `pyproject.toml`
+
+**其他变更** (3 文件):
+  - `.claude/settings.local.json`
+  - `.githooks/pre-commit`
+  - `uv.lock`
+
+**变更统计**:
+```
+.claude/settings.local.json                   |   32 +
+ .githooks/pre-commit                          |   10 +-
+ pyproject.toml                                |    4 +-
+ src/vn_agent/agents/director.py               |    7 +-
+ src/vn_agent/agents/graph.py                  |   27 +-
+ src/vn_agent/agents/state.py                  |   17 +-
+ src/vn_agent/cli.py                           |   50 +-
+ src/vn_agent/compiler/renpy_compiler.py       |    6 +
+ src/vn_agent/compiler/templates/init.rpy.j2   |    9 +
+ src/vn_agent/compiler/templates/script.rpy.j2 |   12 +-
+ tests/test_compiler/test_renpy_compiler.py    |    6 +
+ tests/test_integration/__init__.py            |    0
+ tests/test_integration/test_pipeline.py       |  177 +++
+ uv.lock                                       | 1770 +++++++++++++++++++++++++
+ 14 files changed, 2096 insertions(+), 31 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-18 | 实现 - 2026-03-18 00:02
 
 **变更文件** (46 个):

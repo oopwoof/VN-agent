@@ -53,13 +53,16 @@ async def run_director(state: AgentState) -> dict:
 
     system = SYSTEM_PROMPT.format(strategies=format_strategies_for_prompt())
 
+    max_scenes = state.get("max_scenes", 10)
+    num_characters = state.get("num_characters", 3)
+
     user_prompt = f"""Create a visual novel story plan for this theme:
 
 Theme: {theme}
 
 Requirements:
-- 6-12 scenes total
-- 2-4 characters
+- Up to {max_scenes} scenes total
+- {num_characters} characters
 - At least 2 meaningful player choices (branches)
 - Clear emotional arc with beginning, middle, and end
 - Assign a BGM mood (peaceful/romantic/tense/melancholic/joyful/mysterious/epic/neutral) to each scene

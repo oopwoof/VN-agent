@@ -8,14 +8,14 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 # 使用 Python 运行更新脚本
 # 优先使用虚拟环境中的 Python，否则回退到系统 Python
-if [ -f "$REPO_ROOT/.venv/bin/python" ]; then
-    PYTHON="$REPO_ROOT/.venv/bin/python"
-elif [ -f "$REPO_ROOT/.venv/Scripts/python.exe" ]; then
+if [ -f "$REPO_ROOT/.venv/Scripts/python.exe" ]; then
     PYTHON="$REPO_ROOT/.venv/Scripts/python.exe"
-elif command -v python3 &>/dev/null; then
-    PYTHON="python3"
+elif [ -f "$REPO_ROOT/.venv/bin/python" ]; then
+    PYTHON="$REPO_ROOT/.venv/bin/python"
 elif command -v python &>/dev/null; then
     PYTHON="python"
+elif command -v python3 &>/dev/null; then
+    PYTHON="python3"
 else
     echo "⚠️  未找到 Python，跳过文档更新"
     exit 0
