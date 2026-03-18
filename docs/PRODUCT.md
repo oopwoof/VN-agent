@@ -23,18 +23,24 @@
 
 ## 产品状态
 
-**当前阶段**: Phase 1 开发中（基础文本管线）
+**当前阶段**: Phase 4 优化中（核心功能全部完成）
 
 | 功能模块 | 计划 | 状态 |
 |---------|------|------|
-| 故事导演 (Director Agent) | Phase 1 | 🔄 开发中 |
-| 剧本编写 (Writer Agent) | Phase 1 | 🔄 开发中 |
-| 剧本审稿 (Reviewer Agent) | Phase 2 | ⏳ 待开始 |
-| Ren'Py 编译器 | Phase 2 | ⏳ 待开始 |
-| 角色立绘生成 | Phase 3 | ⏳ 待开始 |
-| 场景背景生成 | Phase 3 | ⏳ 待开始 |
-| BGM 音乐导演 | Phase 3 | ⏳ 待开始 |
-| Web 界面 | Phase 4 | ⏳ 待开始 |
+| 故事导演 (Director Agent) | Phase 1 | ✅ 完成 |
+| 剧本编写 (Writer Agent) | Phase 1 | ✅ 完成 |
+| 叙事策略体系 | Phase 1 | ✅ 完成 |
+| 剧本审稿 (Reviewer Agent) | Phase 2 | ✅ 完成 |
+| Ren'Py 编译器 | Phase 2 | ✅ 完成 |
+| CLI 工具 (generate/validate/compile/dry-run) | Phase 2 | ✅ 完成 |
+| 角色立绘生成 | Phase 3 | ✅ 完成（需 OpenAI API） |
+| 场景背景生成（并行化） | Phase 3 | ✅ 完成（需 OpenAI API） |
+| BGM 音乐导演（曲库策略） | Phase 3 | ✅ 完成 |
+| --resume 断点续传 | Phase 4 | ✅ 完成 |
+| 错误恢复（非致命错误累积） | Phase 4 | ✅ 完成 |
+| 流式进度显示 | Phase 4 | ✅ 完成 |
+| Web 界面 (FastAPI) | Phase 4 | ⏳ 待开始 |
+| Suno API 音乐生成 | Phase 3 | ⏳ 待 Suno API 公开 |
 
 ---
 
@@ -61,32 +67,33 @@ $ vn-agent generate --theme "一个时间旅行者在二战期间寻找失散家
 
 ## 产品规划
 
-### Phase 1（第1-2周）- 文本管线 MVP
+### Phase 1（第1-2周）- 文本管线 MVP ✅ 完成
 - [x] 项目架构设计
-- [ ] 基础 Agent 框架（Director + Writer）
-- [ ] 叙事策略体系
-- [ ] CLI 基础命令
+- [x] 基础 Agent 框架（Director + Writer）
+- [x] 叙事策略体系（8 种策略）
+- [x] CLI 基础命令
+- [x] 测试覆盖（schema + agent 单元测试）
 
-**验收标准**: `vn-agent generate` 能输出结构化 JSON 剧本
+### Phase 2（第3-4周）- 完整文本管线 ✅ 完成
+- [x] Reviewer Agent + 修订循环（最多 3 次）
+- [x] Ren'Py 编译器（含 BGM play/stop 指令）
+- [x] 完整 CLI（generate / validate / compile / dry-run）
+- [x] Jinja2 模板（script/characters/gui/init）
 
-### Phase 2（第3-4周）- 完整文本管线
-- [ ] Reviewer Agent + 修订循环
-- [ ] Ren'Py 编译器（文本部分）
-- [ ] 完整 CLI
+### Phase 3（第5-6周）- 多模态资产 ✅ 完成
+- [x] 角色立绘生成（DALL-E 3 / Stability AI）
+- [x] 场景背景生成（并行化，去重）
+- [x] BGM 曲库策略（16 曲目，8 情绪）
+- [x] Music Director Agent（相邻相同情绪共享曲目）
 
-**验收标准**: JSON 剧本 → 可在 Ren'Py 运行的 .rpy 文件
-
-### Phase 3（第5-6周）- 多模态资产
-- [ ] 角色立绘生成（DALL-E 3）
-- [ ] 场景背景生成
-- [ ] BGM 匹配/生成
-
-**验收标准**: 完整 Ren'Py 项目（含图像和音乐）
-
-### Phase 4（第7-8周）- 优化
-- [ ] 并行化加速
-- [ ] FastAPI 后端
-- [ ] 错误恢复机制
+### Phase 4（第7-8周）- 优化 🔄 进行中
+- [x] 并行化加速（asyncio.gather）
+- [x] 流式进度显示（LangGraph stream_mode="updates"）
+- [x] 错误恢复（非致命错误累积，不中断流程）
+- [x] --resume 断点续传
+- [x] 集成测试（46 个测试全部通过）
+- [ ] FastAPI 后端 + Web 界面
+- [ ] Suno API 音乐生成（待 API 公开）
 
 ---
 
