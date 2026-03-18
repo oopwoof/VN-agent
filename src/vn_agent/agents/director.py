@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from pydantic import BaseModel, Field
 
 from vn_agent.agents.state import AgentState
@@ -105,6 +106,10 @@ Return a JSON object with this exact structure:
     # Parse response
     content = response.content if hasattr(response, 'content') else str(response)
 
+    # Save raw response for debugging
+    output_dir = state.get("output_dir", ".")
+    _save_debug_raw(output_dir, "director_raw.txt", content)
+
     try:
         plan_data = _extract_json(content)
         script, characters = _build_from_plan(plan_data, theme)
@@ -117,10 +122,41 @@ Return a JSON object with this exact structure:
 
     logger.info(f"Director created: '{script.title}' with {len(script.scenes)} scenes, {len(characters)} characters")
 
+    # Checkpoint: save script immediately after Director so Writer can be resumed without re-running Director
+    _save_checkpoint(output_dir, script, characters)
+
     return {
         "vn_script": script,
         "characters": characters,
     }
+
+
+def _save_debug_raw(output_dir: str, filename: str, content: str) -> None:
+    """Save raw LLM response to debug/ directory (best-effort, never raises)."""
+    try:
+        debug_dir = Path(output_dir) / "debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        (debug_dir / filename).write_text(content, encoding="utf-8")
+    except Exception as e:
+        logger.debug(f"Could not save debug raw response: {e}")
+
+
+def _save_checkpoint(output_dir: str, script, characters: dict) -> None:
+    """Save vn_script.json + characters.json after Director completes (best-effort)."""
+    import json as _json
+    try:
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "vn_script.json").write_text(
+            script.model_dump_json(indent=2), encoding="utf-8"
+        )
+        chars_data = {k: v.model_dump() for k, v in characters.items()}
+        (out / "characters.json").write_text(
+            _json.dumps(chars_data, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        logger.info(f"Director checkpoint saved to {out}")
+    except Exception as e:
+        logger.warning(f"Could not save Director checkpoint: {e}")
 
 
 def _extract_json(content: str) -> dict:
@@ -160,55 +196,82 @@ def _extract_json(content: str) -> dict:
 
 def _salvage_truncated_json(text: str) -> dict | None:
     """
-    Attempt to fix a truncated JSON string by progressively trimming incomplete
-    trailing content and closing brackets until it parses.
-    """
-    # Walk backwards removing characters until we find valid JSON
-    # This handles truncation at arbitrary points inside arrays/objects
-    bracket_stack = []
-    for i, ch in enumerate(text):
-        if ch in ('{', '['):
-            bracket_stack.append(ch)
-        elif ch in ('}', ']'):
-            if bracket_stack:
-                bracket_stack.pop()
+    Attempt to fix a truncated JSON string using two strategies:
+    1. Backward scan: find the last '}'/']' and close from there.
+    2. Forward scan: find the last root-level comma and close the root object.
 
-    if not bracket_stack:
-        # Already balanced — try parsing as-is
+    Handles Unicode (e.g. Chinese) text safely — never strips by character value.
+    """
+    closing = {'{': '}', '[': ']'}
+
+    def _close_and_parse(candidate: str) -> dict | None:
+        """Close unclosed brackets on `candidate` and try json.loads."""
+        candidate = candidate.rstrip().rstrip(',').rstrip()
+        open_stack: list[str] = []
+        in_str = False
+        escape = False
+        for ch in candidate:
+            if escape:
+                escape = False
+                continue
+            if ch == '\\' and in_str:
+                escape = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch in closing:
+                open_stack.append(closing[ch])
+            elif ch in ('}', ']'):
+                if open_stack and open_stack[-1] == ch:
+                    open_stack.pop()
+        suffix = ''.join(reversed(open_stack))
         try:
-            return json.loads(text)
+            result = json.loads(candidate + suffix)
+            if isinstance(result, dict):
+                return result
         except json.JSONDecodeError:
             pass
+        return None
 
-    # Find the last position where the JSON was "more complete"
-    # Strategy: strip from the end until we can close all open brackets cleanly
-    closing = {'{': '}', '[': ']'}
-    candidate = text.rstrip()
-    # Remove trailing comma if present (common at truncation boundary)
-    while candidate.endswith(',') or candidate.endswith('"') or (
-        candidate and candidate[-1] not in ('}', ']', '"', '0123456789', 'e', 'n')
-    ):
-        candidate = candidate[:-1].rstrip()
-        if len(candidate) < 10:
-            return None
+    # Strategy 1: scan backward for '}' or ']' and attempt to complete from there.
+    # Works when truncation happens inside a nested object/array.
+    for i in range(len(text) - 1, -1, -1):
+        if text[i] in ('}', ']'):
+            result = _close_and_parse(text[:i + 1])
+            if result:
+                return result
 
-    # Close all unclosed brackets
-    open_stack = []
-    for ch in candidate:
-        if ch in ('{', '['):
-            open_stack.append(closing[ch])
+    # Strategy 2: scan forward tracking JSON structure to find the last
+    # root-level comma (between top-level fields). Cut there and close.
+    # Works when truncation happens so early that no '}' exists yet.
+    last_root_comma = -1
+    depth = 0
+    in_str = False
+    escape = False
+    for i, ch in enumerate(text):
+        if escape:
+            escape = False
+            continue
+        if ch == '\\' and in_str:
+            escape = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch in closing:
+            depth += 1
         elif ch in ('}', ']'):
-            if open_stack and open_stack[-1] == ch:
-                open_stack.pop()
+            depth -= 1
+        elif ch == ',' and depth == 1:
+            last_root_comma = i
 
-    candidate += ''.join(reversed(open_stack))
-
-    try:
-        result = json.loads(candidate)
-        if isinstance(result, dict):
-            return result
-    except json.JSONDecodeError:
-        pass
+    if last_root_comma > 0:
+        return _close_and_parse(text[:last_root_comma])
 
     return None
 

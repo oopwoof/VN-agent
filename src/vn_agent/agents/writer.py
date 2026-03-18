@@ -10,7 +10,7 @@ from vn_agent.schema.character import CharacterProfile
 from vn_agent.services.llm import ainvoke_llm
 from vn_agent.strategies.narrative import get_strategy
 from vn_agent.config import get_settings
-from vn_agent.agents.director import _extract_json
+from vn_agent.agents.director import _extract_json, _save_debug_raw
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ async def run_writer(state: AgentState) -> dict:
     script = state["vn_script"]
     characters = state["characters"]
     revision_feedback = state.get("review_feedback", "")
+    output_dir = state.get("output_dir", ".")
 
     if not script:
         return {"errors": state.get("errors", []) + ["Writer: No script found in state"]}
@@ -49,7 +50,7 @@ async def run_writer(state: AgentState) -> dict:
     # Write dialogue for each scene
     updated_scenes = []
     for scene in script.scenes:
-        updated_scene = await _write_scene(scene, script, char_desc, revision_feedback)
+        updated_scene = await _write_scene(scene, script, char_desc, revision_feedback, output_dir)
         updated_scenes.append(updated_scene)
 
     updated_script = script.model_copy(update={"scenes": updated_scenes})
@@ -70,6 +71,7 @@ async def _write_scene(
     script: VNScript,
     char_descriptions: str,
     revision_feedback: str,
+    output_dir: str = ".",
 ) -> Scene:
     """Write dialogue for a single scene."""
     settings = get_settings()
@@ -106,6 +108,8 @@ After dialogue, if branches exist, the player will choose:
 
     response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_writer_model)
     content = response.content if hasattr(response, 'content') else str(response)
+
+    _save_debug_raw(output_dir, f"writer_{scene.id}.txt", content)
 
     # Parse dialogue lines
     dialogue = _parse_dialogue(content, scene)
