@@ -151,5 +151,108 @@ def validate(
         raise typer.Exit(1)
 
 
+@app.command("dry-run")
+def dry_run(
+    theme: str = typer.Argument(..., help="Story theme or premise"),
+    max_scenes: int = typer.Option(10, "--max-scenes"),
+    num_characters: int = typer.Option(3, "--characters"),
+    text_only: bool = typer.Option(False, "--text-only"),
+) -> None:
+    """Preview what would be generated without calling any APIs."""
+    import os
+    from rich.table import Table
+    from vn_agent.config import get_settings
+
+    settings = get_settings()
+
+    # Check API key availability
+    provider = settings.llm_provider
+    if provider == "anthropic":
+        api_key_present = bool(
+            settings.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        )
+        api_key_label = "ANTHROPIC_API_KEY"
+    else:
+        api_key_present = bool(
+            settings.openai_api_key or os.environ.get("OPENAI_API_KEY", "")
+        )
+        api_key_label = "OPENAI_API_KEY"
+
+    image_enabled = not text_only and provider == "openai"
+
+    # Estimated API calls: director + writer*scenes + reviewer + (char_designer + scene_artist if not text_only)
+    estimated_llm_calls = 1 + max_scenes + 1  # director, writer per scene, reviewer
+    if not text_only:
+        estimated_llm_calls += num_characters  # character designer
+        estimated_llm_calls += max_scenes  # scene artist
+
+    table = Table(title="VN-Agent Dry Run Preview", show_header=True, header_style="bold magenta")
+    table.add_column("Setting", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+
+    table.add_row("Theme", theme[:60] + ("..." if len(theme) > 60 else ""))
+    table.add_row("Provider", f"{provider}")
+    table.add_row("Model", settings.llm_model)
+    table.add_row("Max Scenes", str(max_scenes))
+    table.add_row("Characters", str(num_characters))
+    table.add_row("Music Strategy", settings.music_strategy)
+    table.add_row("Text-Only Mode", "Yes" if text_only else "No")
+    table.add_row("Image Generation", "Disabled" if text_only else "Enabled")
+    table.add_row("Estimated LLM Calls", str(estimated_llm_calls))
+    table.add_row(
+        api_key_label,
+        "[green]set[/green]" if api_key_present else "[red]NOT SET[/red]",
+    )
+
+    console.print()
+    console.print(table)
+
+    console.print("\n[bold]What would happen:[/bold]")
+    console.print(f"  [cyan]1.[/cyan] Director plans a story with up to {max_scenes} scenes and {num_characters} characters")
+    console.print(f"  [cyan]2.[/cyan] Writer generates dialogue for each scene")
+    console.print(f"  [cyan]3.[/cyan] Reviewer validates the script")
+    if not text_only:
+        console.print(f"  [cyan]4.[/cyan] Character Designer creates visual profiles for {num_characters} characters (parallel)")
+        console.print(f"  [cyan]5.[/cyan] Scene Artist generates backgrounds for unique scenes (parallel)")
+        console.print(f"  [cyan]6.[/cyan] Music Director assigns BGM tracks")
+    else:
+        console.print(f"  [cyan]4.[/cyan] Music Director assigns BGM tracks")
+        console.print(f"  [dim](Image generation skipped — text-only mode)[/dim]")
+    console.print(f"  [cyan]→[/cyan] Ren'Py project compiled to output directory\n")
+
+    if not api_key_present:
+        console.print(f"[yellow]Warning: {api_key_label} is not set. Generation will fail without it.[/yellow]")
+
+
+@app.command()
+def compile(
+    script_path: Path = typer.Argument(..., help="Path to vn_script.json"),
+    characters_path: Path = typer.Option(None, "--characters", help="Path to characters.json"),
+    output: Path = typer.Option(Path("./vn_output"), "--output", "-o"),
+) -> None:
+    """Compile an existing VN script JSON to a Ren'Py project."""
+    from vn_agent.schema.script import VNScript
+    from vn_agent.schema.character import CharacterProfile
+    import json
+
+    try:
+        script = VNScript.model_validate_json(script_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        console.print(f"[red]Error loading script: {e}[/red]")
+        raise typer.Exit(1)
+
+    characters: dict[str, CharacterProfile] = {}
+    if characters_path and characters_path.exists():
+        try:
+            raw = json.loads(characters_path.read_text(encoding="utf-8"))
+            characters = {k: CharacterProfile.model_validate(v) for k, v in raw.items()}
+        except Exception as e:
+            console.print(f"[yellow]Warning: could not load characters file: {e}[/yellow]")
+
+    output.mkdir(parents=True, exist_ok=True)
+    build_project(script, characters, output)
+    console.print(f"[green]✓ Compiled to {output.resolve()}[/green]")
+
+
 if __name__ == "__main__":
     app()

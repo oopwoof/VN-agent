@@ -42,6 +42,32 @@
 
 ## 开发记录
 
+### 2026-03-18 | 实现 - 2026-03-18 00:26
+
+**变更文件** (5 个):
+**源码变更** (3 文件):
+  - `src/vn_agent/agents/character_designer.py`
+  - `src/vn_agent/agents/scene_artist.py`
+  - `src/vn_agent/cli.py`
+
+**测试变更** (2 文件):
+  - `tests/test_cli/__init__.py`
+  - `tests/test_cli/test_cli.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/character_designer.py |  20 ++-
+ src/vn_agent/agents/scene_artist.py       |  40 +++++-
+ src/vn_agent/cli.py                       | 103 ++++++++++++++
+ tests/test_cli/__init__.py                |   0
+ tests/test_cli/test_cli.py                | 221 ++++++++++++++++++++++++++++++
+ 5 files changed, 373 insertions(+), 11 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-18 | 实现 - 2026-03-18 00:22
 
 **变更文件** (14 个):

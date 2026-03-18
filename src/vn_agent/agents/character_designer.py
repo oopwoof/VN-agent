@@ -1,6 +1,7 @@
 """Character Designer Agent: Generates visual profiles for characters."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -26,11 +27,22 @@ async def run_character_designer(state: AgentState) -> dict:
         return {}
 
     logger.info(f"CharacterDesigner: designing {len(characters)} characters")
-    updated_characters = {}
 
-    for char_id, char in characters.items():
-        updated_char = await _design_character(char, output_dir)
-        updated_characters[char_id] = updated_char
+    char_ids = list(characters.keys())
+    char_list = list(characters.values())
+
+    results = await asyncio.gather(
+        *[_design_character(char, output_dir) for char in char_list],
+        return_exceptions=True,
+    )
+
+    updated_characters = {}
+    for char_id, result in zip(char_ids, results):
+        if isinstance(result, Exception):
+            logger.error(f"Failed to design character {char_id}: {result}")
+            updated_characters[char_id] = characters[char_id]
+        else:
+            updated_characters[char_id] = result
 
     return {"characters": updated_characters}
 

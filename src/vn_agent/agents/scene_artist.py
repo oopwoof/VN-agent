@@ -1,6 +1,7 @@
 """Scene Artist Agent: Generates background images for scenes."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -27,13 +28,38 @@ async def run_scene_artist(state: AgentState) -> dict:
 
     logger.info(f"SceneArtist: generating {len(script.scenes)} backgrounds")
 
-    # Get unique backgrounds
-    bg_ids = {s.background_id: s for s in script.scenes}
+    # Build a map: background_id -> scene (use first scene with that bg_id)
+    unique_bgs: dict = {}
+    for scene in script.scenes:
+        if scene.background_id not in unique_bgs:
+            unique_bgs[scene.background_id] = scene
 
-    updated_scenes = list(script.scenes)
-    for i, scene in enumerate(updated_scenes):
-        updated_scene = await _generate_background(scene, output_dir)
-        updated_scenes[i] = updated_scene
+    logger.info(f"SceneArtist: {len(unique_bgs)} unique backgrounds to generate")
+
+    # Generate all unique backgrounds in parallel
+    bg_ids = list(unique_bgs.keys())
+    results = await asyncio.gather(
+        *[_generate_background(scene, output_dir) for scene in unique_bgs.values()],
+        return_exceptions=True,
+    )
+
+    # Build a map from background_id -> generated background_prompt
+    bg_prompt_map: dict[str, str | None] = {}
+    for bg_id, result in zip(bg_ids, results):
+        if isinstance(result, Exception):
+            logger.error(f"Failed to generate background {bg_id}: {result}")
+            bg_prompt_map[bg_id] = None
+        else:
+            bg_prompt_map[bg_id] = result.background_prompt
+
+    # Apply the generated background_prompt back to all scenes sharing the same background_id
+    updated_scenes = []
+    for scene in script.scenes:
+        prompt = bg_prompt_map.get(scene.background_id)
+        if prompt is not None:
+            updated_scenes.append(scene.model_copy(update={"background_prompt": prompt}))
+        else:
+            updated_scenes.append(scene)
 
     updated_script = script.model_copy(update={"scenes": updated_scenes})
     return {"vn_script": updated_script}
