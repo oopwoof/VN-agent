@@ -60,5 +60,50 @@ def build_project(
         encoding="utf-8",
     )
 
+    # Write placeholder assets for any missing image/audio files so Ren'Py
+    # doesn't error on missing files during development / text-only runs.
+    _write_placeholder_assets(script, characters, output_dir)
+
     logger.info(f"Ren'Py project built at: {output_dir}")
     return output_dir
+
+
+# Minimal 1×1 transparent PNG (67 bytes, no external deps)
+_PLACEHOLDER_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+    b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+def _write_placeholder_assets(
+    script: VNScript,
+    characters: dict[str, CharacterProfile],
+    output_dir: Path,
+) -> None:
+    """Create 1×1 transparent PNG placeholders for any missing sprite/background.
+
+    Ren'Py will display a blank image instead of throwing a missing-file error,
+    which keeps the game runnable during development before real art is generated.
+    Only writes files that don't already exist.
+    """
+    game = output_dir / "game"
+
+    # Background placeholders
+    bg_ids = {scene.background_id for scene in script.scenes if scene.background_id}
+    for bg_id in bg_ids:
+        path = game / "images" / "backgrounds" / f"{bg_id}.png"
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(_PLACEHOLDER_PNG)
+            logger.debug(f"Placeholder: {path.relative_to(output_dir)}")
+
+    # Character sprite placeholders (neutral emotion used as default)
+    for char_id in characters:
+        char_dir = game / "images" / "characters" / char_id
+        char_dir.mkdir(parents=True, exist_ok=True)
+        for emotion in ("neutral", "happy", "sad"):
+            path = char_dir / f"{emotion}.png"
+            if not path.exists():
+                path.write_bytes(_PLACEHOLDER_PNG)
+                logger.debug(f"Placeholder: {path.relative_to(output_dir)}")
