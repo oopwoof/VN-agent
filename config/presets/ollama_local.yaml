@@ -1,0 +1,25 @@
+# Ollama — fully local, no network, no API key
+# Install: https://ollama.com/download
+# Pull model: ollama pull qwen2.5:7b
+# Start server: ollama serve  (or it auto-starts on most platforms)
+#
+# Usage:
+#   Copy the llm block below into config/settings.yaml (replace existing llm block)
+
+llm:
+  default_provider: openai          # Ollama speaks OpenAI protocol
+  base_url: http://localhost:11434/v1
+  api_key: ollama                   # Ollama ignores this; must be non-empty for langchain
+  model: qwen2.5:7b                 # good JSON adherence; also try llama3.2:3b (faster)
+  temperature: 0.7
+  max_tokens: 8000
+  max_retries: 3
+  retry_wait: 2.0
+
+  # Use the same model for all agents (swap to :3b variant for speed)
+  director_model: qwen2.5:7b
+  writer_model: qwen2.5:7b
+  reviewer_model: qwen2.5:7b
+  character_designer_model: qwen2.5:7b
+  scene_artist_model: qwen2.5:7b
+  music_director_model: qwen2.5:7b

@@ -42,6 +42,36 @@
 
 ## 开发记录
 
+### 2026-03-18 | 实现 - 2026-03-18 01:35
+
+**变更文件** (7 个):
+**源码变更** (4 文件):
+  - `src/vn_agent/cli.py`
+  - `src/vn_agent/config.py`
+  - `src/vn_agent/services/llm.py`
+  - `src/vn_agent/services/mock_llm.py`
+
+**配置变更** (3 文件):
+  - `config/presets/groq_free.yaml`
+  - `config/presets/ollama_local.yaml`
+  - `config/settings.yaml`
+
+**变更统计**:
+```
+config/presets/groq_free.yaml     |  25 +++++
+ config/presets/ollama_local.yaml  |  25 +++++
+ config/settings.yaml              |   9 ++
+ src/vn_agent/cli.py               |  40 +++++++-
+ src/vn_agent/config.py            |   6 ++
+ src/vn_agent/services/llm.py      |  38 +++++--
+ src/vn_agent/services/mock_llm.py | 209 ++++++++++++++++++++++++++++++++++++++
+ 7 files changed, 341 insertions(+), 11 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-18 | 实现 - 2026-03-18 01:25
 
 **变更文件** (7 个):

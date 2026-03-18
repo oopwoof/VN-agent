@@ -1,10 +1,19 @@
 llm:
+  # ── Active provider ────────────────────────────────────────────────────────
+  # "anthropic" → uses ANTHROPIC_API_KEY
+  # "openai"    → uses OPENAI_API_KEY (or api_key below; also works with local servers)
   default_provider: anthropic
   model: claude-sonnet-4-6
   temperature: 0.7
   max_tokens: 16000
   max_retries: 3
   retry_wait: 2.0
+
+  # Optional: override API endpoint and key for local / free providers.
+  # Leave empty ("") to use the provider's default endpoint + env-var key.
+  # See config/presets/ for ready-to-use examples.
+  base_url: ""   # e.g. http://localhost:11434/v1 for Ollama
+  api_key: ""    # explicit key (use "ollama" as dummy for local servers)
 
   # Per-agent model overrides (balance quality vs cost)
   director_model: claude-sonnet-4-6          # complex planning — keep sonnet

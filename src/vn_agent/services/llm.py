@@ -27,13 +27,21 @@ def _make_retry_decorator(max_retries: int):
 
 
 @lru_cache(maxsize=8)
-def _get_llm_cached(provider: str, model: str, temperature: float, max_tokens: int, api_key: str):
-    """Create and cache an LLM instance keyed by its configuration."""
+def _get_llm_cached(
+    provider: str,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    api_key: str,
+    base_url: str,
+):
+    """Create and cache an LLM instance keyed by its full configuration."""
     logger.debug(
         f"Creating LLM: provider={provider} model={model} "
-        f"temperature={temperature} max_tokens={max_tokens}"
+        f"max_tokens={max_tokens}"
+        + (f" base_url={base_url}" if base_url else "")
     )
-    if provider == "anthropic":
+    if provider == "anthropic" and not base_url:
         from langchain_anthropic import ChatAnthropic
         return ChatAnthropic(
             model=model,
@@ -42,30 +50,40 @@ def _get_llm_cached(provider: str, model: str, temperature: float, max_tokens: i
             max_tokens=max_tokens,
         )
     else:
+        # "openai" provider, OR any provider with a custom base_url
+        # (Ollama / LM Studio / Groq / OpenRouter all speak OpenAI protocol)
         from langchain_openai import ChatOpenAI
-        return ChatOpenAI(
+        kwargs: dict = dict(
             model=model,
             api_key=api_key,
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        if base_url:
+            kwargs["base_url"] = base_url
+        return ChatOpenAI(**kwargs)
 
 
 def get_llm(model: str | None = None):
     """Get configured LLM instance (cached per model)."""
     settings = get_settings()
     resolved_model = model or settings.llm_model
-    api_key = (
-        settings.anthropic_api_key
-        if settings.llm_provider == "anthropic"
-        else settings.openai_api_key
-    )
+
+    # Explicit api_key override takes priority; then provider-specific env key
+    if settings.llm_api_key:
+        api_key = settings.llm_api_key
+    elif settings.llm_provider == "anthropic":
+        api_key = settings.anthropic_api_key
+    else:
+        api_key = settings.openai_api_key
+
     return _get_llm_cached(
         settings.llm_provider,
         resolved_model,
         settings.llm_temperature,
         settings.llm_max_tokens,
         api_key,
+        settings.llm_base_url,
     )
 
 

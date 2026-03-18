@@ -15,6 +15,32 @@ from vn_agent.agents.state import initial_state
 from vn_agent.agents.graph import create_pipeline
 from vn_agent.compiler.project_builder import build_project
 
+_mock_patches: list = []
+
+
+def _patch_mock_llm() -> None:
+    """Replace ainvoke_llm in all agent modules with the canned mock."""
+    from unittest.mock import patch
+    from vn_agent.services.mock_llm import mock_ainvoke
+
+    targets = [
+        "vn_agent.agents.director.ainvoke_llm",
+        "vn_agent.agents.writer.ainvoke_llm",
+        "vn_agent.agents.reviewer.ainvoke_llm",
+        "vn_agent.agents.character_designer.ainvoke_llm",
+        "vn_agent.agents.scene_artist.ainvoke_llm",
+    ]
+    for target in targets:
+        p = patch(target, side_effect=mock_ainvoke)
+        p.start()
+        _mock_patches.append(p)
+
+
+def _unpatch_mock_llm() -> None:
+    for p in _mock_patches:
+        p.stop()
+    _mock_patches.clear()
+
 app = typer.Typer(
     name="vn-agent",
     help="Multi-agent AI visual novel generator",
@@ -57,6 +83,10 @@ def generate(
     max_scenes: int = typer.Option(10, "--max-scenes", help="Maximum number of scenes"),
     num_characters: int = typer.Option(3, "--characters", help="Number of characters"),
     resume: bool = typer.Option(False, "--resume", help="Resume from existing output directory"),
+    mock: bool = typer.Option(
+        False, "--mock",
+        help="Use canned fixture responses (no API calls). For pipeline testing / offline dev.",
+    ),
 ) -> None:
     """Generate a visual novel from a theme."""
     setup_logging(verbose)
@@ -64,11 +94,14 @@ def generate(
     console.print(f"\n[bold blue]VN-Agent[/bold blue] - AI Visual Novel Generator")
     console.print(f"Theme: [italic]{theme}[/italic]\n")
 
+    if mock:
+        console.print("[dim]Mock mode: using fixture data, no API calls.[/dim]\n")
+
     script_checkpoint = output / "vn_script.json"
     if resume and script_checkpoint.exists():
         asyncio.run(_resume_async(output, text_only))
     else:
-        asyncio.run(_generate_async(theme, output, text_only, max_scenes, num_characters, verbose))
+        asyncio.run(_generate_async(theme, output, text_only, max_scenes, num_characters, verbose, mock=mock))
 
 
 async def _generate_async(
@@ -78,7 +111,10 @@ async def _generate_async(
     max_scenes: int = 10,
     num_characters: int = 3,
     verbose: bool = False,
+    mock: bool = False,
 ) -> None:
+    if mock:
+        _patch_mock_llm()
     pipeline = create_pipeline()
     state = initial_state(
         theme=theme,
@@ -115,11 +151,13 @@ async def _generate_async(
                         final_state.update(output_chunk)
         except Exception as e:
             import traceback
+            _unpatch_mock_llm()
             console.print(f"\n[red]Error during generation: {e}[/red]")
             if verbose:
                 console.print(traceback.format_exc())
             raise typer.Exit(1)
 
+    _unpatch_mock_llm()
     script = final_state.get("vn_script")
     characters = final_state.get("characters", {})
     errors = final_state.get("errors", [])

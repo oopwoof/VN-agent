@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 16000
     llm_max_retries: int = 3
 
+    # Optional overrides for local / free providers
+    # llm_base_url: when set, ChatOpenAI uses this as base_url (Ollama / LM Studio / Groq / OpenRouter)
+    # llm_api_key:  explicit key override; avoids needing OPENAI_API_KEY for local servers
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+
     # Per-agent model overrides
     llm_director_model: str = "claude-sonnet-4-6"
     llm_writer_model: str = "claude-sonnet-4-6"

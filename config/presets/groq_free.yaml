@@ -1,0 +1,25 @@
+# Groq free tier — real LLM, zero cost, ~1-3s latency
+# Sign up at https://console.groq.com → API Keys → create key
+# Add to .env:  GROQ_API_KEY=gsk_...
+#
+# Usage:
+#   Copy the llm block below into config/settings.yaml (replace existing llm block)
+#   Then set llm.api_key to your key, or export GROQ_API_KEY in your shell
+
+llm:
+  default_provider: openai          # Groq speaks OpenAI protocol
+  base_url: https://api.groq.com/openai/v1
+  api_key: ""                        # paste your gsk_... key here, or set GROQ_API_KEY env var
+  model: llama-3.3-70b-versatile    # best free model for structured JSON
+  temperature: 0.7
+  max_tokens: 8000                   # Groq free tier: 6000 tokens/min; keep under limit
+  max_retries: 3
+  retry_wait: 2.0
+
+  # All agents use the same model (Groq free is already fast enough)
+  director_model: llama-3.3-70b-versatile
+  writer_model: llama-3.3-70b-versatile
+  reviewer_model: llama-3.1-8b-instant   # smaller/faster for simple checks
+  character_designer_model: llama-3.1-8b-instant
+  scene_artist_model: llama-3.1-8b-instant
+  music_director_model: llama-3.1-8b-instant
