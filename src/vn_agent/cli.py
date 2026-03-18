@@ -68,7 +68,7 @@ def generate(
     if resume and script_checkpoint.exists():
         asyncio.run(_resume_async(output, text_only))
     else:
-        asyncio.run(_generate_async(theme, output, text_only, max_scenes, num_characters))
+        asyncio.run(_generate_async(theme, output, text_only, max_scenes, num_characters, verbose))
 
 
 async def _generate_async(
@@ -77,6 +77,7 @@ async def _generate_async(
     text_only: bool,
     max_scenes: int = 10,
     num_characters: int = 3,
+    verbose: bool = False,
 ) -> None:
     pipeline = create_pipeline()
     state = initial_state(

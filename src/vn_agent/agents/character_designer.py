@@ -9,6 +9,7 @@ from vn_agent.agents.state import AgentState
 from vn_agent.schema.character import CharacterProfile, VisualProfile, EmotionSprite
 from vn_agent.services.llm import ainvoke_llm
 from vn_agent.services.image_gen import generate_image
+from vn_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,8 @@ Return as JSON:
   "default_outfit": "..."
 }}"""
 
-    response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt)
+    settings = get_settings()
+    response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_character_designer_model)
     content = response.content if hasattr(response, 'content') else str(response)
 
     visual_data = _parse_visual_profile(content)

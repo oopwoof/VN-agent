@@ -104,7 +104,7 @@ Return JSON array:
 After dialogue, if branches exist, the player will choose:
 {[b.text for b in scene.branches]}"""
 
-    response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt)
+    response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_writer_model)
     content = response.content if hasattr(response, 'content') else str(response)
 
     # Parse dialogue lines

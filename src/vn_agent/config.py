@@ -24,10 +24,18 @@ class Settings(BaseSettings):
 
     # Loaded from settings.yaml
     llm_provider: str = "anthropic"
-    llm_model: str = "claude-opus-4-6"
+    llm_model: str = "claude-sonnet-4-6"
     llm_temperature: float = 0.7
-    llm_max_tokens: int = 4096
+    llm_max_tokens: int = 16000
     llm_max_retries: int = 3
+
+    # Per-agent model overrides
+    llm_director_model: str = "claude-sonnet-4-6"
+    llm_writer_model: str = "claude-sonnet-4-6"
+    llm_reviewer_model: str = "claude-haiku-4-5-20251001"
+    llm_character_designer_model: str = "claude-haiku-4-5-20251001"
+    llm_scene_artist_model: str = "claude-haiku-4-5-20251001"
+    llm_music_director_model: str = "claude-haiku-4-5-20251001"
 
     image_provider: str = "openai"
     image_model: str = "dall-e-3"

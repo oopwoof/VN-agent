@@ -85,7 +85,7 @@ class MockMessage:
 def mock_ainvoke(mocker):
     call_count = [0]
 
-    async def side_effect(system, user, schema=None):
+    async def side_effect(system, user, schema=None, model=None):
         call_count[0] += 1
         system_lower = system.lower()
 

@@ -26,37 +26,55 @@ def _make_retry_decorator(max_retries: int):
     )
 
 
-@lru_cache(maxsize=1)
-def get_llm():
-    """Get configured LLM instance (cached)."""
-    settings = get_settings()
-    if settings.llm_provider == "anthropic":
+@lru_cache(maxsize=8)
+def _get_llm_cached(provider: str, model: str, temperature: float, max_tokens: int, api_key: str):
+    """Create and cache an LLM instance keyed by its configuration."""
+    if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
         return ChatAnthropic(
-            model=settings.llm_model,
-            api_key=settings.anthropic_api_key,
-            temperature=settings.llm_temperature,
-            max_tokens=settings.llm_max_tokens,
+            model=model,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
     else:
         from langchain_openai import ChatOpenAI
         return ChatOpenAI(
-            model=settings.llm_model,
-            api_key=settings.openai_api_key,
-            temperature=settings.llm_temperature,
-            max_tokens=settings.llm_max_tokens,
+            model=model,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
 
 
-def get_structured_llm(schema: type[T]) -> Any:
+def get_llm(model: str | None = None):
+    """Get configured LLM instance (cached per model)."""
+    settings = get_settings()
+    resolved_model = model or settings.llm_model
+    api_key = (
+        settings.anthropic_api_key
+        if settings.llm_provider == "anthropic"
+        else settings.openai_api_key
+    )
+    return _get_llm_cached(
+        settings.llm_provider,
+        resolved_model,
+        settings.llm_temperature,
+        settings.llm_max_tokens,
+        api_key,
+    )
+
+
+def get_structured_llm(schema: type[T], model: str | None = None) -> Any:
     """Get LLM with structured output bound to a Pydantic schema."""
-    return get_llm().with_structured_output(schema)
+    return get_llm(model).with_structured_output(schema)
 
 
 async def ainvoke_llm(
     system_prompt: str,
     user_prompt: str,
     schema: type[T] | None = None,
+    model: str | None = None,
 ) -> T | str:
     """Invoke LLM with system+user prompts, optionally with structured output."""
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -71,9 +89,9 @@ async def ainvoke_llm(
             HumanMessage(content=user_prompt),
         ]
         if schema is not None:
-            llm = get_structured_llm(schema)
+            llm = get_structured_llm(schema, model)
         else:
-            llm = get_llm()
+            llm = get_llm(model)
         result = await llm.ainvoke(messages)
         return result
 
@@ -84,6 +102,7 @@ def invoke_llm(
     system_prompt: str,
     user_prompt: str,
     schema: type[T] | None = None,
+    model: str | None = None,
 ) -> T | str:
     """Synchronous LLM invocation."""
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -98,9 +117,9 @@ def invoke_llm(
             HumanMessage(content=user_prompt),
         ]
         if schema is not None:
-            llm = get_structured_llm(schema)
+            llm = get_structured_llm(schema, model)
         else:
-            llm = get_llm()
+            llm = get_llm(model)
         return llm.invoke(messages)
 
     return _call()

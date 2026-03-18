@@ -1,10 +1,18 @@
 llm:
   default_provider: anthropic
-  model: claude-opus-4-6
+  model: claude-sonnet-4-6
   temperature: 0.7
-  max_tokens: 4096
+  max_tokens: 16000
   max_retries: 3
   retry_wait: 2.0
+
+  # Per-agent model overrides (balance quality vs cost)
+  director_model: claude-sonnet-4-6          # complex planning — keep sonnet
+  writer_model: claude-sonnet-4-6            # dialogue quality — keep sonnet
+  reviewer_model: claude-haiku-4-5-20251001        # structural + short quality check — haiku sufficient
+  character_designer_model: claude-haiku-4-5-20251001  # simple JSON visual profile — haiku
+  scene_artist_model: claude-haiku-4-5-20251001       # prompt formatting — haiku
+  music_director_model: claude-haiku-4-5-20251001     # mood assignment — haiku
 
 image_gen:
   provider: openai  # openai | stability

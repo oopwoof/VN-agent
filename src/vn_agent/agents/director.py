@@ -100,7 +100,7 @@ Return a JSON object with this exact structure:
   ]
 }}"""
 
-    response = await ainvoke_llm(system, user_prompt)
+    response = await ainvoke_llm(system, user_prompt, model=settings.llm_director_model)
 
     # Parse response
     content = response.content if hasattr(response, 'content') else str(response)
@@ -124,34 +124,93 @@ Return a JSON object with this exact structure:
 
 
 def _extract_json(content: str) -> dict:
-    """Extract JSON from LLM response."""
+    """Extract JSON from LLM response, handling truncated responses."""
     import re
 
-    # 1. Try markdown code block
-    json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
-    if json_match:
-        try:
-            return json.loads(json_match.group(1))
-        except json.JSONDecodeError:
-            pass
+    # Strip markdown code fences to get raw JSON text
+    stripped = re.sub(r'^```(?:json)?\s*', '', content.strip(), flags=re.MULTILINE)
+    stripped = re.sub(r'\s*```\s*$', '', stripped.strip(), flags=re.MULTILINE)
 
-    # 2. Try raw_decode from first {
-    start = content.find('{')
+    # 1. Try raw_decode from first { (handles both complete and inline JSON)
+    start = stripped.find('{')
     if start != -1:
         try:
-            obj, _ = json.JSONDecoder().raw_decode(content, start)
+            obj, _ = json.JSONDecoder().raw_decode(stripped, start)
             if isinstance(obj, dict):
                 return obj
         except json.JSONDecodeError:
             pass
 
-    # 3. Try full content
+    # 2. Try full content as-is
     try:
-        return json.loads(content)
+        return json.loads(stripped)
     except json.JSONDecodeError:
         pass
 
+    # 3. Response was truncated mid-JSON — try to salvage it
+    # Find the last complete scene object and close the JSON structure
+    if start != -1:
+        salvaged = _salvage_truncated_json(stripped[start:])
+        if salvaged:
+            logger.warning("LLM response was truncated — salvaged partial JSON. Consider increasing max_tokens.")
+            return salvaged
+
     raise ValueError(f"Could not extract JSON from response: {content[:200]}")
+
+
+def _salvage_truncated_json(text: str) -> dict | None:
+    """
+    Attempt to fix a truncated JSON string by progressively trimming incomplete
+    trailing content and closing brackets until it parses.
+    """
+    # Walk backwards removing characters until we find valid JSON
+    # This handles truncation at arbitrary points inside arrays/objects
+    bracket_stack = []
+    for i, ch in enumerate(text):
+        if ch in ('{', '['):
+            bracket_stack.append(ch)
+        elif ch in ('}', ']'):
+            if bracket_stack:
+                bracket_stack.pop()
+
+    if not bracket_stack:
+        # Already balanced — try parsing as-is
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+    # Find the last position where the JSON was "more complete"
+    # Strategy: strip from the end until we can close all open brackets cleanly
+    closing = {'{': '}', '[': ']'}
+    candidate = text.rstrip()
+    # Remove trailing comma if present (common at truncation boundary)
+    while candidate.endswith(',') or candidate.endswith('"') or (
+        candidate and candidate[-1] not in ('}', ']', '"', '0123456789', 'e', 'n')
+    ):
+        candidate = candidate[:-1].rstrip()
+        if len(candidate) < 10:
+            return None
+
+    # Close all unclosed brackets
+    open_stack = []
+    for ch in candidate:
+        if ch in ('{', '['):
+            open_stack.append(closing[ch])
+        elif ch in ('}', ']'):
+            if open_stack and open_stack[-1] == ch:
+                open_stack.pop()
+
+    candidate += ''.join(reversed(open_stack))
+
+    try:
+        result = json.loads(candidate)
+        if isinstance(result, dict):
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    return None
 
 
 def _build_from_plan(plan: dict, theme: str) -> tuple[VNScript, dict[str, CharacterProfile]]:
