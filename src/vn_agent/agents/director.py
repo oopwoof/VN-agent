@@ -4,11 +4,9 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field
-
 from vn_agent.agents.state import AgentState
-from vn_agent.schema.character import CharacterProfile, VisualProfile
-from vn_agent.schema.script import VNScript, Scene, DialogueLine, BranchOption
+from vn_agent.schema.character import CharacterProfile
+from vn_agent.schema.script import VNScript, Scene, BranchOption
 from vn_agent.schema.music import Mood, MusicCue
 from vn_agent.services.llm import ainvoke_llm
 from vn_agent.strategies.narrative import format_strategies_for_prompt
@@ -16,76 +14,97 @@ from vn_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are the Director of a visual novel project. Your job is to plan the overall story structure.
-
-Given a theme, you will:
-1. Create a compelling story outline with 5-15 scenes
-2. Design 2-5 interesting characters
-3. Assign narrative strategies to scenes
-4. Determine BGM mood for each scene
-5. Define branching points that make the story interactive
-
-Output a complete story plan as structured JSON.
+_SYSTEM_OUTLINE = """You are the Director of a visual novel project. Plan the overall story structure.
 
 {strategies}
 
 Rules:
-- Every branch option MUST reference a valid scene ID
-- The story must have exactly one start scene
-- Every scene must be reachable from the start
 - Use scene IDs like: ch1_scene_name (lowercase, underscores)
 - Character IDs must be valid Python identifiers (lowercase, underscores)
-- Include at least 2 meaningful branch points
+- The story must have exactly one start scene; every scene must be reachable from it
 """
 
-class StoryPlan(BaseModel):
-    title: str
-    description: str
-    start_scene_id: str
-    scenes: list[dict] = Field(description="List of scene plans")
-    characters: list[dict] = Field(description="List of character plans")
+_SYSTEM_DETAILS = """You are the Director of a visual novel project. You have a scene outline and must now add:
+1. Navigation: next_scene_id (linear flow) OR branches (player choices) for each scene
+2. BGM mood for each scene
+
+Rules:
+- Every branch next_scene_id MUST reference a scene ID from the provided list
+- Every next_scene_id MUST reference a scene ID from the provided list
+- Include at least 2 meaningful branch points across the story
+- Terminal (ending) scenes have next_scene_id=null and empty branches
+- BGM moods: peaceful / romantic / tense / melancholic / joyful / mysterious / epic / neutral
+"""
 
 
 async def run_director(state: AgentState) -> dict:
-    """Director node: generates story plan from theme."""
+    """Director node: two-step plan — outline first, then navigation + music."""
     theme = state["theme"]
     settings = get_settings()
-    logger.info(f"Director starting for theme: {theme[:50]}...")
-
-    system = SYSTEM_PROMPT.format(strategies=format_strategies_for_prompt())
-
+    output_dir = state.get("output_dir", ".")
     max_scenes = state.get("max_scenes", 10)
     num_characters = state.get("num_characters", 3)
+    logger.info(f"Director starting for theme: {theme[:50]}...")
 
-    user_prompt = f"""Create a visual novel story plan for this theme:
+    # ── Step 1: scene outline + characters (no branches/music yet) ────────────
+    outline_data = await _step1_outline(
+        theme, max_scenes, num_characters, output_dir, settings
+    )
+
+    # ── Step 2: fill in branches + music per scene ────────────────────────────
+    detail_data = await _step2_details(outline_data, output_dir, settings)
+
+    # Merge: inject branch/music back into outline scenes
+    plan_data = _merge_outline_details(outline_data, detail_data)
+
+    try:
+        script, characters = _build_from_plan(plan_data, theme)
+    except Exception as e:
+        logger.error(f"Director failed to build plan: {e}")
+        raise
+
+    if not script.scenes:
+        logger.warning("Director produced 0 scenes — LLM may have returned empty/null scenes list")
+
+    logger.info(f"Director created: '{script.title}' with {len(script.scenes)} scenes, {len(characters)} characters")
+
+    # Checkpoint: save immediately so --resume works if Writer crashes
+    _save_checkpoint(output_dir, script, characters)
+
+    return {
+        "vn_script": script,
+        "characters": characters,
+    }
+
+
+async def _step1_outline(
+    theme: str, max_scenes: int, num_characters: int, output_dir: str, settings
+) -> dict:
+    """Step 1: generate scene outlines + characters (no branches/music)."""
+    strategies = format_strategies_for_prompt()
+    system = _SYSTEM_OUTLINE.format(strategies=strategies)
+
+    user_prompt = f"""Create a visual novel story outline for this theme:
 
 Theme: {theme}
 
 Requirements:
 - Up to {max_scenes} scenes total
 - {num_characters} characters
-- At least 2 meaningful player choices (branches)
-- Clear emotional arc with beginning, middle, and end
-- Assign a BGM mood (peaceful/romantic/tense/melancholic/joyful/mysterious/epic/neutral) to each scene
+- Clear emotional arc: beginning, middle, end
 
-Return a JSON object with this exact structure:
+Return ONLY this JSON (no branches, no music yet):
 {{
   "title": "Story Title",
-  "description": "Brief story description",
+  "description": "One-sentence story description",
   "start_scene_id": "ch1_opening",
   "scenes": [
     {{
       "id": "ch1_opening",
       "title": "Scene Title",
-      "description": "What happens in this scene",
-      "background_id": "bg_location_name",
-      "music_mood": "peaceful",
-      "music_description": "soft piano, gentle morning",
+      "description": "1-2 sentences: what happens",
+      "background_id": "bg_location",
       "characters_present": ["char_id"],
-      "next_scene_id": "ch1_next" or null,
-      "branches": [
-        {{"text": "Choice text", "next_scene_id": "ch1_option_a"}}
-      ],
       "narrative_strategy": "accumulate"
     }}
   ],
@@ -94,41 +113,81 @@ Return a JSON object with this exact structure:
       "id": "char_protagonist",
       "name": "Display Name",
       "color": "#ff9966",
-      "personality": "Personality description",
-      "background": "Character backstory",
+      "personality": "Brief personality",
+      "background": "Brief backstory",
       "role": "protagonist"
     }}
   ]
 }}"""
 
-    response = await ainvoke_llm(system, user_prompt, model=settings.llm_director_model)
-
-    # Parse response
-    content = response.content if hasattr(response, 'content') else str(response)
-
-    # Save raw response for debugging
-    output_dir = state.get("output_dir", ".")
-    _save_debug_raw(output_dir, "director_raw.txt", content)
+    response = await ainvoke_llm(system, user_prompt, model=settings.llm_director_model, caller="director/step1")
+    content = response.content if hasattr(response, "content") else str(response)
+    _save_debug_raw(output_dir, "director_step1_raw.txt", content)
 
     try:
-        plan_data = _extract_json(content)
-        script, characters = _build_from_plan(plan_data, theme)
+        return _extract_json(content)
     except Exception as e:
-        logger.error(f"Director failed to parse LLM response: {e}\nRaw content (first 500 chars): {content[:500]}")
+        logger.error(f"Director step1 parse error: {e}\nRaw (first 500): {content[:500]}")
         raise
 
-    if not script.scenes:
-        logger.warning("Director produced 0 scenes — LLM may have returned empty/null scenes list")
 
-    logger.info(f"Director created: '{script.title}' with {len(script.scenes)} scenes, {len(characters)} characters")
+async def _step2_details(outline: dict, output_dir: str, settings) -> dict:
+    """Step 2: add navigation (next_scene_id/branches) and music mood to each scene."""
+    scene_ids = [s["id"] for s in (outline.get("scenes") or [])]
+    scene_list = "\n".join(
+        f'  - {s["id"]}: {s.get("title", "")} — {s.get("description", "")[:60]}'
+        for s in (outline.get("scenes") or [])
+    )
 
-    # Checkpoint: save script immediately after Director so Writer can be resumed without re-running Director
-    _save_checkpoint(output_dir, script, characters)
+    user_prompt = f"""You have this scene list:
+{scene_list}
 
-    return {
-        "vn_script": script,
-        "characters": characters,
-    }
+All valid scene IDs: {json.dumps(scene_ids)}
+Start scene: {outline.get("start_scene_id", "")}
+
+For EACH scene, specify navigation and music. Return this JSON:
+{{
+  "scenes": [
+    {{
+      "id": "ch1_opening",
+      "next_scene_id": "ch1_next_or_null",
+      "branches": [{{"text": "Choice text", "next_scene_id": "valid_scene_id"}}],
+      "music_mood": "peaceful",
+      "music_description": "soft piano"
+    }}
+  ]
+}}
+
+Rules:
+- Use ONLY scene IDs from the list above
+- A scene with branches should have next_scene_id=null
+- Terminal scenes: next_scene_id=null, branches=[]
+- Include at least 2 scenes with meaningful branches"""
+
+    response = await ainvoke_llm(_SYSTEM_DETAILS, user_prompt, model=settings.llm_director_model, caller="director/step2")
+    content = response.content if hasattr(response, "content") else str(response)
+    _save_debug_raw(output_dir, "director_step2_raw.txt", content)
+
+    try:
+        return _extract_json(content)
+    except Exception as e:
+        logger.warning(f"Director step2 parse error (will use defaults): {e}\nRaw (first 300): {content[:300]}")
+        return {"scenes": []}
+
+
+def _merge_outline_details(outline: dict, details: dict) -> dict:
+    """Merge step2 navigation/music into step1 outline scenes."""
+    detail_map = {s["id"]: s for s in (details.get("scenes") or [])}
+    merged_scenes = []
+    for s in (outline.get("scenes") or []):
+        d = detail_map.get(s["id"], {})
+        merged = {**s}
+        merged["next_scene_id"] = d.get("next_scene_id")
+        merged["branches"] = d.get("branches") or []
+        merged["music_mood"] = d.get("music_mood", "neutral")
+        merged["music_description"] = d.get("music_description", "")
+        merged_scenes.append(merged)
+    return {**outline, "scenes": merged_scenes}
 
 
 def _save_debug_raw(output_dir: str, filename: str, content: str) -> None:

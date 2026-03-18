@@ -8,7 +8,7 @@ from vn_agent.agents.state import initial_state
 from vn_agent.compiler.renpy_compiler import compile_to_string
 
 
-DIRECTOR_MOCK_RESPONSE = """{
+DIRECTOR_STEP1_RESPONSE = """{
   "title": "Echoes of Tomorrow",
   "description": "A short story about choices",
   "start_scene_id": "ch1_morning",
@@ -18,14 +18,7 @@ DIRECTOR_MOCK_RESPONSE = """{
       "title": "Morning Arrival",
       "description": "The protagonist arrives at school",
       "background_id": "bg_school",
-      "music_mood": "peaceful",
-      "music_description": "soft piano",
       "characters_present": ["char_hana"],
-      "next_scene_id": null,
-      "branches": [
-        {"text": "Say hello", "next_scene_id": "ch1_friendly"},
-        {"text": "Walk past", "next_scene_id": "ch1_distant"}
-      ],
       "narrative_strategy": "accumulate"
     },
     {
@@ -33,11 +26,7 @@ DIRECTOR_MOCK_RESPONSE = """{
       "title": "A Warm Greeting",
       "description": "They exchange warm words",
       "background_id": "bg_school",
-      "music_mood": "romantic",
-      "music_description": "warm strings",
       "characters_present": ["char_hana"],
-      "next_scene_id": null,
-      "branches": [],
       "narrative_strategy": "accumulate"
     },
     {
@@ -45,11 +34,7 @@ DIRECTOR_MOCK_RESPONSE = """{
       "title": "Silent Pass",
       "description": "They walk by in silence",
       "background_id": "bg_corridor",
-      "music_mood": "melancholic",
-      "music_description": "quiet piano",
       "characters_present": ["char_hana"],
-      "next_scene_id": null,
-      "branches": [],
       "narrative_strategy": "erode"
     }
   ],
@@ -61,6 +46,35 @@ DIRECTOR_MOCK_RESPONSE = """{
       "personality": "Cheerful and warm",
       "background": "The protagonist's childhood friend",
       "role": "love interest"
+    }
+  ]
+}"""
+
+DIRECTOR_STEP2_RESPONSE = """{
+  "scenes": [
+    {
+      "id": "ch1_morning",
+      "next_scene_id": null,
+      "branches": [
+        {"text": "Say hello", "next_scene_id": "ch1_friendly"},
+        {"text": "Walk past", "next_scene_id": "ch1_distant"}
+      ],
+      "music_mood": "peaceful",
+      "music_description": "soft piano"
+    },
+    {
+      "id": "ch1_friendly",
+      "next_scene_id": null,
+      "branches": [],
+      "music_mood": "romantic",
+      "music_description": "warm strings"
+    },
+    {
+      "id": "ch1_distant",
+      "next_scene_id": null,
+      "branches": [],
+      "music_mood": "melancholic",
+      "music_description": "quiet piano"
     }
   ]
 }"""
@@ -85,20 +99,21 @@ class MockMessage:
 def mock_ainvoke(mocker):
     call_count = [0]
 
-    async def side_effect(system, user, schema=None, model=None):
+    async def side_effect(system, user, schema=None, model=None, caller="llm"):
         call_count[0] += 1
         system_lower = system.lower()
 
-        # Check reviewer first — its prompt contains "dialogue" too, so must be checked
-        # before the writer branch
         if "reviewer" in system_lower:
             content = REVIEWER_MOCK_RESPONSE
-        elif "director" in system_lower or "story plan" in system_lower:
-            content = DIRECTOR_MOCK_RESPONSE
+        elif "director" in system_lower:
+            # Distinguish step1 (outline) from step2 (navigation/music)
+            if "navigation" in system_lower or "next_scene_id" in system_lower:
+                content = DIRECTOR_STEP2_RESPONSE
+            else:
+                content = DIRECTOR_STEP1_RESPONSE
         elif "writer" in system_lower or "dialogue" in system_lower:
             content = WRITER_MOCK_RESPONSE
         else:
-            # Generic fallback
             content = WRITER_MOCK_RESPONSE
 
         return MockMessage(content)

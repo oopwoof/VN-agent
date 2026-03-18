@@ -29,6 +29,10 @@ def _make_retry_decorator(max_retries: int):
 @lru_cache(maxsize=8)
 def _get_llm_cached(provider: str, model: str, temperature: float, max_tokens: int, api_key: str):
     """Create and cache an LLM instance keyed by its configuration."""
+    logger.debug(
+        f"Creating LLM: provider={provider} model={model} "
+        f"temperature={temperature} max_tokens={max_tokens}"
+    )
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
         return ChatAnthropic(
@@ -70,11 +74,31 @@ def get_structured_llm(schema: type[T], model: str | None = None) -> Any:
     return get_llm(model).with_structured_output(schema)
 
 
+def _log_stop_reason(result: Any, caller: str) -> None:
+    """Log stop_reason and token usage from response metadata."""
+    meta = getattr(result, "response_metadata", None) or {}
+    stop_reason = meta.get("stop_reason") or meta.get("finish_reason", "unknown")
+    usage = meta.get("usage", {})
+    input_tokens = usage.get("input_tokens", "?")
+    output_tokens = usage.get("output_tokens", "?")
+    logger.info(
+        f"[{caller}] stop_reason={stop_reason!r}  "
+        f"tokens: in={input_tokens} out={output_tokens}"
+    )
+    if stop_reason == "max_tokens":
+        settings = get_settings()
+        logger.warning(
+            f"[{caller}] Response hit max_tokens limit ({settings.llm_max_tokens}). "
+            "Consider increasing llm.max_tokens in config/settings.yaml."
+        )
+
+
 async def ainvoke_llm(
     system_prompt: str,
     user_prompt: str,
     schema: type[T] | None = None,
     model: str | None = None,
+    caller: str = "llm",
 ) -> T | str:
     """Invoke LLM with system+user prompts, optionally with structured output."""
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -93,6 +117,7 @@ async def ainvoke_llm(
         else:
             llm = get_llm(model)
         result = await llm.ainvoke(messages)
+        _log_stop_reason(result, caller)
         return result
 
     return await _call()
@@ -103,6 +128,7 @@ def invoke_llm(
     user_prompt: str,
     schema: type[T] | None = None,
     model: str | None = None,
+    caller: str = "llm",
 ) -> T | str:
     """Synchronous LLM invocation."""
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -120,6 +146,8 @@ def invoke_llm(
             llm = get_structured_llm(schema, model)
         else:
             llm = get_llm(model)
-        return llm.invoke(messages)
+        result = llm.invoke(messages)
+        _log_stop_reason(result, caller)
+        return result
 
     return _call()

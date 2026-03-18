@@ -77,7 +77,7 @@ Return as JSON:
 }}"""
 
     settings = get_settings()
-    response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_character_designer_model)
+    response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_character_designer_model, caller=f"character_designer/{char.id}")
     content = response.content if hasattr(response, 'content') else str(response)
 
     visual_data = _parse_visual_profile(content)

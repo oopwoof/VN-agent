@@ -91,7 +91,7 @@ Return a JSON object:
 {{"prompt": "detailed image generation prompt here"}}"""
 
     settings = get_settings()
-    response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_scene_artist_model)
+    response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_scene_artist_model, caller=f"scene_artist/{scene.background_id}")
     content = response.content if hasattr(response, 'content') else str(response)
 
     # Extract prompt

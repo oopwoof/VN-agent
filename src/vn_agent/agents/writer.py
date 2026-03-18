@@ -106,7 +106,7 @@ Return JSON array:
 After dialogue, if branches exist, the player will choose:
 {[b.text for b in scene.branches]}"""
 
-    response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_writer_model)
+    response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_writer_model, caller=f"writer/{scene.id}")
     content = response.content if hasattr(response, 'content') else str(response)
 
     _save_debug_raw(output_dir, f"writer_{scene.id}.txt", content)

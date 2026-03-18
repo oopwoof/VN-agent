@@ -172,7 +172,7 @@ If all good, respond ONLY with: PASS
 If issues found, list them clearly."""
 
     settings = get_settings()
-    response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_reviewer_model)
+    response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_reviewer_model, caller="reviewer")
     content = response.content if hasattr(response, 'content') else str(response)
 
     if "PASS" in content.upper() and len(content.strip()) < 20:
