@@ -105,11 +105,15 @@ Return a JSON object with this exact structure:
     # Parse response
     content = response.content if hasattr(response, 'content') else str(response)
 
-    # Extract JSON from response
-    plan_data = _extract_json(content)
+    try:
+        plan_data = _extract_json(content)
+        script, characters = _build_from_plan(plan_data, theme)
+    except Exception as e:
+        logger.error(f"Director failed to parse LLM response: {e}\nRaw content (first 500 chars): {content[:500]}")
+        raise
 
-    # Build VNScript from plan
-    script, characters = _build_from_plan(plan_data, theme)
+    if not script.scenes:
+        logger.warning("Director produced 0 scenes — LLM may have returned empty/null scenes list")
 
     logger.info(f"Director created: '{script.title}' with {len(script.scenes)} scenes, {len(characters)} characters")
 
@@ -154,20 +158,21 @@ def _build_from_plan(plan: dict, theme: str) -> tuple[VNScript, dict[str, Charac
     """Convert plan dict to VNScript and CharacterProfile dict."""
     # Build characters
     characters: dict[str, CharacterProfile] = {}
-    for c in plan.get("characters", []):
+    # Use `or []` to handle both missing keys AND JSON null values
+    for c in plan.get("characters") or []:
         char = CharacterProfile(
             id=c["id"],
             name=c["name"],
-            color=c.get("color", "#ffffff"),
-            personality=c.get("personality", ""),
-            background=c.get("background", ""),
-            role=c.get("role", "supporting"),
+            color=c.get("color") or "#ffffff",
+            personality=c.get("personality") or "",
+            background=c.get("background") or "",
+            role=c.get("role") or "supporting",
         )
         characters[char.id] = char
 
     # Build scenes
     scenes: list[Scene] = []
-    for s in plan.get("scenes", []):
+    for s in plan.get("scenes") or []:
         # Build music cue
         music = None
         if s.get("music_mood"):
@@ -177,22 +182,23 @@ def _build_from_plan(plan: dict, theme: str) -> tuple[VNScript, dict[str, Charac
                 mood = Mood.NEUTRAL
             music = MusicCue(
                 mood=mood,
-                description=s.get("music_description", f"{mood.value} background music"),
+                description=s.get("music_description") or f"{mood.value} background music",
             )
 
-        # Build branches
+        # Build branches — handle null from LLM
         branches = [
             BranchOption(text=b["text"], next_scene_id=b["next_scene_id"])
-            for b in s.get("branches", [])
+            for b in (s.get("branches") or [])
+            if b and b.get("text") and b.get("next_scene_id")
         ]
 
         scene = Scene(
             id=s["id"],
-            title=s.get("title", s["id"]),
-            description=s.get("description", ""),
-            background_id=s.get("background_id", f"bg_{s['id']}"),
+            title=s.get("title") or s["id"],
+            description=s.get("description") or "",
+            background_id=s.get("background_id") or f"bg_{s['id']}",
             music=music,
-            characters_present=s.get("characters_present", []),
+            characters_present=s.get("characters_present") or [],
             dialogue=[],  # Writer fills this in
             branches=branches,
             next_scene_id=s.get("next_scene_id"),

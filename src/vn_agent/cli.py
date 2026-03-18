@@ -5,6 +5,7 @@ import asyncio
 import logging
 from pathlib import Path
 
+import sys
 import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -20,10 +21,17 @@ app = typer.Typer(
     add_completion=False,
 )
 
-console = Console()
+console = Console(highlight=False)
 
 
 def setup_logging(verbose: bool = False) -> None:
+    # Ensure UTF-8 output on Windows (non-destructive reconfigure)
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except AttributeError:
+            pass  # not available in all environments (e.g. pytest capture)
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         level=level,
@@ -105,7 +113,10 @@ async def _generate_async(
                     if isinstance(output_chunk, dict):
                         final_state.update(output_chunk)
         except Exception as e:
+            import traceback
             console.print(f"\n[red]Error during generation: {e}[/red]")
+            if verbose:
+                console.print(traceback.format_exc())
             raise typer.Exit(1)
 
     script = final_state.get("vn_script")
