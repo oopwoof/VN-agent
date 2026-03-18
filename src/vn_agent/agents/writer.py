@@ -116,11 +116,11 @@ def _parse_dialogue(content: str, scene: Scene) -> list[DialogueLine]:
     """Parse JSON dialogue from LLM response."""
     import json, re
 
-    # Try to extract JSON array
-    arr_match = re.search(r'\[.*?\]', content, re.DOTALL)
-    if arr_match:
+    # 1. Try markdown code block for array
+    arr_block_match = re.search(r'```(?:json)?\s*(\[.*?\])\s*```', content, re.DOTALL)
+    if arr_block_match:
         try:
-            lines_data = json.loads(arr_match.group(0))
+            lines_data = json.loads(arr_block_match.group(1))
             return [
                 DialogueLine(
                     character_id=d.get("character_id"),
@@ -131,6 +131,38 @@ def _parse_dialogue(content: str, scene: Scene) -> list[DialogueLine]:
             ]
         except (json.JSONDecodeError, KeyError):
             pass
+
+    # 2. Try raw_decode from first [
+    start = content.find('[')
+    if start != -1:
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(content, start)
+            if isinstance(obj, list):
+                return [
+                    DialogueLine(
+                        character_id=d.get("character_id"),
+                        text=d.get("text", ""),
+                        emotion=d.get("emotion", "neutral"),
+                    )
+                    for d in obj
+                ]
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    # 3. Try full content as JSON array
+    try:
+        lines_data = json.loads(content)
+        if isinstance(lines_data, list):
+            return [
+                DialogueLine(
+                    character_id=d.get("character_id"),
+                    text=d.get("text", ""),
+                    emotion=d.get("emotion", "neutral"),
+                )
+                for d in lines_data
+            ]
+    except (json.JSONDecodeError, KeyError):
+        pass
 
     # Fallback: create placeholder
     logger.warning(f"Could not parse dialogue for scene {scene.id}, using placeholder")

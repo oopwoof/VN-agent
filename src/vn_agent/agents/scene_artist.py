@@ -45,12 +45,16 @@ async def run_scene_artist(state: AgentState) -> dict:
 
     # Build a map from background_id -> generated background_prompt
     bg_prompt_map: dict[str, str | None] = {}
+    all_errors = list(state.get("errors", []))
     for bg_id, result in zip(bg_ids, results):
         if isinstance(result, Exception):
             logger.error(f"Failed to generate background {bg_id}: {result}")
             bg_prompt_map[bg_id] = None
+            all_errors.append(f"SceneArtist: background {bg_id}: {result}")
         else:
-            bg_prompt_map[bg_id] = result.background_prompt
+            bg_scene, bg_errors = result
+            bg_prompt_map[bg_id] = bg_scene.background_prompt
+            all_errors.extend(bg_errors)
 
     # Apply the generated background_prompt back to all scenes sharing the same background_id
     updated_scenes = []
@@ -62,11 +66,14 @@ async def run_scene_artist(state: AgentState) -> dict:
             updated_scenes.append(scene)
 
     updated_script = script.model_copy(update={"scenes": updated_scenes})
-    return {"vn_script": updated_script}
+    return {"vn_script": updated_script, "errors": all_errors}
 
 
-async def _generate_background(scene: Scene, output_dir: str) -> Scene:
-    """Generate background image prompt and optionally the image."""
+async def _generate_background(scene: Scene, output_dir: str) -> tuple[Scene, list[str]]:
+    """Generate background image prompt and optionally the image.
+
+    Returns a tuple of (updated_scene, errors).
+    """
     user_prompt = f"""Create an image generation prompt for this scene background:
 
 Scene: {scene.title}
@@ -97,13 +104,15 @@ Return a JSON object:
             pass
 
     updated_scene = scene.model_copy(update={"background_prompt": bg_prompt})
+    errors: list[str] = []
 
-    # Try to generate image
+    # Try to generate image; collect error if it fails
     file_path = Path(output_dir) / "game" / "images" / "backgrounds" / f"{scene.background_id}.png"
     try:
         await generate_image(bg_prompt, file_path)
         logger.info(f"Generated background: {scene.background_id}")
     except Exception as e:
         logger.warning(f"Could not generate background {scene.background_id}: {e}")
+        errors.append(f"SceneArtist: image {scene.background_id}: {e}")
 
-    return updated_scene
+    return updated_scene, errors

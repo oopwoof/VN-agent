@@ -122,20 +122,32 @@ Return a JSON object with this exact structure:
 def _extract_json(content: str) -> dict:
     """Extract JSON from LLM response."""
     import re
-    # Try to find JSON block
+
+    # 1. Try markdown code block
     json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
     if json_match:
-        return json.loads(json_match.group(1))
-    # Try to parse entire content as JSON
+        try:
+            return json.loads(json_match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # 2. Try raw_decode from first {
+    start = content.find('{')
+    if start != -1:
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(content, start)
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            pass
+
+    # 3. Try full content
     try:
         return json.loads(content)
     except json.JSONDecodeError:
-        # Find outermost braces
-        start = content.find('{')
-        end = content.rfind('}')
-        if start != -1 and end != -1:
-            return json.loads(content[start:end+1])
-        raise ValueError(f"Could not extract JSON from response: {content[:200]}")
+        pass
+
+    raise ValueError(f"Could not extract JSON from response: {content[:200]}")
 
 
 def _build_from_plan(plan: dict, theme: str) -> tuple[VNScript, dict[str, CharacterProfile]]:

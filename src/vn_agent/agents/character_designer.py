@@ -37,18 +37,25 @@ async def run_character_designer(state: AgentState) -> dict:
     )
 
     updated_characters = {}
+    all_errors = list(state.get("errors", []))
     for char_id, result in zip(char_ids, results):
         if isinstance(result, Exception):
             logger.error(f"Failed to design character {char_id}: {result}")
             updated_characters[char_id] = characters[char_id]
+            all_errors.append(f"CharacterDesigner: {result}")
         else:
-            updated_characters[char_id] = result
+            updated_char, sprite_errors = result
+            updated_characters[char_id] = updated_char
+            all_errors.extend(sprite_errors)
 
-    return {"characters": updated_characters}
+    return {"characters": updated_characters, "errors": all_errors}
 
 
-async def _design_character(char: CharacterProfile, output_dir: str) -> CharacterProfile:
-    """Design visual profile for a character."""
+async def _design_character(char: CharacterProfile, output_dir: str) -> tuple[CharacterProfile, list[str]]:
+    """Design visual profile for a character.
+
+    Returns a tuple of (updated_character, errors).
+    """
     user_prompt = f"""Create a visual profile for this character:
 
 Name: {char.name}
@@ -80,20 +87,39 @@ Return as JSON:
     )
 
     # Generate sprites for key emotions
-    sprites = await _generate_sprites(char, visual, output_dir)
+    sprites, sprite_errors = await _generate_sprites(char, visual, output_dir)
     visual = visual.model_copy(update={"sprites": sprites})
 
-    return char.model_copy(update={"visual": visual})
+    return char.model_copy(update={"visual": visual}), sprite_errors
 
 
 def _parse_visual_profile(content: str) -> dict:
     import json, re
-    json_match = re.search(r'\{.*?\}', content, re.DOTALL)
+
+    # 1. Try markdown code block
+    json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
     if json_match:
         try:
-            return json.loads(json_match.group(0))
+            return json.loads(json_match.group(1))
         except json.JSONDecodeError:
             pass
+
+    # 2. Try raw_decode from first {
+    start = content.find('{')
+    if start != -1:
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(content, start)
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            pass
+
+    # 3. Try full content
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+
     return {}
 
 
@@ -101,10 +127,14 @@ async def _generate_sprites(
     char: CharacterProfile,
     visual: VisualProfile,
     output_dir: str,
-) -> list[EmotionSprite]:
-    """Generate sprite images for key emotions."""
+) -> tuple[list[EmotionSprite], list[str]]:
+    """Generate sprite images for key emotions.
+
+    Returns a tuple of (sprites, errors).
+    """
     key_emotions = ["neutral", "happy", "sad"]
     sprites = []
+    errors: list[str] = []
 
     for emotion in key_emotions:
         image_id = f"{char.id}_{emotion}"
@@ -125,13 +155,14 @@ async def _generate_sprites(
             generation_prompt=prompt,
         )
 
-        # Try to generate image; if fails, log and continue with placeholder
+        # Try to generate image; if fails, log and collect error
         try:
             await generate_image(prompt, abs_path)
             logger.info(f"Generated sprite: {image_id}")
         except Exception as e:
             logger.warning(f"Could not generate sprite {image_id}: {e}")
+            errors.append(f"CharacterDesigner: sprite {image_id}: {e}")
 
         sprites.append(sprite)
 
-    return sprites
+    return sprites, errors

@@ -48,6 +48,7 @@ def generate(
     ),
     max_scenes: int = typer.Option(10, "--max-scenes", help="Maximum number of scenes"),
     num_characters: int = typer.Option(3, "--characters", help="Number of characters"),
+    resume: bool = typer.Option(False, "--resume", help="Resume from existing output directory"),
 ) -> None:
     """Generate a visual novel from a theme."""
     setup_logging(verbose)
@@ -55,7 +56,11 @@ def generate(
     console.print(f"\n[bold blue]VN-Agent[/bold blue] - AI Visual Novel Generator")
     console.print(f"Theme: [italic]{theme}[/italic]\n")
 
-    asyncio.run(_generate_async(theme, output, text_only, max_scenes, num_characters))
+    script_checkpoint = output / "vn_script.json"
+    if resume and script_checkpoint.exists():
+        asyncio.run(_resume_async(output, text_only))
+    else:
+        asyncio.run(_generate_async(theme, output, text_only, max_scenes, num_characters))
 
 
 async def _generate_async(
@@ -125,6 +130,96 @@ async def _generate_async(
     console.print(f"  Title: [bold]{script.title}[/bold]")
     console.print(f"  Scenes: {len(script.scenes)}")
     console.print(f"  Characters: {len(characters)}")
+    console.print(f"  Output: {output.resolve()}")
+    console.print(f"\nRun with Ren'Py: [italic]renpy {output.resolve()}[/italic]\n")
+
+
+async def _resume_async(
+    output: Path,
+    text_only: bool,
+) -> None:
+    """Resume generation from existing vn_script.json checkpoint."""
+    import json
+    from vn_agent.schema.script import VNScript
+    from vn_agent.schema.character import CharacterProfile
+
+    script_path = output / "vn_script.json"
+    chars_path = output / "characters.json"
+
+    try:
+        script = VNScript.model_validate_json(script_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        console.print(f"[red]Error loading checkpoint script: {e}[/red]")
+        raise typer.Exit(1)
+
+    characters: dict[str, CharacterProfile] = {}
+    if chars_path.exists():
+        try:
+            raw = json.loads(chars_path.read_text(encoding="utf-8"))
+            characters = {k: CharacterProfile.model_validate(v) for k, v in raw.items()}
+        except Exception as e:
+            console.print(f"[yellow]Warning: could not load characters checkpoint: {e}[/yellow]")
+
+    console.print(f"Resuming from existing script: [bold]{script.title}[/bold]")
+
+    if text_only:
+        output.mkdir(parents=True, exist_ok=True)
+        build_project(script, characters, output)
+        console.print(f"\n[green]✓ Resume complete (text-only)![/green]")
+        console.print(f"  Title: [bold]{script.title}[/bold]")
+        console.print(f"  Scenes: {len(script.scenes)}")
+        console.print(f"  Characters: {len(characters)}")
+        console.print(f"  Output: {output.resolve()}")
+        return
+
+    from vn_agent.agents.character_designer import run_character_designer
+    from vn_agent.agents.scene_artist import run_scene_artist
+    from vn_agent.agents.music_director import run_music_director
+
+    state: dict = {
+        "vn_script": script,
+        "characters": characters,
+        "output_dir": str(output),
+        "errors": [],
+        "text_only": text_only,
+    }
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Resuming...", total=None)
+
+        try:
+            progress.update(task, description="Character Designer: Creating characters...")
+            state.update(await run_character_designer(state))
+
+            progress.update(task, description="Scene Artist: Generating backgrounds...")
+            state.update(await run_scene_artist(state))
+
+            progress.update(task, description="Music Director: Assigning BGM...")
+            state.update(await run_music_director(state))
+        except Exception as e:
+            console.print(f"\n[red]Error during resume: {e}[/red]")
+            raise typer.Exit(1)
+
+    final_script = state.get("vn_script", script)
+    final_characters = state.get("characters", characters)
+    errors = state.get("errors", [])
+
+    if errors:
+        console.print("\n[yellow]Warnings:[/yellow]")
+        for err in errors:
+            console.print(f"  - {err}")
+
+    output.mkdir(parents=True, exist_ok=True)
+    build_project(final_script, final_characters, output)
+
+    console.print(f"\n[green]✓ Resume complete![/green]")
+    console.print(f"  Title: [bold]{final_script.title}[/bold]")
+    console.print(f"  Scenes: {len(final_script.scenes)}")
+    console.print(f"  Characters: {len(final_characters)}")
     console.print(f"  Output: {output.resolve()}")
     console.print(f"\nRun with Ren'Py: [italic]renpy {output.resolve()}[/italic]\n")
 

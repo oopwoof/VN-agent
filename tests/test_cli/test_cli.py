@@ -219,3 +219,58 @@ def test_compile_invalid_script(tmp_path: Path):
     output_dir = tmp_path / "out"
     result = runner.invoke(app, ["compile", str(script_file), "--output", str(output_dir)])
     assert result.exit_code != 0
+
+
+def test_compile_creates_renpy_files(tmp_path: Path):
+    """compile command produces at least one .rpy file in the output directory."""
+    script_file = tmp_path / "vn_script.json"
+    script_file.write_text(json.dumps(VALID_SCRIPT), encoding="utf-8")
+
+    output_dir = tmp_path / "renpy_out"
+    result = runner.invoke(app, ["compile", str(script_file), "--output", str(output_dir)])
+
+    assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
+    rpy_files = list(output_dir.rglob("*.rpy"))
+    assert len(rpy_files) > 0, "No .rpy files were generated"
+
+
+def test_resume_flag_loads_existing_script(tmp_path: Path, mocker):
+    """--resume skips the LLM pipeline and uses the existing vn_script.json."""
+    # Write checkpoint files into tmp_path
+    script_file = tmp_path / "vn_script.json"
+    script_file.write_text(json.dumps(VALID_SCRIPT), encoding="utf-8")
+
+    chars_file = tmp_path / "characters.json"
+    chars_file.write_text(json.dumps(VALID_CHARACTERS), encoding="utf-8")
+
+    # Mock the three asset agents to be no-ops (avoid real LLM/image calls)
+    async def fake_run_character_designer(state):
+        return {}
+
+    async def fake_run_scene_artist(state):
+        return {}
+
+    async def fake_run_music_director(state):
+        return {}
+
+    mocker.patch(
+        "vn_agent.agents.character_designer.run_character_designer",
+        side_effect=fake_run_character_designer,
+    )
+    mocker.patch(
+        "vn_agent.agents.scene_artist.run_scene_artist",
+        side_effect=fake_run_scene_artist,
+    )
+    mocker.patch(
+        "vn_agent.agents.music_director.run_music_director",
+        side_effect=fake_run_music_director,
+    )
+
+    result = runner.invoke(
+        app,
+        ["generate", "ignored theme", "--output", str(tmp_path), "--resume", "--text-only"],
+    )
+
+    assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
+    # Should mention the loaded title
+    assert "Echoes of Tomorrow" in result.output or "resume" in result.output.lower()
