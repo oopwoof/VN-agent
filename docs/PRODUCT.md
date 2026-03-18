@@ -86,14 +86,29 @@ $ vn-agent generate --theme "一个时间旅行者在二战期间寻找失散家
 - [x] BGM 曲库策略（16 曲目，8 情绪）
 - [x] Music Director Agent（相邻相同情绪共享曲目）
 
-### Phase 4（第7-8周）- 优化 🔄 进行中
+### Phase 4（第7-8周）- 优化 ✅ 核心完成
 - [x] 并行化加速（asyncio.gather）
 - [x] 流式进度显示（LangGraph stream_mode="updates"）
 - [x] 错误恢复（非致命错误累积，不中断流程）
 - [x] --resume 断点续传
 - [x] 集成测试（46 个测试全部通过）
+- [x] stop_reason 诊断日志（区分 max_tokens vs end_turn）
+- [x] Director 两步走（outline → details，避免截断）
+- [x] 鲁棒 JSON 解析（_salvage_truncated_json 双策略）
+- [x] 调试原始响应保存（debug/director_step*.txt）
+- [x] Director 完成后立即存检查点（vn_script.json）
 - [ ] FastAPI 后端 + Web 界面
 - [ ] Suno API 音乐生成（待 API 公开）
+
+### Phase 5 - 成本优化与本地化 ✅ 完成
+- [x] 默认模型切换到 claude-sonnet-4-6（~5× 便宜于 Opus）
+- [x] 按 Agent 分配模型（Director/Writer=Sonnet，其余=Haiku）
+- [x] llm_base_url + llm_api_key 字段，支持任意 OpenAI 兼容端点
+- [x] config/presets/groq_free.yaml（免费，llama-3.3-70b）
+- [x] config/presets/ollama_local.yaml（本地，qwen2.5:7b）
+- [x] --mock CLI flag（零 API 调用，fixture 数据，~1 秒完整流程）
+- [x] build_project 自动生成占位 PNG（开发期 Ren'Py 不报错）
+- [x] Ollama 0.18.1 已安装（qwen2.5:7b 已下载）
 
 ---
 
@@ -143,5 +158,37 @@ $ vn-agent generate --theme "一个时间旅行者在二战期间寻找失散家
 - API 成本（每次生成的花费）
 
 ---
+
+---
+
+## 接下来的开发任务
+
+### 近期（下次开发时）
+
+**P0 - 验证 Ollama 本地流程**
+- [ ] 释放内存后用 qwen2.5:1.5b 跑一次完整 pipeline（`--text-only`）
+- [ ] 观察 stop_reason 日志，确认 max_tokens 是否真的生效
+- [ ] 验证 JSON 解析在本地模型下的鲁棒性
+
+**P1 - 提升生成质量**
+- [ ] Reviewer 在 LLM 返回 PASS 时条件放宽（当前 `len < 20` 过严）
+- [ ] Writer 对中文对话的 prompt 调优（避免英文回复）
+- [ ] Director step2 branch 校验：过滤掉引用了不存在 scene_id 的分支
+
+**P2 - FastAPI 后端**
+- [ ] `POST /generate` → 接收 theme，返回 job_id
+- [ ] `GET /status/{job_id}` → SSE 流式推送进度
+- [ ] `GET /download/{job_id}` → 下载 zip 包
+
+### 中期
+
+**Web UI**
+- [ ] 简单的 React/Vue 前端：输入框 + 进度条 + 预览 + 下载
+- [ ] vn_script.json 可视化编辑器（场景图 / 对话编辑）
+
+**质量提升**
+- [ ] 真实 BGM 文件（freesound.org CC0 素材）
+- [ ] 图像生成接通（Stability AI / FLUX 本地）
+- [ ] Suno API（等 API 公开）
 
 _最后更新: 2026-03-18_

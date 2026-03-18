@@ -42,19 +42,54 @@
 
 ## 开发记录
 
-### 2026-03-18 | 实现 - 2026-03-18 01:42
+### 2026-03-18 | 开发日总结
 
-**变更文件** (1 个):
-**源码变更** (1 文件):
+**今天完成的核心工作**（8 个 commit）：
+
+#### 1. 成本优化：按 Agent 分配模型
+- 默认从 claude-opus-4-6 切到 claude-sonnet-4-6，约节省 80% 成本
+- Director/Writer 用 Sonnet（JSON 复杂度高），Reviewer/CharacterDesigner/SceneArtist 用 Haiku
+- `get_llm()` 新增 model 参数，lru_cache 按 (provider, model, temperature, max_tokens, api_key, base_url) 缓存
+
+#### 2. JSON 截断问题的完整诊断与修复
+**问题根源**（通过 stop_reason 日志确认）：
+- 如果 stop_reason=max_tokens → LLM 输出被截断，需要调大 max_tokens 或缩小请求
+- 如果 stop_reason=end_turn + 解析失败 → 模型返回格式异常，是解析 bug
+
+**_salvage_truncated_json 重写**：
+- 旧逻辑：逐字符向后剥离，中文字符（不在 ASCII 集合）会被无限剥离到空字符串
+- 新逻辑双策略：
+  - Strategy 1：从末尾向前找 `}` 或 `]`，关闭剩余括号，尝试解析
+  - Strategy 2：前向扫描找最后一个根级逗号（深度=1 的 `,`），截断后关闭根对象
+  - 全程用字符串感知扫描（跟踪 in_string/escape 状态），对 Unicode 安全
+
+**Director 两步走**：
+- Step1：只生成场景大纲（id/title/description/background_id/characters_present/strategy）
+- Step2：补全导航（branches/next_scene_id）和音乐（music_mood）
+- 单次响应体积降低约 50-60%，大幅降低截断概率
+
+#### 3. 本地/免费模型支持
+- 新增 `llm_base_url` + `llm_api_key` 配置字段
+- 任意 OpenAI 协议兼容端点（Ollama/LM Studio/Groq/OpenRouter）直接对接
+- `config/presets/` 提供开箱即用配置
+
+#### 4. --mock 开发模式
+- `vn-agent generate "主题" --mock --text-only` → 零 API 调用，~1 秒，输出真实 Ren'Py 项目
+- fixture："The Last Lighthouse"（4 场景，2 角色，2 分支点，真实对话）
+- `_dispatch()` 按 caller tag + system prompt 关键词路由
+
+#### 5. 占位 PNG 自动生成
+- build_project 为所有缺失的背景/立绘写入最小透明 PNG（67 字节，纯内联，无需 Pillow）
+- Ren'Py 可正常运行，不报 missing file 错误
+
+**技术学习**：
+- `unittest.mock.patch()` 可以在运行时替换已 import 的函数引用，CLI 层用这个实现 mock 模式非常干净
+- Ollama 在 Windows 上的安装需要 GUI 交互，`/S` 静默安装不生效
+- RTX 3070 Laptop 8GB 在其他任务占用时可用 VRAM/RAM 不足以加载 7B 模型，需用 1.5B 或先释放资源
+
+**变更文件** (2 文件):
   - `src/vn_agent/compiler/project_builder.py`
-
-**变更统计**:
-```
-src/vn_agent/compiler/project_builder.py | 45 ++++++++++++++++++++++++++++++++
- 1 file changed, 45 insertions(+)
-```
-
-**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+  - `docs/PRODUCT.md` + `docs/DEV_LOG.md`
 
 ---
 
