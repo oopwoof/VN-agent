@@ -1,0 +1,28 @@
+# Budget preset — minimize API cost (~$0.01-0.02 per generation)
+# Uses Haiku for all agents, limits scenes, skips LLM reviewer.
+#
+# Usage:
+#   Copy the blocks below into config/settings.yaml (replace existing)
+
+llm:
+  default_provider: anthropic
+  model: claude-haiku-4-5-20251001
+  temperature: 0.7
+  max_tokens: 8000
+  max_retries: 2
+  base_url: ""
+  api_key: ""
+
+  director_model: claude-haiku-4-5-20251001
+  writer_model: claude-haiku-4-5-20251001
+  reviewer_model: claude-haiku-4-5-20251001
+  character_designer_model: claude-haiku-4-5-20251001
+  scene_artist_model: claude-haiku-4-5-20251001
+  music_director_model: claude-haiku-4-5-20251001
+
+generation:
+  max_scenes: 4
+  max_revision_rounds: 1
+  min_dialogue_lines: 3
+  max_dialogue_lines: 12
+  reviewer_skip_llm: true

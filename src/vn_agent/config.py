@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     max_revision_rounds: int = 3
     min_dialogue_lines: int = 5
     max_dialogue_lines: int = 20
+    reviewer_skip_llm: bool = False
+
+    # Eval / few-shot
+    corpus_path: str = ""  # path to final_annotations.csv (empty = disabled)
+    few_shot_k: int = 2  # number of examples to inject into Writer prompt
 
 
 def _load_yaml_settings() -> dict:

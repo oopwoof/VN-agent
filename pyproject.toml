@@ -24,6 +24,9 @@ dependencies = [
     "rich>=13.0",
 ]
 
+[project.optional-dependencies]
+web = ["fastapi>=0.110", "uvicorn[standard]>=0.30"]
+
 [project.scripts]
 vn-agent = "vn_agent.cli:app"
 
@@ -34,6 +37,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-mock>=3.12",
+    "pytest-cov>=5.0",
     "ruff>=0.3",
     "mypy>=1.9",
 ]
@@ -48,3 +52,4 @@ select = ["E", "F", "I", "UP"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["slow: marks tests that call real APIs (deselect with '-m \"not slow\"')"]

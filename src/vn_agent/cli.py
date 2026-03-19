@@ -115,6 +115,10 @@ async def _generate_async(
 ) -> None:
     if mock:
         _patch_mock_llm()
+
+    from vn_agent.observability.tracing import reset_trace
+    trace = reset_trace()
+
     pipeline = create_pipeline()
     state = initial_state(
         theme=theme,
@@ -174,6 +178,19 @@ async def _generate_async(
     # Build Ren'Py project
     output.mkdir(parents=True, exist_ok=True)
     build_project(script, characters, output)
+
+    # Token usage summary
+    from vn_agent.services.token_tracker import tracker
+    if tracker.calls:
+        console.print(f"\n[dim]{tracker.summary()}[/dim]")
+
+    # Trace summary + persist
+    console.print(f"\n[dim]{trace.summary()}[/dim]")
+    try:
+        trace_path = trace.save(output)
+        console.print(f"[dim]Trace saved to {trace_path}[/dim]")
+    except Exception:
+        pass
 
     # Summary
     console.print(f"\n[green]✓ Generation complete![/green]")
@@ -397,6 +414,86 @@ def compile(
     output.mkdir(parents=True, exist_ok=True)
     build_project(script, characters, output)
     console.print(f"[green]✓ Compiled to {output.resolve()}[/green]")
+
+
+eval_app = typer.Typer(help="Evaluation commands")
+app.add_typer(eval_app, name="eval")
+
+
+@eval_app.command("strategy")
+def eval_strategy(
+    corpus: Path = typer.Option(..., "--corpus", help="Path to final_annotations.csv"),
+    sample: int = typer.Option(50, "--sample", help="Number of samples to evaluate (0=all)"),
+    mock: bool = typer.Option(False, "--mock", help="Use keyword baseline instead of LLM"),
+) -> None:
+    """Evaluate strategy classification accuracy against COLX_523 corpus."""
+    from vn_agent.eval.corpus import load_corpus
+    from vn_agent.eval.strategy_eval import (
+        evaluate_strategy_classification,
+        format_report,
+        keyword_classifier,
+    )
+
+    setup_logging()
+
+    if not corpus.exists():
+        console.print(f"[red]Corpus file not found: {corpus}[/red]")
+        raise typer.Exit(1)
+
+    sessions = load_corpus(corpus)
+    console.print(f"Loaded {len(sessions)} sessions from corpus")
+
+    if mock:
+
+        async def classifier(text: str) -> str:
+            return keyword_classifier(text)
+    else:
+        from vn_agent.services.llm import ainvoke_llm
+        from vn_agent.config import get_settings
+
+        settings = get_settings()
+
+        async def classifier(text: str) -> str:
+            response = await ainvoke_llm(
+                "You are a narrative strategy classifier. Given a VN dialogue, "
+                "classify its predominant narrative strategy as one of: "
+                "accumulate, erode, rupture, reveal, contrast, weave. "
+                "Respond with ONLY the strategy name.",
+                text,
+                model=settings.llm_reviewer_model,
+                caller="eval/strategy",
+            )
+            content = response.content if hasattr(response, "content") else str(response)
+            return content.strip().lower()
+
+    metrics = asyncio.run(
+        evaluate_strategy_classification(sessions, classifier, sample_size=sample)
+    )
+
+    console.print(f"\n{format_report(metrics)}")
+
+    # Save results
+    import json
+
+    results_path = Path("eval_strategy_results.json")
+    results_path.write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
+    console.print(f"\n[dim]Results saved to {results_path}[/dim]")
+
+
+@eval_app.command("summary")
+def eval_summary() -> None:
+    """Display the most recent evaluation results."""
+    import json
+
+    results_path = Path("eval_strategy_results.json")
+    if not results_path.exists():
+        console.print("[yellow]No evaluation results found. Run 'vn-agent eval strategy' first.[/yellow]")
+        raise typer.Exit(1)
+
+    metrics = json.loads(results_path.read_text(encoding="utf-8"))
+    from vn_agent.eval.strategy_eval import format_report
+
+    console.print(f"\n{format_report(metrics)}")
 
 
 if __name__ == "__main__":

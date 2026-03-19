@@ -60,8 +60,13 @@ async def run_director(state: AgentState) -> dict:
     try:
         script, characters = _build_from_plan(plan_data, theme)
     except Exception as e:
-        logger.error(f"Director failed to build plan: {e}")
-        raise
+        logger.warning(f"Director build failed, attempting LLM repair: {e}")
+        repaired = await _attempt_repair(plan_data, str(e), output_dir, settings)
+        if repaired:
+            script, characters = _build_from_plan(repaired, theme)
+        else:
+            logger.error(f"Director failed to build plan after repair attempt: {e}")
+            raise
 
     if not script.scenes:
         logger.warning("Director produced 0 scenes — LLM may have returned empty/null scenes list")
@@ -187,6 +192,14 @@ def _merge_outline_details(outline: dict, details: dict) -> dict:
         merged["music_mood"] = d.get("music_mood", "neutral")
         merged["music_description"] = d.get("music_description", "")
         merged_scenes.append(merged)
+    # Filter out invalid branch/next_scene_id references from step2
+    valid_ids = {s["id"] for s in merged_scenes}
+    for s in merged_scenes:
+        s["branches"] = [b for b in s["branches"] if b.get("next_scene_id") in valid_ids]
+        if s.get("next_scene_id") and s["next_scene_id"] not in valid_ids:
+            logger.warning(f"Scene {s['id']}: next_scene_id '{s['next_scene_id']}' invalid, cleared")
+            s["next_scene_id"] = None
+
     return {**outline, "scenes": merged_scenes}
 
 
@@ -333,6 +346,28 @@ def _salvage_truncated_json(text: str) -> dict | None:
         return _close_and_parse(text[:last_root_comma])
 
     return None
+
+
+async def _attempt_repair(plan_data: dict, error_msg: str, output_dir: str, settings) -> dict | None:
+    """Attempt to repair invalid plan data by feeding the error back to the LLM."""
+    try:
+        repair_prompt = (
+            f"The following JSON plan failed validation with this error:\n{error_msg}\n\n"
+            f"Original plan (may be truncated):\n{json.dumps(plan_data, indent=2, ensure_ascii=False)[:3000]}\n\n"
+            "Fix the JSON to resolve the error. Return ONLY the corrected JSON."
+        )
+        response = await ainvoke_llm(
+            "You are a JSON repair assistant. Fix the provided JSON to pass validation.",
+            repair_prompt,
+            model=settings.llm_director_model,
+            caller="director/repair",
+        )
+        content = response.content if hasattr(response, "content") else str(response)
+        _save_debug_raw(output_dir, "director_repair_raw.txt", content)
+        return _extract_json(content)
+    except Exception as e:
+        logger.warning(f"LLM repair failed: {e}")
+        return None
 
 
 def _build_from_plan(plan: dict, theme: str) -> tuple[VNScript, dict[str, CharacterProfile]]:

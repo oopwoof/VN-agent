@@ -2,18 +2,43 @@
 from __future__ import annotations
 
 import logging
-from langgraph.graph import StateGraph, END
+from collections.abc import Awaitable, Callable
 
-from vn_agent.agents.state import AgentState, initial_state
-from vn_agent.agents.director import run_director
-from vn_agent.agents.writer import run_writer
-from vn_agent.agents.reviewer import run_reviewer
+from langgraph.graph import END, StateGraph
+
 from vn_agent.agents.character_designer import run_character_designer
-from vn_agent.agents.scene_artist import run_scene_artist
+from vn_agent.agents.director import run_director
 from vn_agent.agents.music_director import run_music_director
+from vn_agent.agents.reviewer import run_reviewer
+from vn_agent.agents.scene_artist import run_scene_artist
+from vn_agent.agents.state import AgentState
+from vn_agent.agents.writer import run_writer
 from vn_agent.config import get_settings
+from vn_agent.observability.tracing import get_trace
+from vn_agent.services.token_tracker import tracker as token_tracker
 
 logger = logging.getLogger(__name__)
+
+
+def _make_traced_node(
+    name: str, func: Callable[[AgentState], Awaitable[dict]]
+) -> Callable[[AgentState], Awaitable[dict]]:
+    """Wrap an agent node function with trace span recording."""
+
+    async def traced(state: AgentState) -> dict:
+        trace = get_trace()
+        # Snapshot token count before
+        tokens_before_in = token_tracker.total_input()
+        tokens_before_out = token_tracker.total_output()
+
+        with trace.span(name) as span:
+            result = await func(state)
+            # Record tokens used by this node
+            span.set_attribute("input_tokens", token_tracker.total_input() - tokens_before_in)
+            span.set_attribute("output_tokens", token_tracker.total_output() - tokens_before_out)
+            return result
+
+    return traced
 
 
 def _should_revise(state: AgentState) -> str:
@@ -39,7 +64,8 @@ def _after_review(state: AgentState) -> str:
     settings = get_settings()
 
     # Check if we should revise first
-    if not state.get("review_passed") and state.get("revision_count", 0) < settings.max_revision_rounds:
+    revision_count = state.get("revision_count", 0)
+    if not state.get("review_passed") and revision_count < settings.max_revision_rounds:
         logger.info(f"Reviewer FAILED (round {state.get('revision_count', 0)}) - revising")
         return "revise"
 
@@ -60,13 +86,15 @@ def build_graph() -> StateGraph:
     """Build the full VN generation pipeline."""
     graph = StateGraph(AgentState)
 
-    # Add nodes
-    graph.add_node("director", run_director)
-    graph.add_node("writer", run_writer)
-    graph.add_node("reviewer", run_reviewer)
-    graph.add_node("character_designer", run_character_designer)
-    graph.add_node("scene_artist", run_scene_artist)
-    graph.add_node("music_director", run_music_director)
+    # Add traced nodes
+    graph.add_node("director", _make_traced_node("director", run_director))
+    graph.add_node("writer", _make_traced_node("writer", run_writer))
+    graph.add_node("reviewer", _make_traced_node("reviewer", run_reviewer))
+    graph.add_node(
+        "character_designer", _make_traced_node("character_designer", run_character_designer)
+    )
+    graph.add_node("scene_artist", _make_traced_node("scene_artist", run_scene_artist))
+    graph.add_node("music_director", _make_traced_node("music_director", run_music_director))
 
     # Linear flow
     graph.set_entry_point("director")

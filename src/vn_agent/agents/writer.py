@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pydantic import BaseModel, Field
 
 from vn_agent.agents.state import AgentState
@@ -106,6 +107,29 @@ Return JSON array:
 After dialogue, if branches exist, the player will choose:
 {[b.text for b in scene.branches]}"""
 
+    # Few-shot example injection (when corpus is configured)
+    if settings.corpus_path:
+        try:
+            from pathlib import Path
+            from vn_agent.eval.corpus import load_corpus
+            from vn_agent.eval.retriever import retrieve_examples, format_examples
+
+            corpus = load_corpus(Path(settings.corpus_path))
+            examples = retrieve_examples(corpus, scene.narrative_strategy or "", k=settings.few_shot_k)
+            few_shot_block = format_examples(examples)
+            if few_shot_block:
+                user_prompt += (
+                    f"\n\nReference examples of '{scene.narrative_strategy}' strategy:\n"
+                    f"{few_shot_block}"
+                )
+        except Exception as e:
+            logger.debug(f"Few-shot injection skipped: {e}")
+
+    # Detect Chinese theme and add language hint
+    is_chinese = bool(re.search(r'[\u4e00-\u9fff]', script.description or ""))
+    if is_chinese:
+        user_prompt += "\n\nIMPORTANT: Write ALL dialogue text in Chinese (简体中文). Keep character_id as English identifiers."
+
     response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_writer_model, caller=f"writer/{scene.id}")
     content = response.content if hasattr(response, 'content') else str(response)
 
@@ -113,6 +137,24 @@ After dialogue, if branches exist, the player will choose:
 
     # Parse dialogue lines
     dialogue = _parse_dialogue(content, scene)
+
+    # Validate each line via Pydantic
+    validated = []
+    for d in dialogue:
+        try:
+            validated.append(DialogueLine.model_validate(d.model_dump()))
+        except Exception:
+            validated.append(d)
+    dialogue = validated
+
+    # Enforce dialogue line count bounds
+    if len(dialogue) < settings.min_dialogue_lines:
+        dialogue.append(DialogueLine(character_id=None, text=f"[{scene.title}]", emotion="neutral"))
+        logger.warning(f"Scene {scene.id}: padded to {len(dialogue)} lines (min={settings.min_dialogue_lines})")
+    if len(dialogue) > settings.max_dialogue_lines:
+        dialogue = dialogue[:settings.max_dialogue_lines]
+        logger.warning(f"Scene {scene.id}: truncated to {settings.max_dialogue_lines} lines")
+
     return scene.model_copy(update={"dialogue": dialogue})
 
 

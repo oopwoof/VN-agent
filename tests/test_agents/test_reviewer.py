@@ -1,7 +1,13 @@
-"""Tests for the Reviewer agent structural checks."""
+"""Tests for the Reviewer agent structural checks and Director merge logic."""
 import pytest
 from vn_agent.schema.script import VNScript, Scene, DialogueLine, BranchOption
-from vn_agent.agents.reviewer import _structural_check, _find_reachable_scenes
+from vn_agent.agents.reviewer import (
+    _structural_check,
+    _find_reachable_scenes,
+    check_strategy_consistency,
+    ReviewResult,
+)
+from vn_agent.agents.director import _merge_outline_details
 
 
 def make_valid_script() -> VNScript:
@@ -88,6 +94,150 @@ class TestStructuralCheck:
         script = script.model_copy(update={"scenes": bad_scenes})
         result = _structural_check(script)
         assert not result.passed
+
+
+class TestReviewerPassJudgement:
+    """Tests for the improved PASS detection logic in _quality_check."""
+
+    def _judge(self, content: str) -> bool:
+        """Simulate the PASS judgement logic from reviewer.py."""
+        stripped = content.strip()
+        first_line = stripped.split("\n", 1)[0].strip().upper()
+        has_issues = "\n-" in stripped or "\n*" in stripped or "\n1." in stripped
+        return first_line.startswith("PASS") and not has_issues
+
+    def test_reviewer_verbose_pass(self):
+        """Verbose PASS responses like 'PASS - coherent and well-paced' should be PASS."""
+        assert self._judge("PASS - the story is coherent and well-paced") is True
+
+    def test_reviewer_simple_pass(self):
+        assert self._judge("PASS") is True
+
+    def test_reviewer_pass_with_issues(self):
+        """PASS followed by bullet-point issues should be FAIL."""
+        content = "PASS\n- but pacing is off\n- characters inconsistent"
+        assert self._judge(content) is False
+
+    def test_reviewer_fail_content(self):
+        assert self._judge("The script has several issues:\n- Missing transitions") is False
+
+    def test_reviewer_pass_numbered_issues(self):
+        content = "PASS\n1. Scene transitions are abrupt"
+        assert self._judge(content) is False
+
+
+class TestMergeDropsInvalidBranches:
+    def test_merge_drops_invalid_branches(self):
+        """Step2 referencing nonexistent scene_id should be filtered out."""
+        outline = {
+            "scenes": [
+                {"id": "s1", "title": "S1"},
+                {"id": "s2", "title": "S2"},
+            ]
+        }
+        details = {
+            "scenes": [
+                {
+                    "id": "s1",
+                    "next_scene_id": None,
+                    "branches": [
+                        {"text": "Go to S2", "next_scene_id": "s2"},
+                        {"text": "Go to S99", "next_scene_id": "s99_nonexistent"},
+                    ],
+                },
+                {
+                    "id": "s2",
+                    "next_scene_id": "s99_nonexistent",
+                    "branches": [],
+                },
+            ]
+        }
+        result = _merge_outline_details(outline, details)
+        s1 = result["scenes"][0]
+        s2 = result["scenes"][1]
+        # Invalid branch to s99 should be dropped
+        assert len(s1["branches"]) == 1
+        assert s1["branches"][0]["next_scene_id"] == "s2"
+        # Invalid next_scene_id should be cleared
+        assert s2["next_scene_id"] is None
+
+
+class TestStrategyConsistency:
+    def test_no_warning_when_keywords_match(self):
+        script = VNScript(
+            title="Test", description="", theme="test", start_scene_id="s1",
+            scenes=[
+                Scene(
+                    id="s1", title="S1", description="", background_id="bg",
+                    narrative_strategy="rupture",
+                    dialogue=[
+                        DialogueLine(character_id=None, text="A sudden shock breaks the silence", emotion="neutral"),
+                        DialogueLine(character_id=None, text="Everything shattered in an instant", emotion="neutral"),
+                        DialogueLine(character_id=None, text="The explosion rocked the room", emotion="neutral"),
+                    ],
+                ),
+            ],
+            characters=[],
+        )
+        warnings = check_strategy_consistency(script)
+        assert len(warnings) == 0
+
+    def test_warning_when_no_keywords_match(self):
+        script = VNScript(
+            title="Test", description="", theme="test", start_scene_id="s1",
+            scenes=[
+                Scene(
+                    id="s1", title="S1", description="", background_id="bg",
+                    narrative_strategy="rupture",
+                    dialogue=[
+                        DialogueLine(character_id=None, text="They chatted about the weather", emotion="neutral"),
+                        DialogueLine(character_id=None, text="It was a calm afternoon", emotion="neutral"),
+                        DialogueLine(character_id=None, text="Nothing happened", emotion="neutral"),
+                    ],
+                ),
+            ],
+            characters=[],
+        )
+        warnings = check_strategy_consistency(script)
+        assert len(warnings) == 1
+        assert "rupture" in warnings[0]
+
+    def test_no_warning_for_short_dialogue(self):
+        """Scenes with fewer than 3 lines are not checked."""
+        script = VNScript(
+            title="Test", description="", theme="test", start_scene_id="s1",
+            scenes=[
+                Scene(
+                    id="s1", title="S1", description="", background_id="bg",
+                    narrative_strategy="rupture",
+                    dialogue=[
+                        DialogueLine(character_id=None, text="Just one line", emotion="neutral"),
+                    ],
+                ),
+            ],
+            characters=[],
+        )
+        warnings = check_strategy_consistency(script)
+        assert len(warnings) == 0
+
+    def test_no_warning_when_strategy_is_none(self):
+        script = VNScript(
+            title="Test", description="", theme="test", start_scene_id="s1",
+            scenes=[
+                Scene(
+                    id="s1", title="S1", description="", background_id="bg",
+                    narrative_strategy=None,
+                    dialogue=[
+                        DialogueLine(character_id=None, text="Line 1", emotion="neutral"),
+                        DialogueLine(character_id=None, text="Line 2", emotion="neutral"),
+                        DialogueLine(character_id=None, text="Line 3", emotion="neutral"),
+                    ],
+                ),
+            ],
+            characters=[],
+        )
+        warnings = check_strategy_consistency(script)
+        assert len(warnings) == 0
 
 
 class TestReachability:

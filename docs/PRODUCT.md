@@ -23,7 +23,7 @@
 
 ## 产品状态
 
-**当前阶段**: Phase 4 优化中（核心功能全部完成）
+**当前阶段**: Phase 7 工业化迭代完成（122 测试全部通过）
 
 | 功能模块 | 计划 | 状态 |
 |---------|------|------|
@@ -39,7 +39,29 @@
 | --resume 断点续传 | Phase 4 | ✅ 完成 |
 | 错误恢复（非致命错误累积） | Phase 4 | ✅ 完成 |
 | 流式进度显示 | Phase 4 | ✅ 完成 |
-| Web 界面 (FastAPI) | Phase 4 | ⏳ 待开始 |
+| Reviewer PASS 判断修复 | Phase 6 | ✅ 完成 |
+| Director 分支校验 | Phase 6 | ✅ 完成 |
+| 选择性重试（仅瞬态错误） | Phase 6 | ✅ 完成 |
+| Ren'Py 表情切换 | Phase 6 | ✅ 完成 |
+| Ren'Py 场景转场（fade/dissolve） | Phase 6 | ✅ 完成 |
+| Ren'Py 角色位置编排 | Phase 6 | ✅ 完成 |
+| Writer 中文支持 | Phase 6 | ✅ 完成 |
+| 对话行数约束 | Phase 6 | ✅ 完成 |
+| Token 用量追踪 + 成本预估 | Phase 6 | ✅ 完成 |
+| Reviewer 可选跳过 LLM 质检 | Phase 6 | ✅ 完成 |
+| Budget preset（全 Haiku） | Phase 6 | ✅ 完成 |
+| OGG 占位音频文件 | Phase 6 | ✅ 完成 |
+| Web API (FastAPI) | Phase 6 | ✅ 完成 |
+| 评估框架（策略分类 + 管线质量） | Phase 7 | ✅ 完成 |
+| COLX_523 语料集成（1,036 条标注） | Phase 7 | ✅ 完成 |
+| Few-shot 示例检索注入 Writer | Phase 7 | ✅ 完成 |
+| Reviewer 策略一致性检查 | Phase 7 | ✅ 完成 |
+| 可观测性 Trace（耗时 + token 追踪） | Phase 7 | ✅ 完成 |
+| SQLite 持久化 Job Store | Phase 7 | ✅ 完成 |
+| Web API 增强（/jobs, DELETE, 并发控制） | Phase 7 | ✅ 完成 |
+| GitHub Actions CI | Phase 7 | ✅ 完成 |
+| Docker 容器化 | Phase 7 | ✅ 完成 |
+| Schema 验证 + LLM repair | Phase 7 | ✅ 完成 |
 | Suno API 音乐生成 | Phase 3 | ⏳ 待 Suno API 公开 |
 
 ---
@@ -47,20 +69,63 @@
 ## 核心用户流程
 
 ```
-$ vn-agent generate --theme "一个时间旅行者在二战期间寻找失散家人的故事" --output ./my_vn
+$ vn-agent generate "一个时间旅行者在二战期间寻找失散家人的故事" --output ./my_vn
 
-[1/6] 📋 Director 规划故事结构...
-[2/6] ✍️  Writer 创作剧本...
-[3/6] 🔍 Reviewer 审核剧本...
-[4/6] 🎨 生成角色立绘和场景背景...
-[5/6] 🎵 Music Director 分配 BGM...
-[6/6] 📦 编译 Ren'Py 项目...
+[1/6] Director 规划故事结构...
+[2/6] Writer 创作剧本...
+[3/6] Reviewer 审核剧本...
+[4/6] 生成角色立绘和场景背景...
+[5/6] Music Director 分配 BGM...
+[6/6] 编译 Ren'Py 项目...
+
+Token Usage Summary (8 LLM calls)
+  Total: 12,500 input + 4,200 output = 16,700 tokens
+  Estimated cost: $0.1005
 
 ✅ 完成！输出目录: ./my_vn
    - 8 个场景
    - 3 个角色
    - 4 首 BGM
-   - 预计游玩时长: 20-30 分钟
+```
+
+### Web API 流程
+
+```bash
+# 启动服务器
+uv sync --extra web && uvicorn vn_agent.web.app:app --port 8000
+
+# 提交生成任务
+curl -X POST localhost:8000/generate \
+  -d '{"theme":"校园恋爱","text_only":true}' \
+  -H 'Content-Type: application/json'
+# → {"job_id":"a1b2c3d4"}
+
+# 查询状态
+curl localhost:8000/status/a1b2c3d4
+# → {"status":"completed","progress":"done - 3 scenes","errors":[]}
+
+# 列出所有任务
+curl localhost:8000/jobs
+# → [{"job_id":"a1b2c3d4","theme":"校园恋爱","status":"completed",...}]
+
+# 下载结果
+curl -O localhost:8000/download/a1b2c3d4
+
+# 删除任务（含输出目录）
+curl -X DELETE localhost:8000/jobs/a1b2c3d4
+```
+
+### 评估流程
+
+```bash
+# 策略分类评估（mock 模式，关键词 baseline）
+vn-agent eval strategy --corpus path/to/final_annotations.csv --sample 50 --mock
+
+# 策略分类评估（LLM 模式）
+vn-agent eval strategy --corpus path/to/final_annotations.csv --sample 20
+
+# 查看上次评估结果
+vn-agent eval summary
 ```
 
 ---
@@ -91,14 +156,11 @@ $ vn-agent generate --theme "一个时间旅行者在二战期间寻找失散家
 - [x] 流式进度显示（LangGraph stream_mode="updates"）
 - [x] 错误恢复（非致命错误累积，不中断流程）
 - [x] --resume 断点续传
-- [x] 集成测试（46 个测试全部通过）
 - [x] stop_reason 诊断日志（区分 max_tokens vs end_turn）
 - [x] Director 两步走（outline → details，避免截断）
 - [x] 鲁棒 JSON 解析（_salvage_truncated_json 双策略）
 - [x] 调试原始响应保存（debug/director_step*.txt）
 - [x] Director 完成后立即存检查点（vn_script.json）
-- [ ] FastAPI 后端 + Web 界面
-- [ ] Suno API 音乐生成（待 API 公开）
 
 ### Phase 5 - 成本优化与本地化 ✅ 完成
 - [x] 默认模型切换到 claude-sonnet-4-6（~5× 便宜于 Opus）
@@ -108,7 +170,51 @@ $ vn-agent generate --theme "一个时间旅行者在二战期间寻找失散家
 - [x] config/presets/ollama_local.yaml（本地，qwen2.5:7b）
 - [x] --mock CLI flag（零 API 调用，fixture 数据，~1 秒完整流程）
 - [x] build_project 自动生成占位 PNG（开发期 Ren'Py 不报错）
-- [x] Ollama 0.18.1 已安装（qwen2.5:7b 已下载）
+
+### Phase 6 - 迭代体验开发 ✅ 完成（5 个 Sprint）
+- [x] **Sprint 1: 管线可靠性**
+  - Reviewer PASS 判断改为首行前缀匹配 + 结构化反馈检测
+  - Director step2 分支目标校验（过滤不存在的 scene_id）
+  - LLM 重试仅对瞬态错误（网络超时、限流、500），认证错误直接抛出
+- [x] **Sprint 2: Ren'Py 视觉体验**
+  - 表情切换（`show char emotion`，跟踪当前表情避免重复指令）
+  - 场景转场（首场景 `with fade`，后续 `with dissolve`）
+  - 角色位置编排（1人 center，2人 left/right，3+ left/center/right）
+- [x] **Sprint 3: Writer 鲁棒性 + 中文支持**
+  - CJK 检测自动追加中文 prompt 指令
+  - 对话行数 min/max 约束（不足填充，超出截断）
+  - 中文 mock fixture（"校园恋爱" 主题完整 Director+Writer 数据）
+- [x] **Sprint 4: 成本监控**
+  - TokenTracker 模块级单例，按模型累加 input/output tokens
+  - CLI 生成后输出 token summary + 估算成本
+  - `reviewer_skip_llm` 配置项，跳过 LLM 质检省一次 API 调用
+  - `config/presets/budget.yaml`（全 Haiku，4 场景，~$0.01-0.02/次）
+  - 真实 API 烟雾测试（`@pytest.mark.slow`，需 ANTHROPIC_API_KEY）
+- [x] **Sprint 5: 打磨 + Web API**
+  - OGG 占位音频（内联 WAV 格式，无需 ffmpeg）
+  - FastAPI 后端（POST /generate, GET /status, GET /download）
+  - pyproject.toml `[web]` 可选依赖（fastapi + uvicorn）
+
+### Phase 7 - 工业化迭代 ✅ 完成（Sprint 7-11）
+- [x] **Sprint 7: 评估框架 + 策略分类基准**
+  - COLX_523 语料导入（1,036 条标注 VN 会话，7 策略映射到 6 个 VN-Agent 策略）
+  - 策略分类评估器（accuracy/F1/confusion matrix），支持 mock 关键词 baseline
+  - 端到端管线质量指标（结构/对话/策略/成本 四维度）
+  - CLI `eval strategy` / `eval summary` 子命令
+- [x] **Sprint 8: Few-shot 检索 + Reviewer 策略一致性**
+  - 按策略从语料检索示例注入 Writer prompt（`corpus_path` + `few_shot_k` 配置）
+  - Reviewer 策略一致性检查（关键词匹配，非阻塞 warning）
+- [x] **Sprint 9: 可观测性 + 结构化日志**
+  - TraceContext/Span 模块单例，agent 节点自动追踪耗时 + token
+  - 生成后输出 trace summary + 持久化 `trace.json`
+- [x] **Sprint 10: 服务基础设施增强**
+  - SQLite JobStore 替换内存 dict（进程重启不丢数据）
+  - 新增 GET /jobs、DELETE /jobs/{id} 端点
+  - asyncio.Semaphore 并发控制 + 环境变量配置
+- [x] **Sprint 11: CI/CD + 可靠性约束**
+  - GitHub Actions CI（lint + typecheck + test + 70% 覆盖率门禁）
+  - Dockerfile（python:3.11-slim + uvicorn）
+  - Director/Writer schema 验证 + LLM repair（一次自动修复机会）
 
 ---
 
@@ -137,6 +243,15 @@ $ vn-agent generate --theme "一个时间旅行者在二战期间寻找失散家
 - 场景可达性（所有 scene 都能从 start 到达）
 - 叙事连贯性（narrative_strategy 与内容匹配）
 
+### 成本控制策略
+**问题**: 如何控制 API 调用成本？
+**方案**: 多层成本控制
+1. **模型分级**: Director/Writer 用 Sonnet，其余用 Haiku
+2. **Budget preset**: 全 Haiku + 跳过 LLM 质检，~$0.01-0.02/次
+3. **Token 追踪**: 每次生成后显示实际 token 用量和估算成本
+4. **选择性重试**: 仅对瞬态错误重试，避免认证错误浪费 3 次调用
+5. **reviewer_skip_llm**: 结构检查通过即 PASS，省一次 LLM 调用
+
 ---
 
 ## 竞品分析
@@ -150,45 +265,39 @@ $ vn-agent generate --theme "一个时间旅行者在二战期间寻找失散家
 
 ---
 
-## 关键指标（待定义）
+## 关键指标
 
 - 生成成功率（端到端不报错）
-- 剧本质量评分（人工评估）
-- 生成时间（从输入到输出）
-- API 成本（每次生成的花费）
-
----
+- 剧本质量评分（人工评估 + `eval strategy` 自动评估）
+- 生成时间（从输入到输出）— **现可通过 trace.json 追踪每步耗时**
+- API 成本（每次生成的花费）— **现可通过 TokenTracker 精确追踪**
+- 策略分类准确率 — **`vn-agent eval strategy` 量化**
+- 管线质量指标 — **结构完整性 / 对话质量 / 策略覆盖 / 成本效率**
+- 测试通过率 — **当前 122 passed, 1 deselected**
 
 ---
 
 ## 接下来的开发任务
 
-### 近期（下次开发时）
+### 近期
 
-**P0 - 验证 Ollama 本地流程**
-- [ ] 释放内存后用 qwen2.5:1.5b 跑一次完整 pipeline（`--text-only`）
-- [ ] 观察 stop_reason 日志，确认 max_tokens 是否真的生效
-- [ ] 验证 JSON 解析在本地模型下的鲁棒性
-
-**P1 - 提升生成质量**
-- [ ] Reviewer 在 LLM 返回 PASS 时条件放宽（当前 `len < 20` 过严）
-- [ ] Writer 对中文对话的 prompt 调优（避免英文回复）
-- [ ] Director step2 branch 校验：过滤掉引用了不存在 scene_id 的分支
-
-**P2 - FastAPI 后端**
-- [ ] `POST /generate` → 接收 theme，返回 job_id
-- [ ] `GET /status/{job_id}` → SSE 流式推送进度
-- [ ] `GET /download/{job_id}` → 下载 zip 包
-
-### 中期
-
-**Web UI**
+**P0 - Web 前端**
 - [ ] 简单的 React/Vue 前端：输入框 + 进度条 + 预览 + 下载
 - [ ] vn_script.json 可视化编辑器（场景图 / 对话编辑）
 
-**质量提升**
-- [ ] 真实 BGM 文件（freesound.org CC0 素材）
-- [ ] 图像生成接通（Stability AI / FLUX 本地）
-- [ ] Suno API（等 API 公开）
+**P1 - 质量提升**
+- [ ] 真实 BGM 文件（freesound.org CC0 素材替换占位 WAV）
+- [ ] 图像生成端到端验证（Stability AI / FLUX 本地）
+- [ ] 多语言扩展（日文、韩文 prompt 适配）
+- [ ] Writer 输出更丰富的情感状态（目前以 neutral/happy/sad 为主）
+- [ ] 评估框架扩展：对真实语料跑 LLM 策略分类 baseline
+
+### 中期
+
+**质量与稳定性**
+- [ ] 验证 Ollama 本地模型完整流程（释放内存后 qwen2.5:1.5b）
+- [ ] Suno API 音乐生成（待 API 公开）
+- [ ] 评估框架：Writer 输出自动与 gold label 对比（strategy consistency 精细化）
+- [ ] Trace 分析工具（从 trace.json 提取瓶颈、优化建议）
 
 _最后更新: 2026-03-18_

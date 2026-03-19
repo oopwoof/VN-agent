@@ -54,15 +54,29 @@ async def run_reviewer(state: AgentState) -> dict:
             "revision_count": state.get("revision_count", 0) + 1,
         }
 
-    # Then LLM quality check
-    quality_result = await _quality_check(script)
+    # Then LLM quality check (can be skipped for budget-sensitive runs)
+    settings = get_settings()
+    if settings.reviewer_skip_llm:
+        logger.info("Reviewer: skipping LLM quality check (reviewer_skip_llm=True)")
+        result = structural_result
+    else:
+        quality_result = await _quality_check(script)
+        result = quality_result
+    # Strategy consistency check (warnings only, non-blocking)
+    strategy_warnings = check_strategy_consistency(script)
+    if strategy_warnings:
+        for w in strategy_warnings:
+            logger.warning(f"Strategy consistency: {w}")
 
-    result = quality_result
+    feedback = result.feedback
+    if strategy_warnings:
+        feedback += "\n\nStrategy consistency warnings:\n" + "\n".join(f"- {w}" for w in strategy_warnings)
+
     logger.info(f"Reviewer result: {'PASS' if result.passed else 'FAIL'} - {result.feedback[:80]}")
 
     return {
         "review_passed": result.passed,
-        "review_feedback": result.feedback,
+        "review_feedback": feedback,
         "revision_count": state.get("revision_count", 0) + 1,
     }
 
@@ -175,7 +189,50 @@ If issues found, list them clearly."""
     response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_reviewer_model, caller="reviewer")
     content = response.content if hasattr(response, 'content') else str(response)
 
-    if "PASS" in content.upper() and len(content.strip()) < 20:
+    stripped = content.strip()
+    first_line = stripped.split("\n", 1)[0].strip().upper()
+    has_issues = "\n-" in stripped or "\n*" in stripped or "\n1." in stripped
+    is_pass = first_line.startswith("PASS") and not has_issues
+
+    if is_pass:
         return ReviewResult(passed=True, feedback="Quality check passed", issues=[])
 
     return ReviewResult(passed=False, feedback=content, issues=[content])
+
+
+# ── Strategy consistency check (non-blocking warnings) ─────────────────────
+
+_STRATEGY_KEYWORDS: dict[str, list[str]] = {
+    "accumulate": ["build", "layer", "gradual", "slowly", "growing", "deepen"],
+    "erode": ["doubt", "wear", "crumble", "fade", "lose", "weaken"],
+    "rupture": ["sudden", "shock", "break", "snap", "explosion", "shatter"],
+    "reveal": ["secret", "hidden", "discover", "truth", "uncover", "realize"],
+    "contrast": ["contrast", "opposite", "juxtapose", "versus", "conflict", "clash"],
+    "weave": ["thread", "parallel", "interleave", "drift", "wander", "connect"],
+    "escalate": ["escalate", "intensify", "raise", "stakes", "pressure", "urgent"],
+    "resolve": ["resolve", "closure", "peace", "reconcile", "settle", "end"],
+}
+
+
+def check_strategy_consistency(script: VNScript) -> list[str]:
+    """Check if scene dialogue loosely matches the assigned narrative strategy.
+
+    Returns a list of warning strings (non-blocking).
+    """
+    warnings: list[str] = []
+    for scene in script.scenes:
+        strategy = scene.narrative_strategy
+        if not strategy or strategy not in _STRATEGY_KEYWORDS:
+            continue
+
+        keywords = _STRATEGY_KEYWORDS[strategy]
+        dialogue_text = " ".join(line.text.lower() for line in scene.dialogue)
+
+        hits = sum(1 for kw in keywords if kw in dialogue_text)
+        if hits == 0 and len(scene.dialogue) >= 3:
+            warnings.append(
+                f"Scene '{scene.id}': strategy '{strategy}' assigned but no matching "
+                f"keywords found in dialogue ({len(scene.dialogue)} lines)"
+            )
+
+    return warnings
