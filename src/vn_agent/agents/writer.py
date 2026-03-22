@@ -1,21 +1,23 @@
 """Writer Agent: Creates dialogue for each scene."""
 from __future__ import annotations
 
+import json
 import logging
 import re
-from pydantic import BaseModel, Field
+from pathlib import Path
 
+from vn_agent.agents.director import _save_debug_raw
 from vn_agent.agents.state import AgentState
-from vn_agent.schema.script import VNScript, Scene, DialogueLine
+from vn_agent.config import get_settings
 from vn_agent.schema.character import CharacterProfile
+from vn_agent.schema.script import DialogueLine, Scene, VNScript
 from vn_agent.services.llm import ainvoke_llm
 from vn_agent.strategies.narrative import get_strategy
-from vn_agent.config import get_settings
-from vn_agent.agents.director import _extract_json, _save_debug_raw
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a visual novel writer. Your job is to write compelling dialogue for scenes.
+SYSTEM_PROMPT = """You are a visual novel writer. Your job is to write compelling
+dialogue for scenes.
 
 You will receive a scene description and list of characters, and you must write:
 1. Engaging, character-consistent dialogue
@@ -48,10 +50,22 @@ async def run_writer(state: AgentState) -> dict:
     # Build character descriptions for context
     char_desc = _build_char_descriptions(characters)
 
+    # Load corpus once for few-shot injection (avoid per-scene reload)
+    corpus = None
+    if settings.corpus_path:
+        try:
+            from vn_agent.eval.corpus import load_corpus
+
+            corpus = load_corpus(Path(settings.corpus_path))
+        except Exception as e:
+            logger.debug(f"Corpus loading failed, few-shot disabled: {e}")
+
     # Write dialogue for each scene
     updated_scenes = []
     for scene in script.scenes:
-        updated_scene = await _write_scene(scene, script, char_desc, revision_feedback, output_dir)
+        updated_scene = await _write_scene(
+            scene, script, char_desc, revision_feedback, output_dir, corpus=corpus
+        )
         updated_scenes.append(updated_scene)
 
     updated_script = script.model_copy(update={"scenes": updated_scenes})
@@ -73,11 +87,15 @@ async def _write_scene(
     char_descriptions: str,
     revision_feedback: str,
     output_dir: str = ".",
+    corpus=None,
 ) -> Scene:
     """Write dialogue for a single scene."""
     settings = get_settings()
     strategy = get_strategy(scene.narrative_strategy or "")
-    strategy_guidance = f"Narrative strategy: {strategy.description}\n{strategy.guidance}" if strategy else ""
+    strategy_guidance = (
+        f"Narrative strategy: {strategy.description}\n{strategy.guidance}"
+        if strategy else ""
+    )
 
     feedback_note = ""
     if revision_feedback:
@@ -107,15 +125,17 @@ Return JSON array:
 After dialogue, if branches exist, the player will choose:
 {[b.text for b in scene.branches]}"""
 
-    # Few-shot example injection (when corpus is configured)
-    if settings.corpus_path:
+    # Few-shot example injection (when corpus is passed in)
+    if corpus:
         try:
-            from pathlib import Path
-            from vn_agent.eval.corpus import load_corpus
-            from vn_agent.eval.retriever import retrieve_examples, format_examples
+            from vn_agent.eval.retriever import (
+                format_examples,
+                retrieve_examples,
+            )
 
-            corpus = load_corpus(Path(settings.corpus_path))
-            examples = retrieve_examples(corpus, scene.narrative_strategy or "", k=settings.few_shot_k)
+            examples = retrieve_examples(
+                corpus, scene.narrative_strategy or "", k=settings.few_shot_k
+            )
             few_shot_block = format_examples(examples)
             if few_shot_block:
                 user_prompt += (
@@ -128,9 +148,16 @@ After dialogue, if branches exist, the player will choose:
     # Detect Chinese theme and add language hint
     is_chinese = bool(re.search(r'[\u4e00-\u9fff]', script.description or ""))
     if is_chinese:
-        user_prompt += "\n\nIMPORTANT: Write ALL dialogue text in Chinese (简体中文). Keep character_id as English identifiers."
+        user_prompt += (
+            "\n\nIMPORTANT: Write ALL dialogue text in Chinese (简体中文)."
+            " Keep character_id as English identifiers."
+        )
 
-    response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_writer_model, caller=f"writer/{scene.id}")
+    response = await ainvoke_llm(
+        SYSTEM_PROMPT, user_prompt,
+        model=settings.llm_writer_model,
+        caller=f"writer/{scene.id}",
+    )
     content = response.content if hasattr(response, 'content') else str(response)
 
     _save_debug_raw(output_dir, f"writer_{scene.id}.txt", content)
@@ -150,7 +177,10 @@ After dialogue, if branches exist, the player will choose:
     # Enforce dialogue line count bounds
     if len(dialogue) < settings.min_dialogue_lines:
         dialogue.append(DialogueLine(character_id=None, text=f"[{scene.title}]", emotion="neutral"))
-        logger.warning(f"Scene {scene.id}: padded to {len(dialogue)} lines (min={settings.min_dialogue_lines})")
+        logger.warning(
+            f"Scene {scene.id}: padded to {len(dialogue)} lines"
+            f" (min={settings.min_dialogue_lines})"
+        )
     if len(dialogue) > settings.max_dialogue_lines:
         dialogue = dialogue[:settings.max_dialogue_lines]
         logger.warning(f"Scene {scene.id}: truncated to {settings.max_dialogue_lines} lines")
@@ -160,8 +190,6 @@ After dialogue, if branches exist, the player will choose:
 
 def _parse_dialogue(content: str, scene: Scene) -> list[DialogueLine]:
     """Parse JSON dialogue from LLM response."""
-    import json, re
-
     # 1. Try markdown code block for array
     arr_block_match = re.search(r'```(?:json)?\s*(\[.*?\])\s*```', content, re.DOTALL)
     if arr_block_match:

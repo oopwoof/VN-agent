@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import tempfile
 import uuid
@@ -19,6 +20,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 from vn_agent.web.store import JobStore
 
@@ -113,10 +115,19 @@ async def download(job_id: str):
     if not output_dir or not Path(output_dir).exists():
         raise HTTPException(status_code=404, detail="Output directory not found")
 
-    zip_path = Path(tempfile.mktemp(suffix=".zip"))
+    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    tmp.close()
+    zip_path = Path(tmp.name)
     shutil.make_archive(str(zip_path.with_suffix("")), "zip", output_dir)
+
+    def _cleanup():
+        zip_path.unlink(missing_ok=True)
+
     return FileResponse(
-        path=str(zip_path), filename=f"vn_{job_id}.zip", media_type="application/zip"
+        path=str(zip_path),
+        filename=f"vn_{job_id}.zip",
+        media_type="application/zip",
+        background=BackgroundTask(_cleanup),
     )
 
 
@@ -137,15 +148,24 @@ async def list_jobs(limit: int = 20):
 
 @app.delete("/jobs/{job_id}")
 async def delete_job(job_id: str):
+    # Validate job_id format to prevent path traversal
+    if not re.fullmatch(r"[a-f0-9]{8}", job_id):
+        raise HTTPException(status_code=400, detail="Invalid job_id format")
+
     store = _get_store()
     job = store.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Clean up output directory
+    # Clean up output directory with path containment check
     output_dir = job.get("output_dir", "")
     if output_dir and Path(output_dir).exists():
-        shutil.rmtree(output_dir, ignore_errors=True)
+        resolved = Path(output_dir).resolve()
+        if _OUTPUT_DIR:
+            base = Path(_OUTPUT_DIR).resolve()
+            if not str(resolved).startswith(str(base)):
+                raise HTTPException(status_code=403, detail="Output directory outside allowed base")
+        shutil.rmtree(resolved, ignore_errors=True)
 
     store.delete(job_id)
     return {"deleted": job_id}

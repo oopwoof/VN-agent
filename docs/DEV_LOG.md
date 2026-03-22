@@ -42,6 +42,28 @@
 
 ## 开发记录
 
+### 2026-03-22 | 实现 - 2026-03-22 15:35
+
+**变更文件** (3 个):
+**源码变更** (2 文件):
+  - `src/vn_agent/agents/writer.py`
+  - `src/vn_agent/web/app.py`
+
+**测试变更** (1 文件):
+  - `tests/test_web/test_app.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/writer.py | 70 ++++++++++++++++++++++++++++++-------------
+ src/vn_agent/web/app.py       | 28 ++++++++++++++---
+ tests/test_web/test_app.py    | 10 +++----
+ 3 files changed, 78 insertions(+), 30 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-18 | 实现 - 2026-03-18 22:19
 
 **变更文件** (35 个):
@@ -114,7 +136,12 @@
  35 files changed, 2911 insertions(+), 68 deletions(-)
 ```
 
-**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+**技术决策与反思**:
+- `DELETE /jobs/{job_id}` 端点加入 `re.fullmatch(r"[a-f0-9]{8}", job_id)` 路径参数校验，防止路径遍历攻击；job_id 由 `uuid.uuid4().hex[:8]` 生成，始终为合法 hex 格式，校验不会影响正常调用。
+- 测试中原本使用 `"del1"` / `"nonexistent"` 等非 hex 字符串作为 job_id，与端点校验逻辑不一致，统一改为 `"aabbccdd"` / `"deadbeef"` 等合法格式，保持测试与生产行为一致。
+- `writer.py` 导入块清理：`pydantic.BaseModel`、`pydantic.Field`、`_extract_json` 三个未使用导入遗留自重构前，本次清除；同时将局部 `import json, re` 提升至文件顶层，消除 E401/I001 lint 警告。
+- `app.py` 中 `import re` 被误放在 stdlib 块与第三方块之间，移入 stdlib 块后 ruff I001 消除。
+- **代码质量**: ruff 扫描 14 错误 → 0 错误；pytest 122 passed, 1 skipped，与修复前完全一致（无回归）。
 
 ---
 
@@ -995,4 +1022,4 @@ _（每次 commit 后更新）_
 
 ---
 
-_最后更新: 2026-03-18_
+_最后更新: 2026-03-22_

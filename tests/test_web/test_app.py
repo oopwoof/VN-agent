@@ -48,7 +48,7 @@ class TestEndpoints:
         assert resp.status_code == 404
 
     def test_delete_not_found(self, client):
-        resp = client.delete("/jobs/nonexistent")
+        resp = client.delete("/jobs/deadbeef")
         assert resp.status_code == 404
 
     def test_download_not_found(self, client):
@@ -101,10 +101,10 @@ class TestEndpoints:
 
     def test_delete_job(self, test_app):
         _, store = test_app
-        store.create("del1", "theme", {}, "/tmp/del")
+        store.create("aabbccdd", "theme", {}, "/tmp/del")
 
         client = TestClient(test_app[0])
-        resp = client.delete("/jobs/del1")
+        resp = client.delete("/jobs/aabbccdd")
         assert resp.status_code == 200
-        assert resp.json()["deleted"] == "del1"
-        assert store.get("del1") is None
+        assert resp.json()["deleted"] == "aabbccdd"
+        assert store.get("aabbccdd") is None

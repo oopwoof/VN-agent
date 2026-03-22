@@ -300,4 +300,4 @@ vn-agent eval summary
 - [ ] 评估框架：Writer 输出自动与 gold label 对比（strategy consistency 精细化）
 - [ ] Trace 分析工具（从 trace.json 提取瓶颈、优化建议）
 
-_最后更新: 2026-03-18_
+_最后更新: 2026-03-22_
