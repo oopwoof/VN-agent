@@ -20,3 +20,6 @@ jobs:
         run: uv run mypy src/vn_agent/ --ignore-missing-imports
       - name: Test
         run: uv run pytest -x --tb=short -m "not slow" --cov=src/vn_agent --cov-fail-under=70
+
+env:
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
