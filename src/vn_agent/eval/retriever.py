@@ -1,9 +1,17 @@
-"""Few-shot example retriever: selects corpus examples by strategy for Writer prompt injection."""
+"""Few-shot example retriever: selects corpus examples by strategy for Writer prompt injection.
+
+Supports two retrieval modes:
+1. Label-based: filter by strategy label (default, no extra deps)
+2. Semantic: embedding similarity search via EmbeddingIndex (requires [rag] extras)
+"""
 from __future__ import annotations
 
+import logging
 import random
 
 from vn_agent.eval.corpus import AnnotatedSession
+
+logger = logging.getLogger(__name__)
 
 
 def retrieve_examples(
@@ -24,6 +32,23 @@ def retrieve_examples(
     remaining = [s for s in corpus if s.strategy and s not in matching]
     padding = random.sample(remaining, min(k - len(matching), len(remaining)))
     return matching + padding
+
+
+def retrieve_examples_semantic(
+    index: object,  # EmbeddingIndex (avoid import for optional dep)
+    query: str,
+    strategy: str = "",
+    k: int = 2,
+) -> list[AnnotatedSession]:
+    """Retrieve examples using embedding similarity search.
+
+    Args:
+        index: An EmbeddingIndex instance
+        query: scene description or other text to match against
+        strategy: optional strategy label to prefer
+        k: number of examples to return
+    """
+    return index.search(query=query, k=k, strategy=strategy or None)
 
 
 def format_examples(examples: list[AnnotatedSession]) -> str:

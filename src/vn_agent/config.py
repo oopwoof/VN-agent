@@ -1,10 +1,10 @@
 """Configuration loading with pydantic-settings."""
-from pathlib import Path
 from functools import lru_cache
+from pathlib import Path
+
+import yaml
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import yaml
-
 
 ROOT = Path(__file__).parent.parent.parent
 
@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     # Eval / few-shot
     corpus_path: str = ""  # path to final_annotations.csv (empty = disabled)
     few_shot_k: int = 2  # number of examples to inject into Writer prompt
+
+    # Embedding RAG (requires [rag] extras: sentence-transformers + faiss-cpu)
+    use_semantic_retrieval: bool = True  # use embedding similarity; False = label filter
+    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_index_path: str = ""  # pre-built index dir; empty = build on-the-fly
 
 
 def _load_yaml_settings() -> dict:

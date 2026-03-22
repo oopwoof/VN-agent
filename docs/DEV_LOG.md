@@ -42,6 +42,36 @@
 
 ## 开发记录
 
+### 2026-03-22 | 实现 - 2026-03-22 16:31
+
+**变更文件** (6 个):
+**源码变更** (4 文件):
+  - `src/vn_agent/agents/writer.py`
+  - `src/vn_agent/config.py`
+  - `src/vn_agent/eval/embedder.py`
+  - `src/vn_agent/eval/retriever.py`
+
+**测试变更** (1 文件):
+  - `tests/test_eval/test_embedder.py`
+
+**配置变更** (1 文件):
+  - `pyproject.toml`
+
+**变更统计**:
+```
+pyproject.toml                   |   1 +
+ src/vn_agent/agents/writer.py    |  56 ++++++++++++--
+ src/vn_agent/config.py           |  11 ++-
+ src/vn_agent/eval/embedder.py    | 163 +++++++++++++++++++++++++++++++++++++++
+ src/vn_agent/eval/retriever.py   |  27 ++++++-
+ tests/test_eval/test_embedder.py | 122 +++++++++++++++++++++++++++++
+ 6 files changed, 368 insertions(+), 12 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-22 | 实现 - 2026-03-22 16:21
 
 **变更文件** (7 个):

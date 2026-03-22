@@ -36,13 +36,18 @@ async def run_writer(state: AgentState) -> dict:
     # Build character descriptions for context
     char_desc = _build_char_descriptions(characters)
 
-    # Load corpus once for few-shot injection (avoid per-scene reload)
+    # Load corpus + optional embedding index for few-shot injection
     corpus = None
+    embedding_index = None
     if settings.corpus_path:
         try:
             from vn_agent.eval.corpus import load_corpus
 
             corpus = load_corpus(Path(settings.corpus_path))
+
+            # Try semantic retrieval (requires [rag] extras)
+            if settings.use_semantic_retrieval:
+                embedding_index = _build_or_load_embedding_index(corpus, settings)
         except Exception as e:
             logger.debug(f"Corpus loading failed, few-shot disabled: {e}")
 
@@ -50,7 +55,8 @@ async def run_writer(state: AgentState) -> dict:
     updated_scenes = []
     for scene in script.scenes:
         updated_scene = await _write_scene(
-            scene, script, char_desc, revision_feedback, output_dir, corpus=corpus
+            scene, script, char_desc, revision_feedback, output_dir,
+            corpus=corpus, embedding_index=embedding_index,
         )
         updated_scenes.append(updated_scene)
 
@@ -67,6 +73,31 @@ def _build_char_descriptions(characters: dict[str, CharacterProfile]) -> str:
     return "\n".join(lines)
 
 
+def _build_or_load_embedding_index(corpus, settings):
+    """Build or load an embedding index for semantic retrieval. Returns None on failure."""
+    try:
+        from vn_agent.eval.embedder import EmbeddingIndex
+
+        if settings.embedding_index_path:
+            index_path = Path(settings.embedding_index_path)
+            if index_path.exists():
+                return EmbeddingIndex.load(index_path)
+
+        index = EmbeddingIndex(model_name=settings.embedding_model)
+        index.build(corpus)
+
+        if settings.embedding_index_path:
+            index.save(Path(settings.embedding_index_path))
+
+        return index
+    except ImportError:
+        logger.debug("sentence-transformers not installed, semantic retrieval disabled")
+        return None
+    except Exception as e:
+        logger.debug(f"Embedding index build failed: {e}")
+        return None
+
+
 async def _write_scene(
     scene: Scene,
     script: VNScript,
@@ -74,6 +105,7 @@ async def _write_scene(
     revision_feedback: str,
     output_dir: str = ".",
     corpus=None,
+    embedding_index=None,
 ) -> Scene:
     """Write dialogue for a single scene."""
     settings = get_settings()
@@ -111,21 +143,29 @@ Return JSON array:
 After dialogue, if branches exist, the player will choose:
 {[b.text for b in scene.branches]}"""
 
-    # Few-shot example injection (when corpus is passed in)
-    if corpus:
+    # Few-shot example injection: prefer semantic RAG, fallback to label filter
+    if corpus or embedding_index:
         try:
             from vn_agent.eval.retriever import (
                 format_examples,
                 retrieve_examples,
+                retrieve_examples_semantic,
             )
 
-            examples = retrieve_examples(
-                corpus, scene.narrative_strategy or "", k=settings.few_shot_k
-            )
+            strategy_label = scene.narrative_strategy or ""
+            if embedding_index is not None:
+                query = f"{scene.description} | strategy: {strategy_label}"
+                examples = retrieve_examples_semantic(
+                    embedding_index, query, strategy_label, k=settings.few_shot_k,
+                )
+            else:
+                examples = retrieve_examples(
+                    corpus, strategy_label, k=settings.few_shot_k,
+                )
             few_shot_block = format_examples(examples)
             if few_shot_block:
                 user_prompt += (
-                    f"\n\nReference examples of '{scene.narrative_strategy}' strategy:\n"
+                    f"\n\nReference examples of '{strategy_label}' strategy:\n"
                     f"{few_shot_block}"
                 )
         except Exception as e:
