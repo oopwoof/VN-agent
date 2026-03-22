@@ -6,10 +6,10 @@ import logging
 from pathlib import Path
 
 from vn_agent.agents.state import AgentState
-from vn_agent.schema.script import VNScript, Scene
-from vn_agent.services.llm import ainvoke_llm
-from vn_agent.services.image_gen import generate_image
 from vn_agent.config import get_settings
+from vn_agent.schema.script import Scene
+from vn_agent.services.image_gen import generate_image
+from vn_agent.services.llm import ainvoke_llm
 
 logger = logging.getLogger(__name__)
 
@@ -91,19 +91,26 @@ Return a JSON object:
 {{"prompt": "detailed image generation prompt here"}}"""
 
     settings = get_settings()
-    response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_scene_artist_model, caller=f"scene_artist/{scene.background_id}")
-    content = response.content if hasattr(response, 'content') else str(response)
-
-    # Extract prompt
-    import json, re
     bg_prompt = scene.description  # fallback
-    json_match = re.search(r'\{.*?\}', content, re.DOTALL)
-    if json_match:
+
+    # Try tool calling first (structured output via bind_tools)
+    if settings.use_tool_calling:
         try:
-            data = json.loads(json_match.group(0))
-            bg_prompt = data.get("prompt", bg_prompt)
-        except json.JSONDecodeError:
-            pass
+            from vn_agent.services.tools import BackgroundPrompt, ainvoke_with_tools
+
+            result = await ainvoke_with_tools(
+                SYSTEM_PROMPT, user_prompt, [BackgroundPrompt],
+                model=settings.llm_scene_artist_model,
+                caller=f"scene_artist/{scene.background_id}",
+            )
+            bg_prompt = result.prompt
+        except Exception as e:
+            logger.debug(f"Tool calling fallback for {scene.background_id}: {e}")
+            bg_prompt = await _text_fallback_prompt(
+                scene, user_prompt, settings,
+            )
+    else:
+        bg_prompt = await _text_fallback_prompt(scene, user_prompt, settings)
 
     updated_scene = scene.model_copy(update={"background_prompt": bg_prompt})
     errors: list[str] = []
@@ -118,3 +125,26 @@ Return a JSON object:
         errors.append(f"SceneArtist: image {scene.background_id}: {e}")
 
     return updated_scene, errors
+
+
+async def _text_fallback_prompt(scene: Scene, user_prompt: str, settings) -> str:
+    """Fallback: extract background prompt from free-text LLM response."""
+    import json
+    import re
+
+    caller = f"scene_artist/{scene.background_id}"
+    response = await ainvoke_llm(
+        SYSTEM_PROMPT, user_prompt,
+        model=settings.llm_scene_artist_model, caller=caller,
+    )
+    content = response.content if hasattr(response, 'content') else str(response)
+
+    bg_prompt = scene.description
+    json_match = re.search(r'\{.*?\}', content, re.DOTALL)
+    if json_match:
+        try:
+            data = json.loads(json_match.group(0))
+            bg_prompt = data.get("prompt", bg_prompt)
+        except json.JSONDecodeError:
+            pass
+    return bg_prompt

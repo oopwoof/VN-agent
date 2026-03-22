@@ -6,10 +6,10 @@ import logging
 from pathlib import Path
 
 from vn_agent.agents.state import AgentState
-from vn_agent.schema.character import CharacterProfile, VisualProfile, EmotionSprite
-from vn_agent.services.llm import ainvoke_llm
-from vn_agent.services.image_gen import generate_image
 from vn_agent.config import get_settings
+from vn_agent.schema.character import CharacterProfile, EmotionSprite, VisualProfile
+from vn_agent.services.image_gen import generate_image
+from vn_agent.services.llm import ainvoke_llm
 
 logger = logging.getLogger(__name__)
 
@@ -77,10 +77,31 @@ Return as JSON:
 }}"""
 
     settings = get_settings()
-    response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_character_designer_model, caller=f"character_designer/{char.id}")
-    content = response.content if hasattr(response, 'content') else str(response)
+    visual_data: dict = {}
 
-    visual_data = _parse_visual_profile(content)
+    # Try tool calling first (structured output via bind_tools)
+    if settings.use_tool_calling:
+        try:
+            from vn_agent.services.tools import VisualProfileResult, ainvoke_with_tools
+
+            result = await ainvoke_with_tools(
+                SYSTEM_PROMPT, user_prompt, [VisualProfileResult],
+                model=settings.llm_character_designer_model,
+                caller=f"character_designer/{char.id}",
+            )
+            visual_data = result.model_dump()
+        except Exception as e:
+            logger.debug(f"Tool calling fallback for {char.id}: {e}")
+
+    # Fallback to free-text JSON extraction
+    if not visual_data:
+        response = await ainvoke_llm(
+            SYSTEM_PROMPT, user_prompt,
+            model=settings.llm_character_designer_model,
+            caller=f"character_designer/{char.id}",
+        )
+        content = response.content if hasattr(response, 'content') else str(response)
+        visual_data = _parse_visual_profile(content)
 
     visual = VisualProfile(
         art_style=visual_data.get("art_style", "anime style, high quality"),
@@ -96,7 +117,8 @@ Return as JSON:
 
 
 def _parse_visual_profile(content: str) -> dict:
-    import json, re
+    import json
+    import re
 
     # 1. Try markdown code block
     json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)

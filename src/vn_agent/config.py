@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     embedding_model: str = "all-MiniLM-L6-v2"
     embedding_index_path: str = ""  # pre-built index dir; empty = build on-the-fly
 
+    # Tool calling (LLM function calling instead of free-text JSON)
+    use_tool_calling: bool = True  # bind_tools for scene_artist/character_designer
+
 
 def _load_yaml_settings() -> dict:
     config_path = ROOT / "config" / "settings.yaml"
