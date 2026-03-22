@@ -42,6 +42,30 @@
 
 ## 开发记录
 
+### 2026-03-22 | 实现 - 2026-03-22 16:42
+
+**变更文件** (4 个):
+**源码变更** (3 文件):
+  - `src/vn_agent/cli.py`
+  - `src/vn_agent/services/streaming.py`
+  - `src/vn_agent/web/app.py`
+
+**测试变更** (1 文件):
+  - `tests/test_services/test_streaming.py`
+
+**变更统计**:
+```
+src/vn_agent/cli.py                   |  63 ++++++++++++-------
+ src/vn_agent/services/streaming.py    | 110 ++++++++++++++++++++++++++++++++++
+ src/vn_agent/web/app.py               |  25 ++++++++
+ tests/test_services/test_streaming.py |  98 ++++++++++++++++++++++++++++++
+ 4 files changed, 273 insertions(+), 23 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-22 | 实现 - 2026-03-22 16:36
 
 **变更文件** (5 个):

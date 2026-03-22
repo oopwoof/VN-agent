@@ -21,6 +21,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
+from starlette.responses import StreamingResponse
 
 from vn_agent.web.store import JobStore
 
@@ -169,6 +170,30 @@ async def delete_job(job_id: str):
 
     store.delete(job_id)
     return {"deleted": job_id}
+
+
+@app.post("/generate/stream")
+async def generate_stream(req: GenerateRequest):
+    """Stream a quick LLM response (e.g. story outline) via SSE.
+
+    Useful for real-time feedback during the planning phase.
+    Returns Server-Sent Events with token chunks.
+    """
+    from vn_agent.prompts.templates import DIRECTOR_OUTLINE_SYSTEM
+    from vn_agent.services.streaming import astream_sse
+    from vn_agent.strategies.narrative import format_strategies_for_prompt
+
+    strategies = format_strategies_for_prompt()
+    system = DIRECTOR_OUTLINE_SYSTEM.format(strategies=strategies)
+    user_prompt = (
+        f"Create a brief visual novel story outline for: {req.theme}\n"
+        f"Max scenes: {req.max_scenes}, Characters: {req.num_characters}"
+    )
+
+    return StreamingResponse(
+        astream_sse(system, user_prompt, caller="web/stream"),
+        media_type="text/event-stream",
+    )
 
 
 # ── Background runner ────────────────────────────────────────────────────────

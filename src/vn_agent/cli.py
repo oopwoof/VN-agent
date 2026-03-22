@@ -3,16 +3,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from pathlib import Path
 
-import sys
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.logging import RichHandler
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from vn_agent.agents.state import initial_state
 from vn_agent.agents.graph import create_pipeline
+from vn_agent.agents.state import initial_state
 from vn_agent.compiler.project_builder import build_project
 
 _mock_patches: list = []
@@ -21,6 +21,7 @@ _mock_patches: list = []
 def _patch_mock_llm() -> None:
     """Replace ainvoke_llm in all agent modules with the canned mock."""
     from unittest.mock import patch
+
     from vn_agent.services.mock_llm import mock_ainvoke
 
     targets = [
@@ -87,21 +88,32 @@ def generate(
         False, "--mock",
         help="Use canned fixture responses (no API calls). For pipeline testing / offline dev.",
     ),
+    stream: bool = typer.Option(
+        False, "--stream",
+        help="Stream LLM tokens to console in real-time.",
+    ),
 ) -> None:
     """Generate a visual novel from a theme."""
     setup_logging(verbose)
 
-    console.print(f"\n[bold blue]VN-Agent[/bold blue] - AI Visual Novel Generator")
+    console.print("\n[bold blue]VN-Agent[/bold blue] - AI Visual Novel Generator")
     console.print(f"Theme: [italic]{theme}[/italic]\n")
 
     if mock:
         console.print("[dim]Mock mode: using fixture data, no API calls.[/dim]\n")
+    if stream:
+        console.print("[dim]Streaming mode: LLM tokens will display in real-time.[/dim]\n")
 
     script_checkpoint = output / "vn_script.json"
     if resume and script_checkpoint.exists():
         asyncio.run(_resume_async(output, text_only))
     else:
-        asyncio.run(_generate_async(theme, output, text_only, max_scenes, num_characters, verbose, mock=mock))
+        asyncio.run(
+            _generate_async(
+                theme, output, text_only, max_scenes, num_characters,
+                verbose, mock=mock, stream=stream,
+            )
+        )
 
 
 async def _generate_async(
@@ -112,6 +124,7 @@ async def _generate_async(
     num_characters: int = 3,
     verbose: bool = False,
     mock: bool = False,
+    stream: bool = False,
 ) -> None:
     if mock:
         _patch_mock_llm()
@@ -193,7 +206,7 @@ async def _generate_async(
         pass
 
     # Summary
-    console.print(f"\n[green]✓ Generation complete![/green]")
+    console.print("\n[green]✓ Generation complete![/green]")
     console.print(f"  Title: [bold]{script.title}[/bold]")
     console.print(f"  Scenes: {len(script.scenes)}")
     console.print(f"  Characters: {len(characters)}")
@@ -207,8 +220,9 @@ async def _resume_async(
 ) -> None:
     """Resume generation from existing vn_script.json checkpoint."""
     import json
-    from vn_agent.schema.script import VNScript
+
     from vn_agent.schema.character import CharacterProfile
+    from vn_agent.schema.script import VNScript
 
     script_path = output / "vn_script.json"
     chars_path = output / "characters.json"
@@ -232,7 +246,7 @@ async def _resume_async(
     if text_only:
         output.mkdir(parents=True, exist_ok=True)
         build_project(script, characters, output)
-        console.print(f"\n[green]✓ Resume complete (text-only)![/green]")
+        console.print("\n[green]✓ Resume complete (text-only)![/green]")
         console.print(f"  Title: [bold]{script.title}[/bold]")
         console.print(f"  Scenes: {len(script.scenes)}")
         console.print(f"  Characters: {len(characters)}")
@@ -240,8 +254,8 @@ async def _resume_async(
         return
 
     from vn_agent.agents.character_designer import run_character_designer
-    from vn_agent.agents.scene_artist import run_scene_artist
     from vn_agent.agents.music_director import run_music_director
+    from vn_agent.agents.scene_artist import run_scene_artist
 
     state: dict = {
         "vn_script": script,
@@ -283,7 +297,7 @@ async def _resume_async(
     output.mkdir(parents=True, exist_ok=True)
     build_project(final_script, final_characters, output)
 
-    console.print(f"\n[green]✓ Resume complete![/green]")
+    console.print("\n[green]✓ Resume complete![/green]")
     console.print(f"  Title: [bold]{final_script.title}[/bold]")
     console.print(f"  Scenes: {len(final_script.scenes)}")
     console.print(f"  Characters: {len(final_characters)}")
@@ -296,16 +310,16 @@ def validate(
     script_path: Path = typer.Argument(..., help="Path to vn_script.json"),
 ) -> None:
     """Validate an existing VN script JSON file."""
-    from vn_agent.schema.script import VNScript
     from vn_agent.agents.reviewer import _structural_check
+    from vn_agent.schema.script import VNScript
 
     try:
         script = VNScript.model_validate_json(script_path.read_text(encoding="utf-8"))
         result = _structural_check(script)
         if result.passed:
-            console.print(f"[green]✓ Script is valid[/green]")
+            console.print("[green]✓ Script is valid[/green]")
         else:
-            console.print(f"[red]✗ Validation failed:[/red]")
+            console.print("[red]✗ Validation failed:[/red]")
             console.print(result.feedback)
             raise typer.Exit(1)
     except Exception as e:
@@ -322,7 +336,9 @@ def dry_run(
 ) -> None:
     """Preview what would be generated without calling any APIs."""
     import os
+
     from rich.table import Table
+
     from vn_agent.config import get_settings
 
     settings = get_settings()
@@ -371,16 +387,16 @@ def dry_run(
 
     console.print("\n[bold]What would happen:[/bold]")
     console.print(f"  [cyan]1.[/cyan] Director plans a story with up to {max_scenes} scenes and {num_characters} characters")
-    console.print(f"  [cyan]2.[/cyan] Writer generates dialogue for each scene")
-    console.print(f"  [cyan]3.[/cyan] Reviewer validates the script")
+    console.print("  [cyan]2.[/cyan] Writer generates dialogue for each scene")
+    console.print("  [cyan]3.[/cyan] Reviewer validates the script")
     if not text_only:
         console.print(f"  [cyan]4.[/cyan] Character Designer creates visual profiles for {num_characters} characters (parallel)")
-        console.print(f"  [cyan]5.[/cyan] Scene Artist generates backgrounds for unique scenes (parallel)")
-        console.print(f"  [cyan]6.[/cyan] Music Director assigns BGM tracks")
+        console.print("  [cyan]5.[/cyan] Scene Artist generates backgrounds for unique scenes (parallel)")
+        console.print("  [cyan]6.[/cyan] Music Director assigns BGM tracks")
     else:
-        console.print(f"  [cyan]4.[/cyan] Music Director assigns BGM tracks")
-        console.print(f"  [dim](Image generation skipped — text-only mode)[/dim]")
-    console.print(f"  [cyan]→[/cyan] Ren'Py project compiled to output directory\n")
+        console.print("  [cyan]4.[/cyan] Music Director assigns BGM tracks")
+        console.print("  [dim](Image generation skipped — text-only mode)[/dim]")
+    console.print("  [cyan]→[/cyan] Ren'Py project compiled to output directory\n")
 
     if not api_key_present:
         console.print(f"[yellow]Warning: {api_key_label} is not set. Generation will fail without it.[/yellow]")
@@ -393,9 +409,10 @@ def compile(
     output: Path = typer.Option(Path("./vn_output"), "--output", "-o"),
 ) -> None:
     """Compile an existing VN script JSON to a Ren'Py project."""
-    from vn_agent.schema.script import VNScript
-    from vn_agent.schema.character import CharacterProfile
     import json
+
+    from vn_agent.schema.character import CharacterProfile
+    from vn_agent.schema.script import VNScript
 
     try:
         script = VNScript.model_validate_json(script_path.read_text(encoding="utf-8"))
@@ -448,8 +465,8 @@ def eval_strategy(
         async def classifier(text: str) -> str:
             return keyword_classifier(text)
     else:
-        from vn_agent.services.llm import ainvoke_llm
         from vn_agent.config import get_settings
+        from vn_agent.services.llm import ainvoke_llm
 
         settings = get_settings()
 
