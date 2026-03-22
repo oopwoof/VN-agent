@@ -4,37 +4,24 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+
 from vn_agent.agents.state import AgentState
+from vn_agent.config import get_settings
+from vn_agent.prompts.templates import (
+    DIRECTOR_DETAILS_SYSTEM,
+    DIRECTOR_OUTLINE_SYSTEM,
+    strip_thinking,
+)
 from vn_agent.schema.character import CharacterProfile
-from vn_agent.schema.script import VNScript, Scene, BranchOption
 from vn_agent.schema.music import Mood, MusicCue
+from vn_agent.schema.script import BranchOption, Scene, VNScript
 from vn_agent.services.llm import ainvoke_llm
 from vn_agent.strategies.narrative import format_strategies_for_prompt
-from vn_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_OUTLINE = """You are the Director of a visual novel project. Plan the overall story structure.
-
-{strategies}
-
-Rules:
-- Use scene IDs like: ch1_scene_name (lowercase, underscores)
-- Character IDs must be valid Python identifiers (lowercase, underscores)
-- The story must have exactly one start scene; every scene must be reachable from it
-"""
-
-_SYSTEM_DETAILS = """You are the Director of a visual novel project. You have a scene outline and must now add:
-1. Navigation: next_scene_id (linear flow) OR branches (player choices) for each scene
-2. BGM mood for each scene
-
-Rules:
-- Every branch next_scene_id MUST reference a scene ID from the provided list
-- Every next_scene_id MUST reference a scene ID from the provided list
-- Include at least 2 meaningful branch points across the story
-- Terminal (ending) scenes have next_scene_id=null and empty branches
-- BGM moods: peaceful / romantic / tense / melancholic / joyful / mysterious / epic / neutral
-"""
+_SYSTEM_OUTLINE = DIRECTOR_OUTLINE_SYSTEM
+_SYSTEM_DETAILS = DIRECTOR_DETAILS_SYSTEM
 
 
 async def run_director(state: AgentState) -> dict:
@@ -128,6 +115,7 @@ Return ONLY this JSON (no branches, no music yet):
     response = await ainvoke_llm(system, user_prompt, model=settings.llm_director_model, caller="director/step1")
     content = response.content if hasattr(response, "content") else str(response)
     _save_debug_raw(output_dir, "director_step1_raw.txt", content)
+    content = strip_thinking(content)
 
     try:
         return _extract_json(content)
@@ -172,6 +160,7 @@ Rules:
     response = await ainvoke_llm(_SYSTEM_DETAILS, user_prompt, model=settings.llm_director_model, caller="director/step2")
     content = response.content if hasattr(response, "content") else str(response)
     _save_debug_raw(output_dir, "director_step2_raw.txt", content)
+    content = strip_thinking(content)
 
     try:
         return _extract_json(content)

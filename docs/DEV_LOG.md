@@ -42,6 +42,36 @@
 
 ## 开发记录
 
+### 2026-03-22 | 实现 - 2026-03-22 16:21
+
+**变更文件** (7 个):
+**源码变更** (5 文件):
+  - `src/vn_agent/agents/director.py`
+  - `src/vn_agent/agents/reviewer.py`
+  - `src/vn_agent/agents/writer.py`
+  - `src/vn_agent/prompts/__init__.py`
+  - `src/vn_agent/prompts/templates.py`
+
+**测试变更** (2 文件):
+  - `tests/test_prompts/__init__.py`
+  - `tests/test_prompts/test_templates.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/director.py      |  35 ++++-------
+ src/vn_agent/agents/reviewer.py      |  20 ++-----
+ src/vn_agent/agents/writer.py        |  19 +-----
+ src/vn_agent/prompts/__init__.py     |   1 +
+ src/vn_agent/prompts/templates.py    | 111 +++++++++++++++++++++++++++++++++++
+ tests/test_prompts/__init__.py       |   0
+ tests/test_prompts/test_templates.py |  59 +++++++++++++++++++
+ 7 files changed, 191 insertions(+), 54 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-22 | 实现 - 2026-03-22 15:35
 
 **变更文件** (3 个):

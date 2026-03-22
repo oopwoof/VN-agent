@@ -9,6 +9,7 @@ from pathlib import Path
 from vn_agent.agents.director import _save_debug_raw
 from vn_agent.agents.state import AgentState
 from vn_agent.config import get_settings
+from vn_agent.prompts.templates import WRITER_SYSTEM, strip_thinking
 from vn_agent.schema.character import CharacterProfile
 from vn_agent.schema.script import DialogueLine, Scene, VNScript
 from vn_agent.services.llm import ainvoke_llm
@@ -16,22 +17,7 @@ from vn_agent.strategies.narrative import get_strategy
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a visual novel writer. Your job is to write compelling
-dialogue for scenes.
-
-You will receive a scene description and list of characters, and you must write:
-1. Engaging, character-consistent dialogue
-2. Natural transitions between dialogue lines
-3. Narration lines (character_id: null) for scene setting and inner thoughts
-4. Emotional states for each line
-
-Rules:
-- Character IDs must match exactly the provided character list
-- Each dialogue line needs: character_id (or null for narration), text, emotion
-- Emotions: neutral, happy, sad, angry, surprised, scared, thoughtful, loving, determined
-- Write natural, authentic dialogue that serves the narrative strategy
-- Keep lines concise (1-3 sentences each)
-"""
+SYSTEM_PROMPT = WRITER_SYSTEM
 
 
 async def run_writer(state: AgentState) -> dict:
@@ -161,6 +147,7 @@ After dialogue, if branches exist, the player will choose:
     content = response.content if hasattr(response, 'content') else str(response)
 
     _save_debug_raw(output_dir, f"writer_{scene.id}.txt", content)
+    content = strip_thinking(content)
 
     # Parse dialogue lines
     dialogue = _parse_dialogue(content, scene)

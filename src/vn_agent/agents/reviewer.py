@@ -5,25 +5,14 @@ import logging
 from dataclasses import dataclass
 
 from vn_agent.agents.state import AgentState
-from vn_agent.schema.script import VNScript, Scene
-from vn_agent.services.llm import ainvoke_llm
 from vn_agent.config import get_settings
+from vn_agent.prompts.templates import REVIEWER_SYSTEM, strip_thinking
+from vn_agent.schema.script import VNScript
+from vn_agent.services.llm import ainvoke_llm
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a visual novel script reviewer. Your job is to check scripts for:
-
-1. **Structural integrity**: All branch next_scene_ids reference existing scenes
-2. **Reachability**: All scenes can be reached from the start scene
-3. **Character consistency**: Characters in dialogue are declared in characters_present
-4. **Narrative coherence**: The story makes sense and flows naturally
-5. **Branch completeness**: No dead ends (every non-final scene has either next_scene_id or branches)
-
-If the script passes all checks, respond with: PASS
-
-If there are issues, list them clearly and suggest specific fixes.
-Be concise and actionable.
-"""
+SYSTEM_PROMPT = REVIEWER_SYSTEM
 
 
 @dataclass
@@ -188,6 +177,7 @@ If issues found, list them clearly."""
     settings = get_settings()
     response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_reviewer_model, caller="reviewer")
     content = response.content if hasattr(response, 'content') else str(response)
+    content = strip_thinking(content)
 
     stripped = content.strip()
     first_line = stripped.split("\n", 1)[0].strip().upper()
