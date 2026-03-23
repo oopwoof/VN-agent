@@ -16,9 +16,9 @@
 
 **VN-Agent：基于多 Agent 架构的 AI 视觉小说自动生成系统** | Python · LangGraph · FAISS · Ren'Py &emsp; 01/2026—03/2026
 
-- 将"一行主题→完整可运行游戏"拆解为 LangGraph 6 Agent DAG（3 阶段：规划→创作修订→资产并行），每个 Agent 对应独立决策域避免 prompt 过长导致输出不稳定；Director 两步生成防 max_tokens 截断，Reviewer↔Writer 条件边修订循环（3 轮上限 + 强制 proceed 防无限循环），资产阶段 `asyncio.gather` 并发 + `return_exceptions` 故障隔离；端到端产出含多分支剧情、立绘、背景、BGM 的 Ren'Py 可运行项目
-- 诊断 Writer 生成瓶颈为**上下文不足**（Reviewer 反馈集中在分支缺陷和策略偏离），逐模块优化 RAG 链：Query 层拼接场景语义+策略标签提升召回相关性，检索排序层 sentence-transformers + FAISS 从 1,036 条学术语料按余弦相似度召回并策略优先排序，生成层注入 few-shot 示例 + CoT 4 步推理 prompt；Reviewer 5 维度 rubric（LLM-as-Judge）+ BFS 可达性等 4 类结构校验形成修订闭环，策略分类 F1：keyword 0.21 → LLM 0.34（+57%）
-- 实现 Tool Calling（Pydantic schema → function definition）替代正则 JSON 提取消除解析失败，流式输出（`.astream()` + SSE）支持 CLI/Web 实时预览，多模型分级路由（Sonnet 规划 / Haiku 审查，预算模式全 Haiku 降本 ~73%）；FastAPI 异步 API + Docker + CI（140 测试 + 覆盖率 ≥70% 门控）
+- **架构**：将"主题→可运行游戏"拆解为 LangGraph 6 Agent DAG（规划→创作修订→资产并行），Agent 解耦避免 prompt scaling 导致输出不稳定；Reviewer↔Writer 条件边修订循环保障生成质量，资产阶段 3 Agent 并发 + 故障隔离；端到端产出含多分支剧情、立绘、背景、BGM 的 Ren'Py 可运行项目
+- **算法**：通过 error analysis 定位生成瓶颈为上下文不足，逐模块优化 RAG 链（Query 构造 / 语义检索排序 / few-shot 注入），基于 1,036 条学术语料 + FAISS 向量检索提升召回相关性；设计 **LLM-as-Judge** 5 维度 rubric + 4 类结构校验（BFS 可达性）形成自动修订闭环，生成策略匹配度 F1 提升 **57%**（0.21→0.34）
+- **工程**：**Tool Calling** 替代正则解析消除格式错误，多模型路由平衡质量与成本（Sonnet 规划 / Haiku 审查，降本 ~73%）；FastAPI 异步 API + Docker + GitHub Actions CI（140 测试，覆盖率 ≥70%）
 
 ---
 
