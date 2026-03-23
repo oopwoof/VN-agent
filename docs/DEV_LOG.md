@@ -42,6 +42,33 @@
 
 ## 开发记录
 
+### 2026-03-22 | 实现 - 2026-03-22 19:05
+
+**变更文件** (6 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/agents/graph.py`
+
+**其他变更** (4 文件):
+  - `eval_strategy_results.json`
+  - `eval_structural_results.json`
+  - `scripts/eval_real_api.py`
+  - `scripts/eval_structural.py`
+
+**变更统计**:
+```
+docs/RESUME.md               | 143 +++++++++++++++++++++++++++++
+ eval_strategy_results.json   |  93 +++++++++++++++++++
+ eval_structural_results.json |  66 ++++++++++++++
+ scripts/eval_real_api.py     | 167 ++++++++++++++++++++++++++++++++++
+ scripts/eval_structural.py   | 210 +++++++++++++++++++++++++++++++++++++++++++
+ src/vn_agent/agents/graph.py |  69 +++++++++++---
+ 6 files changed, 735 insertions(+), 13 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-22 | 实现 - 2026-03-22 17:18
 
 **变更文件** (27 个):

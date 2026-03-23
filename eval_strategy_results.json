@@ -1,0 +1,93 @@
+{
+  "accuracy": 0.1815,
+  "per_class": {
+    "accumulate": {
+      "precision": 0.1458,
+      "recall": 0.1373,
+      "f1": 0.1414,
+      "support": 153
+    },
+    "contrast": {
+      "precision": 0.156,
+      "recall": 0.1549,
+      "f1": 0.1555,
+      "support": 142
+    },
+    "erode": {
+      "precision": 0.0734,
+      "recall": 0.1429,
+      "f1": 0.097,
+      "support": 91
+    },
+    "reveal": {
+      "precision": 0.2552,
+      "recall": 0.2076,
+      "f1": 0.229,
+      "support": 236
+    },
+    "rupture": {
+      "precision": 0.184,
+      "recall": 0.3067,
+      "f1": 0.23,
+      "support": 150
+    },
+    "weave": {
+      "precision": 0.2803,
+      "recall": 0.1402,
+      "f1": 0.1869,
+      "support": 264
+    }
+  },
+  "confusion_matrix": {
+    "accumulate": {
+      "accumulate": 21,
+      "contrast": 19,
+      "erode": 35,
+      "reveal": 30,
+      "rupture": 29,
+      "weave": 19
+    },
+    "contrast": {
+      "accumulate": 27,
+      "contrast": 22,
+      "erode": 28,
+      "reveal": 19,
+      "rupture": 29,
+      "weave": 17
+    },
+    "erode": {
+      "accumulate": 9,
+      "contrast": 13,
+      "erode": 13,
+      "reveal": 17,
+      "rupture": 29,
+      "weave": 10
+    },
+    "reveal": {
+      "accumulate": 24,
+      "contrast": 36,
+      "erode": 41,
+      "reveal": 49,
+      "rupture": 53,
+      "weave": 33
+    },
+    "rupture": {
+      "accumulate": 22,
+      "contrast": 23,
+      "erode": 18,
+      "reveal": 25,
+      "rupture": 46,
+      "weave": 16
+    },
+    "weave": {
+      "accumulate": 41,
+      "contrast": 28,
+      "erode": 42,
+      "reveal": 52,
+      "rupture": 64,
+      "weave": 37
+    }
+  },
+  "total": 1036,
+  "errors": 0
+}

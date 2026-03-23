@@ -1,6 +1,7 @@
 """LangGraph StateGraph pipeline orchestration."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
@@ -39,6 +40,43 @@ def _make_traced_node(
             return result
 
     return traced
+
+
+async def _run_assets_parallel(state: AgentState) -> dict:
+    """Run character_designer, scene_artist, and music_director concurrently.
+
+    Each sub-agent gets its own trace span. Failures are collected as errors
+    rather than crashing the pipeline (fault isolation).
+    """
+    trace = get_trace()
+
+    async def _traced(name: str, func):
+        t_in = token_tracker.total_input()
+        t_out = token_tracker.total_output()
+        with trace.span(name) as span:
+            result = await func(state)
+            span.set_attribute("input_tokens", token_tracker.total_input() - t_in)
+            span.set_attribute("output_tokens", token_tracker.total_output() - t_out)
+            return result
+
+    results = await asyncio.gather(
+        _traced("character_designer", run_character_designer),
+        _traced("scene_artist", run_scene_artist),
+        _traced("music_director", run_music_director),
+        return_exceptions=True,
+    )
+
+    merged: dict = {}
+    errors = list(state.get("errors", []))
+    for i, r in enumerate(results):
+        if isinstance(r, Exception):
+            agent_name = ["character_designer", "scene_artist", "music_director"][i]
+            logger.error(f"Asset agent {agent_name} failed: {r}")
+            errors.append(f"{agent_name}: {r}")
+        elif isinstance(r, dict):
+            merged.update(r)
+    merged["errors"] = errors
+    return merged
 
 
 def _should_revise(state: AgentState) -> str:
@@ -83,20 +121,27 @@ def _after_review(state: AgentState) -> str:
 
 
 def build_graph() -> StateGraph:
-    """Build the full VN generation pipeline."""
+    """Build the full VN generation pipeline.
+
+    Topology:
+        director → writer → reviewer ─┬─ (PASS) → asset_generation → END
+                              ↑        ├─ (FAIL) → writer  (revision loop)
+                              └────────┘  (end)  → END     (text_only mode)
+
+    asset_generation runs character_designer, scene_artist, and music_director
+    concurrently via asyncio.gather with per-agent fault isolation.
+    """
     graph = StateGraph(AgentState)
 
-    # Add traced nodes
+    # Core pipeline nodes (traced individually)
     graph.add_node("director", _make_traced_node("director", run_director))
     graph.add_node("writer", _make_traced_node("writer", run_writer))
     graph.add_node("reviewer", _make_traced_node("reviewer", run_reviewer))
-    graph.add_node(
-        "character_designer", _make_traced_node("character_designer", run_character_designer)
-    )
-    graph.add_node("scene_artist", _make_traced_node("scene_artist", run_scene_artist))
-    graph.add_node("music_director", _make_traced_node("music_director", run_music_director))
 
-    # Linear flow
+    # Parallel asset generation (3 sub-agents run concurrently inside one node)
+    graph.add_node("asset_generation", _run_assets_parallel)
+
+    # Linear flow: director → writer → reviewer
     graph.set_entry_point("director")
     graph.add_edge("director", "writer")
     graph.add_edge("writer", "reviewer")
@@ -106,16 +151,14 @@ def build_graph() -> StateGraph:
         "reviewer",
         _after_review,
         {
-            "proceed": "character_designer",
+            "proceed": "asset_generation",
             "revise": "writer",
             "end": END,
         },
     )
 
-    # Asset generation pipeline
-    graph.add_edge("character_designer", "scene_artist")
-    graph.add_edge("scene_artist", "music_director")
-    graph.add_edge("music_director", END)
+    # Asset generation → END
+    graph.add_edge("asset_generation", END)
 
     return graph.compile()
 

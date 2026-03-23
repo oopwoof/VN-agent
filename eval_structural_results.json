@@ -1,0 +1,66 @@
+{
+  "baseline_pass": true,
+  "adversarial_tests": 6,
+  "adversarial_caught": 6,
+  "detection_rate": "100%",
+  "defect_types": 4,
+  "checks": [
+    "start_scene_exists",
+    "branch_references_valid",
+    "all_scenes_reachable_bfs",
+    "character_id_consistency"
+  ],
+  "results": [
+    {
+      "test": "Valid mock script (baseline)",
+      "passed": true,
+      "issues": []
+    },
+    {
+      "test": "Invalid start_scene_id",
+      "passed": false,
+      "issues": [
+        "Start scene 'nonexistent_scene' not found in scenes",
+        "Unreachable scenes: ch1_arrival, ch1_retreat, ch1_sacrifice, ch1_signal"
+      ]
+    },
+    {
+      "test": "Branch references non-existent scene",
+      "passed": false,
+      "issues": [
+        "Scene 'ch1_arrival': branch 'Go to void' references non-existent scene 'scene_that_doesnt_exist'"
+      ]
+    },
+    {
+      "test": "Unreachable orphan scene",
+      "passed": false,
+      "issues": [
+        "Unreachable scenes: orphan_scene"
+      ]
+    },
+    {
+      "test": "Undeclared character speaks",
+      "passed": false,
+      "issues": [
+        "Scene 'ch1_arrival': character 'char_ghost' speaks but is not declared"
+      ]
+    },
+    {
+      "test": "next_scene_id references non-existent scene",
+      "passed": false,
+      "issues": [
+        "Scene 'ch1_arrival': next_scene_id 'deleted_scene' does not exist"
+      ]
+    },
+    {
+      "test": "Multiple simultaneous issues",
+      "passed": false,
+      "issues": [
+        "Start scene 'wrong_start' not found in scenes",
+        "Scene 'ch1_arrival': branch 'Bad branch' references non-existent scene 'nowhere'",
+        "Unreachable scenes: ch1_arrival, ch1_retreat, ch1_sacrifice, ch1_signal",
+        "Scene 'ch1_signal': character 'char_unknown' speaks but is not declared"
+      ]
+    }
+  ]
+}
