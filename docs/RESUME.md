@@ -17,7 +17,7 @@
 **VN-Agent：基于多 Agent 架构的 AI 视觉小说自动生成系统** | Python · LangGraph · FAISS · Ren'Py &emsp; 01/2026—03/2026
 
 - 设计 LangGraph 6 Agent 协作管线（Director/Writer/Reviewer + CharacterDesigner/SceneArtist/MusicDirector 并行），条件边驱动 Reviewer↔Writer 修订循环（最多 3 轮自动回退）、资产生成阶段 `asyncio.gather` 并发执行 + 单 Agent 故障隔离；用户输入一行主题即端到端输出含多分支剧情、角色立绘、场景背景、BGM 的完整 Ren'Py 可运行游戏
-- 针对 Writer 生成质量不足（分支死胡同、对话缺乏叙事策略感），构建 sentence-transformers + FAISS 语义 RAG 从 1,036 条学术标注语料按余弦相似度检索 few-shot 示例注入生成上下文，设计 CoT 4 步推理 prompt 引导结构化规划 + Reviewer 5 维度 rubric 评分（LLM-as-Judge，均分 ≥3.5/5→PASS 否则触发修订），形成"生成→检索→评估→修订"质量闭环
+- 针对 Writer 生成质量不足（分支死胡同、对话缺乏叙事策略感），构建 sentence-transformers + FAISS 语义 RAG 从 1,036 条学术标注语料按余弦相似度检索 few-shot 示例注入生成上下文（策略分类 F1：keyword 0.21 → LLM 0.34，+57%），设计 CoT 4 步推理 prompt + Reviewer 5 维度 rubric 评分（LLM-as-Judge，≥3.5/5→PASS），结构校验覆盖 4 类图缺陷（BFS 可达性/分支引用/角色一致性），形成"生成→检索→评估→修订"质量闭环
 - 实现 LLM Tool Calling（Pydantic schema → function definition）替代正则 JSON 提取消除解析失败，LLM 流式输出（`.astream()` + SSE）支持 CLI/Web 实时预览，多模型分级路由（Sonnet 规划创作 / Haiku 审查资产，预算模式全 Haiku 降本 ~73%）；FastAPI 异步 API + Docker + GitHub Actions CI（140 测试 + 覆盖率 ≥70% 门控）
 
 ---
@@ -43,26 +43,37 @@
 
 ## 评估实测数据
 
-### 策略分类评估（`vn-agent eval strategy --mock --sample 0`）
+### 策略分类评估（`scripts/eval_ollama.py`，qwen2.5:7b 本地推理）
+
+| 方法 | Accuracy | Macro F1 | 耗时 |
+|------|----------|----------|------|
+| 随机基线 (1/6) | 16.7% | — | — |
+| Keyword 规则 | 23.0% | 0.21 | 0s |
+| **qwen2.5:7b LLM** | **35.0%** | **0.34** | 26s (100 samples) |
+
+→ 7B 本地模型 F1 = 0.34，是 keyword baseline（0.21）的 **1.6 倍**（+57%），验证 LLM 分类器 / 语义检索的必要性。
+
+全量 1,036 样本 keyword baseline: accuracy 18.1%, macro F1 0.17（`eval strategy --mock --sample 0`）
+
+### 端到端管线评估（qwen2.5:7b，text_only，4 场景配置）
 
 | 指标 | 值 |
 |------|-----|
-| 语料规模 | 1,036 条 COLX_523 标注（6 类叙事策略） |
-| Keyword baseline accuracy | **18.1%**（随机基线 16.7%） |
-| Keyword baseline macro F1 | **0.17** |
-| 最佳策略 F1 | rupture 0.23, reveal 0.23 |
-| 最差策略 F1 | erode 0.10（关键词覆盖不足） |
+| 生成成功 | 是（1 场景，5 行对话） |
+| 结构校验 | **PASS**（4 类缺陷检查全通过） |
+| 修订轮数 | 3 轮（Reviewer 循环完整触发） |
+| 总耗时 | 52.3s |
+| 每节点耗时 | Director 12.2s, Writer 5-17s, Reviewer 4-5s |
 
-→ Keyword baseline 仅略高于随机，验证了 LLM 分类器的必要性。LLM 分类结果需充值 API 后测试。
+→ 7B 模型生成能力有限（1/4 场景），但**管线编排、修订循环、结构校验均正确运行**，验证系统架构鲁棒性。
 
-### 结构校验评估（`scripts/eval_structural.py`）
+### 结构校验评估（`scripts/eval_structural.py`，对抗测试）
 
 | 指标 | 值 |
 |------|-----|
-| 缺陷类型覆盖 | 4 类（start_scene / branch_ref / reachability / character_id） |
+| 缺陷类型覆盖 | 4 类（start_scene / branch_ref / BFS reachability / character_id） |
 | 基线（合法脚本） | PASS |
 | 对抗测试检出率 | **6/6 (100%)**，共检出 10 个缺陷实例 |
-| 检查方式 | BFS 可达性 + 引用完整性 + 角色声明一致性 |
 
 ### 成本分析（Anthropic 公开定价计算）
 

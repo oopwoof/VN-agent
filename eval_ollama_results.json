@@ -1,0 +1,158 @@
+{
+  "strategy_eval": {
+    "sample_size": 100,
+    "keyword": {
+      "accuracy": 0.23,
+      "macro_f1": 0.2137,
+      "per_class": {
+        "accumulate": {
+          "precision": 0.1333,
+          "recall": 0.1111,
+          "f1": 0.1212,
+          "support": 18
+        },
+        "contrast": {
+          "precision": 0.2,
+          "recall": 0.2,
+          "f1": 0.2,
+          "support": 10
+        },
+        "erode": {
+          "precision": 0.2273,
+          "recall": 0.3333,
+          "f1": 0.2703,
+          "support": 15
+        },
+        "reveal": {
+          "precision": 0.4286,
+          "recall": 0.3,
+          "f1": 0.3529,
+          "support": 30
+        },
+        "rupture": {
+          "precision": 0.12,
+          "recall": 0.3,
+          "f1": 0.1714,
+          "support": 10
+        },
+        "weave": {
+          "precision": 0.2857,
+          "recall": 0.1176,
+          "f1": 0.1667,
+          "support": 17
+        }
+      }
+    },
+    "llm": {
+      "accuracy": 0.35,
+      "macro_f1": 0.3346,
+      "per_class": {
+        "accumulate": {
+          "precision": 0.1538,
+          "recall": 0.1176,
+          "f1": 0.1333,
+          "support": 17
+        },
+        "contrast": {
+          "precision": 0.5455,
+          "recall": 0.3529,
+          "f1": 0.4286,
+          "support": 17
+        },
+        "erode": {
+          "precision": 0.0833,
+          "recall": 0.25,
+          "f1": 0.125,
+          "support": 4
+        },
+        "reveal": {
+          "precision": 0.2895,
+          "recall": 0.4783,
+          "f1": 0.3607,
+          "support": 23
+        },
+        "rupture": {
+          "precision": 0.7,
+          "recall": 0.4667,
+          "f1": 0.56,
+          "support": 15
+        },
+        "weave": {
+          "precision": 0.5,
+          "recall": 0.3333,
+          "f1": 0.4,
+          "support": 24
+        }
+      },
+      "time_s": 25.8
+    }
+  },
+  "pipeline": {
+    "time_s": 52.3,
+    "revision_count": 3,
+    "review_passed": false,
+    "errors": [],
+    "title": "Lighthouse Keeper's Dilemma",
+    "scenes": 1,
+    "characters": 1,
+    "dialogue_lines": 5,
+    "structural_passed": true,
+    "structural_issues": [],
+    "tokens": {
+      "by_agent": {
+        "eval/strategy": {
+          "input": 0,
+          "output": 0
+        },
+        "director/step1": {
+          "input": 0,
+          "output": 0
+        },
+        "director/step2": {
+          "input": 0,
+          "output": 0
+        },
+        "writer/ch1_opening": {
+          "input": 0,
+          "output": 0
+        },
+        "reviewer": {
+          "input": 0,
+          "output": 0
+        }
+      },
+      "total_input": 0,
+      "total_output": 0
+    },
+    "trace": [
+      {
+        "name": "director",
+        "duration_s": 12.2
+      },
+      {
+        "name": "writer",
+        "duration_s": 5.7
+      },
+      {
+        "name": "reviewer",
+        "duration_s": 4.0
+      },
+      {
+        "name": "writer",
+        "duration_s": 4.2
+      },
+      {
+        "name": "reviewer",
+        "duration_s": 3.9
+      },
+      {
+        "name": "writer",
+        "duration_s": 17.0
+      },
+      {
+        "name": "reviewer",
+        "duration_s": 5.2
+      }
+    ]
+  }
+}
