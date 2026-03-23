@@ -17,13 +17,23 @@ label {{ scene.id }}:
     stop music fadeout 1.0
 {% set ns.current_music = None %}
 {% endif %}
-    scene {{ scene.background_id }}
+{% if loop.first %}
+    scene {{ scene.background_id }} with fade
+{% else %}
+    scene {{ scene.background_id }} with dissolve
+{% endif %}
+{% set positions = ['center'] if scene.characters_present|length == 1 else ['left', 'right'] if scene.characters_present|length == 2 else ['left', 'center', 'right'] %}
 {% for char_id in scene.characters_present %}
-    show {{ char_id }} neutral at center
+    show {{ char_id }} neutral at {{ positions[loop.index0 % positions|length] }}
 {% endfor %}
 
+{% set ns_emo = namespace(map={}) %}
 {% for line in scene.dialogue %}
 {% if line.character_id %}
+{% if line.emotion != ns_emo.map.get(line.character_id, 'neutral') %}
+    show {{ line.character_id }} {{ line.emotion }}
+{% set _ = ns_emo.map.update({line.character_id: line.emotion}) %}
+{% endif %}
     {{ line.character_id }} "{{ line.text | replace('"', '\\"') }}"
 {% else %}
     "{{ line.text | replace('"', '\\"') }}"

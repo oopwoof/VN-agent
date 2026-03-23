@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import logging
 import random
-from pathlib import Path
 
-from vn_agent.config import get_settings, get_music_library
+from vn_agent.config import get_music_library, get_settings
 from vn_agent.schema.music import Mood, MusicCue
 
 logger = logging.getLogger(__name__)
@@ -49,8 +48,6 @@ def _resolve_from_library(cue: MusicCue) -> MusicCue:
         raise MusicNotFoundError(f"No tracks found for mood: {cue.mood}")
 
     track = random.choice(mood_tracks)
-    settings = get_settings()
-    fmt = settings.music_audio_format
 
     return cue.model_copy(update={
         "track_id": track["id"],

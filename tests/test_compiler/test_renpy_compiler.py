@@ -1,9 +1,8 @@
 """Tests for Ren'Py compiler."""
-import pytest
-from vn_agent.schema.script import VNScript, Scene, DialogueLine, BranchOption
+from vn_agent.compiler.renpy_compiler import compile_script, compile_to_string
 from vn_agent.schema.character import CharacterProfile
-from vn_agent.schema.music import MusicCue, Mood
-from vn_agent.compiler.renpy_compiler import compile_to_string, compile_script
+from vn_agent.schema.music import Mood, MusicCue
+from vn_agent.schema.script import BranchOption, DialogueLine, Scene, VNScript
 
 
 def make_simple_script() -> tuple[VNScript, dict[str, CharacterProfile]]:
@@ -127,3 +126,73 @@ class TestRenPyCompiler:
         result = compile_to_string(script, chars)
         assert "label start:" in result
         assert "jump ch1_start" in result
+
+    def test_emotion_switching(self):
+        """Dialogue with emotion changes should emit 'show char emotion' directives."""
+        chars = {
+            "char_hana": CharacterProfile(
+                id="char_hana", name="Hana", color="#ff88aa",
+                personality="Cheerful", background="Student", role="protagonist",
+            )
+        }
+        scenes = [
+            Scene(
+                id="ch1_test",
+                title="Test",
+                description="test",
+                background_id="bg_test",
+                characters_present=["char_hana"],
+                dialogue=[
+                    DialogueLine(character_id="char_hana", text="Hello", emotion="neutral"),
+                    DialogueLine(character_id="char_hana", text="Yay!", emotion="happy"),
+                ],
+                next_scene_id=None,
+            ),
+        ]
+        script = VNScript(
+            title="Test", description="t", theme="t",
+            start_scene_id="ch1_test", scenes=scenes, characters=["char_hana"],
+        )
+        result = compile_to_string(script, chars)
+        assert "show char_hana happy" in result
+
+    def test_scene_transitions(self):
+        """First scene uses 'with fade', subsequent scenes use 'with dissolve'."""
+        script, chars = make_simple_script()
+        result = compile_to_string(script, chars)
+        assert "with fade" in result
+        assert "with dissolve" in result
+
+    def test_character_positioning(self):
+        """2-character scene should use 'at left' and 'at right'."""
+        chars = {
+            "char_a": CharacterProfile(
+                id="char_a", name="A", color="#ff0000",
+                personality="", background="", role="protagonist",
+            ),
+            "char_b": CharacterProfile(
+                id="char_b", name="B", color="#0000ff",
+                personality="", background="", role="supporting",
+            ),
+        }
+        scenes = [
+            Scene(
+                id="ch1_duo",
+                title="Duo",
+                description="Two characters",
+                background_id="bg_test",
+                characters_present=["char_a", "char_b"],
+                dialogue=[
+                    DialogueLine(character_id="char_a", text="Hi", emotion="neutral"),
+                ],
+                next_scene_id=None,
+            ),
+        ]
+        script = VNScript(
+            title="Test", description="t", theme="t",
+            start_scene_id="ch1_duo", scenes=scenes,
+            characters=["char_a", "char_b"],
+        )
+        result = compile_to_string(script, chars)
+        assert "at left" in result
+        assert "at right" in result

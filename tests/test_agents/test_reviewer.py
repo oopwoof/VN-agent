@@ -1,13 +1,11 @@
 """Tests for the Reviewer agent structural checks and Director merge logic."""
-import pytest
-from vn_agent.schema.script import VNScript, Scene, DialogueLine, BranchOption
-from vn_agent.agents.reviewer import (
-    _structural_check,
-    _find_reachable_scenes,
-    check_strategy_consistency,
-    ReviewResult,
-)
 from vn_agent.agents.director import _merge_outline_details
+from vn_agent.agents.reviewer import (
+    _find_reachable_scenes,
+    _structural_check,
+    check_strategy_consistency,
+)
+from vn_agent.schema.script import BranchOption, DialogueLine, Scene, VNScript
 
 
 def make_valid_script() -> VNScript:

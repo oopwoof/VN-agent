@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 from typing import Annotated
-from langgraph.graph.message import add_messages
-from langchain_core.messages import BaseMessage
-from pydantic import BaseModel
 
-from vn_agent.schema.script import VNScript
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
+
 from vn_agent.schema.character import CharacterProfile
+from vn_agent.schema.script import VNScript
 
 
 class AgentState(dict):

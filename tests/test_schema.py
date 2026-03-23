@@ -1,8 +1,9 @@
 """Tests for Pydantic schema models."""
 import pytest
+
+from vn_agent.schema.character import CharacterProfile
 from vn_agent.schema.music import Mood, MusicCue
-from vn_agent.schema.character import CharacterProfile, VisualProfile, EmotionSprite
-from vn_agent.schema.script import VNScript, Scene, DialogueLine, BranchOption
+from vn_agent.schema.script import Scene, VNScript
 
 
 class TestMusicCue:

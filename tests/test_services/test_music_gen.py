@@ -1,9 +1,10 @@
 """Tests for music generation service."""
-import pytest
 from unittest.mock import patch
-from vn_agent.schema.music import Mood, MusicCue
-from vn_agent.services.music_gen import _resolve_from_library, MusicNotFoundError
 
+import pytest
+
+from vn_agent.schema.music import Mood, MusicCue
+from vn_agent.services.music_gen import MusicNotFoundError, _resolve_from_library
 
 SAMPLE_LIBRARY = {
     "tracks": {

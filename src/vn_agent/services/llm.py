@@ -2,14 +2,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, TypeVar
 from functools import lru_cache
+from typing import Any, TypeVar
 
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from pydantic import BaseModel
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 # langchain_core imports are deferred inside functions to avoid pulling torch at import time
-
 from vn_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -17,11 +16,25 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
+_RETRIABLE = (TimeoutError, ConnectionError)
+try:
+    from anthropic import APIConnectionError, InternalServerError, RateLimitError
+    _RETRIABLE += (APIConnectionError, RateLimitError, InternalServerError)
+except ImportError:
+    pass
+try:
+    from openai import APIConnectionError as OC
+    from openai import RateLimitError as OR
+    _RETRIABLE += (OC, OR)
+except ImportError:
+    pass
+
+
 def _make_retry_decorator(max_retries: int):
     return retry(
         stop=stop_after_attempt(max_retries),
         wait=wait_exponential(multiplier=1, min=2, max=30),
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_exception_type(_RETRIABLE),
         reraise=True,
     )
 
@@ -94,15 +107,22 @@ def get_structured_llm(schema: type[T], model: str | None = None) -> Any:
 
 def _log_stop_reason(result: Any, caller: str) -> None:
     """Log stop_reason and token usage from response metadata."""
+    from vn_agent.services.token_tracker import tracker
+
     meta = getattr(result, "response_metadata", None) or {}
     stop_reason = meta.get("stop_reason") or meta.get("finish_reason", "unknown")
     usage = meta.get("usage", {})
-    input_tokens = usage.get("input_tokens", "?")
-    output_tokens = usage.get("output_tokens", "?")
+    input_tokens = usage.get("input_tokens", 0)
+    output_tokens = usage.get("output_tokens", 0)
+    model = meta.get("model_id") or meta.get("model", "unknown")
     logger.info(
         f"[{caller}] stop_reason={stop_reason!r}  "
         f"tokens: in={input_tokens} out={output_tokens}"
     )
+
+    if isinstance(input_tokens, int) and isinstance(output_tokens, int):
+        tracker.add(caller, model, input_tokens, output_tokens)
+
     if stop_reason == "max_tokens":
         settings = get_settings()
         logger.warning(

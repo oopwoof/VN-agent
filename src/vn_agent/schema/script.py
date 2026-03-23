@@ -1,5 +1,6 @@
 """Core VN script schema models."""
 from pydantic import BaseModel, Field
+
 from .music import MusicCue
 
 

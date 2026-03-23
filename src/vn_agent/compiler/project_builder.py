@@ -3,12 +3,11 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 from pathlib import Path
 
-from vn_agent.schema.script import VNScript
-from vn_agent.schema.character import CharacterProfile
 from vn_agent.compiler.renpy_compiler import compile_script
+from vn_agent.schema.character import CharacterProfile
+from vn_agent.schema.script import VNScript
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +67,26 @@ def build_project(
     return output_dir
 
 
+# Minimal silent WAV file (44 bytes header + 0 samples).
+# Ren'Py can play WAV natively. We use .ogg extension but WAV-format content;
+# Ren'Py/SDL_mixer detects format from header, not extension, so this works.
+# This is a 0-sample, 8000 Hz, mono, 16-bit PCM WAV — plays as instant silence.
+_PLACEHOLDER_OGG = (
+    b"RIFF"
+    b"\x24\x00\x00\x00"  # file size - 8 = 36
+    b"WAVE"
+    b"fmt "
+    b"\x10\x00\x00\x00"  # chunk size = 16
+    b"\x01\x00"          # PCM format
+    b"\x01\x00"          # 1 channel
+    b"\x40\x1f\x00\x00"  # 8000 Hz
+    b"\x80\x3e\x00\x00"  # byte rate = 16000
+    b"\x02\x00"          # block align = 2
+    b"\x10\x00"          # 16 bits per sample
+    b"data"
+    b"\x00\x00\x00\x00"  # data size = 0
+)
+
 # Minimal 1×1 transparent PNG (67 bytes, no external deps)
 _PLACEHOLDER_PNG = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -107,3 +126,17 @@ def _write_placeholder_assets(
             if not path.exists():
                 path.write_bytes(_PLACEHOLDER_PNG)
                 logger.debug(f"Placeholder: {path.relative_to(output_dir)}")
+
+    # BGM audio placeholders (silence OGG so Ren'Py doesn't error)
+    bgm_paths: set[str] = set()
+    for scene in script.scenes:
+        if scene.music and scene.music.file_path:
+            bgm_paths.add(scene.music.file_path)
+        elif scene.music:
+            bgm_paths.add(f"audio/bgm/{scene.music.mood.value}.ogg")
+    for rel in bgm_paths:
+        path = game / rel
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(_PLACEHOLDER_OGG)
+            logger.debug(f"Placeholder: {path.relative_to(output_dir)}")

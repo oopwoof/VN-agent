@@ -44,11 +44,14 @@ dev = [
 ]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/vn_agent/services/mock_llm.py" = ["E501"]  # JSON fixture strings
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -157,7 +157,9 @@ Rules:
 - Terminal scenes: next_scene_id=null, branches=[]
 - Include at least 2 scenes with meaningful branches"""
 
-    response = await ainvoke_llm(_SYSTEM_DETAILS, user_prompt, model=settings.llm_director_model, caller="director/step2")
+    response = await ainvoke_llm(
+        _SYSTEM_DETAILS, user_prompt, model=settings.llm_director_model, caller="director/step2",
+    )
     content = response.content if hasattr(response, "content") else str(response)
     _save_debug_raw(output_dir, "director_step2_raw.txt", content)
     content = strip_thinking(content)

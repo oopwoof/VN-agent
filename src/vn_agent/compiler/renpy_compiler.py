@@ -6,8 +6,8 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from vn_agent.schema.script import VNScript, Scene
 from vn_agent.schema.character import CharacterProfile
+from vn_agent.schema.script import VNScript
 
 logger = logging.getLogger(__name__)
 

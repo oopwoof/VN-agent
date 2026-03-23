@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class StrategyType(str, Enum):
+class StrategyType(StrEnum):
     ACCUMULATE = "accumulate"   # Gradually build up emotion/tension
     ERODE = "erode"             # Gradually wear down character/relationship
     RUPTURE = "rupture"         # Sudden break or revelation

@@ -42,6 +42,72 @@
 
 ## 开发记录
 
+### 2026-03-22 | 实现 - 2026-03-22 17:18
+
+**变更文件** (27 个):
+**源码变更** (15 文件):
+  - `src/vn_agent/agents/callbacks.py`
+  - `src/vn_agent/agents/director.py`
+  - `src/vn_agent/agents/music_director.py`
+  - `src/vn_agent/agents/state.py`
+  - `src/vn_agent/cli.py`
+  - `src/vn_agent/compiler/project_builder.py`
+  - `src/vn_agent/compiler/renpy_compiler.py`
+  - `src/vn_agent/compiler/templates/script.rpy.j2`
+  - `src/vn_agent/schema/music.py`
+  - `src/vn_agent/schema/script.py`
+  - ...及其他 5 个文件
+
+**测试变更** (7 文件):
+  - `tests/test_agents/test_reviewer.py`
+  - `tests/test_cli/test_cli.py`
+  - `tests/test_compiler/test_renpy_compiler.py`
+  - `tests/test_integration/test_pipeline.py`
+  - `tests/test_integration/test_real_api.py`
+
+**配置变更** (2 文件):
+  - `config/settings.yaml`
+  - `pyproject.toml`
+
+**其他变更** (1 文件):
+  - `uv.lock`
+
+**变更统计**:
+```
+config/settings.yaml                          |   3 +
+ docs/DEV_LOG.md                               |  48 ++
+ docs/PRODUCT.md                               |   7 +-
+ pyproject.toml                                |   5 +-
+ src/vn_agent/agents/callbacks.py              |   3 +-
+ src/vn_agent/agents/director.py               |   4 +-
+ src/vn_agent/agents/music_director.py         |   5 +-
+ src/vn_agent/agents/state.py                  |   6 +-
+ src/vn_agent/cli.py                           |  10 +-
+ src/vn_agent/compiler/project_builder.py      |  39 +-
+ src/vn_agent/compiler/renpy_compiler.py       |   2 +-
+ src/vn_agent/compiler/templates/script.rpy.j2 |  14 +-
+ src/vn_agent/schema/music.py                  |   5 +-
+ src/vn_agent/schema/script.py                 |   1 +
+ src/vn_agent/services/llm.py                  |  32 +-
+ src/vn_agent/services/mock_llm.py             | 122 ++++-
+ src/vn_agent/services/music_gen.py            |   5 +-
+ src/vn_agent/services/token_tracker.py        |   2 +-
+ src/vn_agent/strategies/narrative.py          |   4 +-
+ tests/test_agents/test_reviewer.py            |   8 +-
+ tests/test_cli/test_cli.py                    |   1 -
+ tests/test_compiler/test_renpy_compiler.py    |  77 ++-
+ tests/test_integration/test_pipeline.py       |  34 +-
+ tests/test_integration/test_real_api.py       |   1 +
+ tests/test_schema.py                          |   5 +-
+ tests/test_services/test_music_gen.py         |   7 +-
+ uv.lock                                       | 690 +++++++++++++++++++++++++-
+ 27 files changed, 1078 insertions(+), 62 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-22 | 实现 - 2026-03-22 16:42
 
 **变更文件** (4 个):
@@ -1075,6 +1141,53 @@ src/vn_agent/agents/character_designer.py |  20 ++-
 
 ---
 
+### 2026-03-22 | Phase 8: AI 深度补全（Sprint 12-15）
+
+**状态**: ✅ 完成
+
+**目标**: 补全简历核心 AI 技术点 — CoT 推理、Embedding RAG、Tool Calling、流式输出
+
+**Sprint 12: 结构化推理 Prompt**
+- 新增 `src/vn_agent/prompts/templates.py` — 集中管理 prompt 模板
+- Director: 4 步 chain-of-thought 推理框架（主题分析→角色动态→场景流→策略选择）
+- Reviewer: 5 维度评分 rubric（叙事连贯/角色声音/情感弧/分支质量/节奏）
+- `strip_thinking()`: 正则移除 `<thinking>` 推理块，防止污染 JSON 解析
+- Writer: 写作前情感规划引导
+
+**Sprint 13: Embedding RAG 检索**
+- 新增 `src/vn_agent/eval/embedder.py` — `EmbeddingIndex` 类
+- sentence-transformers `all-MiniLM-L6-v2` (22M) 编码 + FAISS `IndexFlatIP` 余弦相似度
+- 语义查询: `"{scene.description} | strategy: {strategy}"` 兼顾语义和策略
+- Graceful degradation: 无 FAISS → numpy 暴力搜索; 无 sentence-transformers → 标签检索
+- `retrieve_examples_semantic()` 替代原 `retrieve_examples()` 作为 few-shot 检索
+
+**Sprint 14: LLM Tool Calling**
+- 新增 `src/vn_agent/services/tools.py` — Pydantic schema 作为 function definition
+- `BackgroundPrompt` / `VisualProfileResult` 两个工具 schema
+- `ainvoke_with_tools()`: LangChain `.bind_tools()` → extract `tool_calls[0]` → validate
+- scene_artist + character_designer 迁移到 tool calling，失败时 fallback 到 regex
+
+**Sprint 15: 流式 LLM 输出**
+- 新增 `src/vn_agent/services/streaming.py`
+- `astream_llm()`: 逐 token 流式 + callback + token usage 归因
+- `astream_sse()`: SSE 格式 `data: {"token": "..."}\n\n` 事件流
+- Web API: `POST /generate/stream` SSE 端点（Director outline 实时预览）
+- CLI: `--stream` flag 支持
+
+**CI 修复**:
+- `ruff check` line-length 调整为 120，mock_llm.py per-file-ignore E501
+- `str(Enum)` → `StrEnum` (UP042)
+- 移除未使用变量 (F841)
+
+**测试**: 122 → 140 tests（+18），全部通过
+
+**技术决策**:
+- 所有新特性通过 feature flag 控制（`use_semantic_retrieval`, `use_tool_calling`）
+- RAG 依赖为可选组 `[rag]`，不影响基础安装
+- Tool Calling 双路径: tool call 优先，失败回退 regex JSON 提取
+
+---
+
 ### 2026-03-17 | 项目初始化
 
 **状态**: 开始实施
@@ -1125,6 +1238,7 @@ _（每次 commit 后更新）_
 | P0 | Phase 1-5 核心管线 | ✅ 完成 |
 | P0 | Phase 6 迭代体验（5 Sprint） | ✅ 完成（56 测试） |
 | P0 | Phase 7 工业化（Sprint 7-11） | ✅ 完成（122 测试） |
+| P0 | Phase 8 AI深度补全（Sprint 12-15） | ✅ 完成（140 测试） |
 | P1 | Web 前端（React/Vue） | 待开始 |
 | P1 | 真实 BGM 文件替换占位 WAV | 待开始 |
 | P2 | Ollama 本地模型验证 | 待开始 |

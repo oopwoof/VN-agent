@@ -356,8 +356,6 @@ def dry_run(
         )
         api_key_label = "OPENAI_API_KEY"
 
-    image_enabled = not text_only and provider == "openai"
-
     # Estimated API calls: director + writer*scenes + reviewer + (char_designer + scene_artist if not text_only)
     estimated_llm_calls = 1 + max_scenes + 1  # director, writer per scene, reviewer
     if not text_only:
@@ -386,11 +384,15 @@ def dry_run(
     console.print(table)
 
     console.print("\n[bold]What would happen:[/bold]")
-    console.print(f"  [cyan]1.[/cyan] Director plans a story with up to {max_scenes} scenes and {num_characters} characters")
+    console.print(
+        f"  [cyan]1.[/cyan] Director plans a story with up to {max_scenes} scenes and {num_characters} characters"
+    )
     console.print("  [cyan]2.[/cyan] Writer generates dialogue for each scene")
     console.print("  [cyan]3.[/cyan] Reviewer validates the script")
     if not text_only:
-        console.print(f"  [cyan]4.[/cyan] Character Designer creates visual profiles for {num_characters} characters (parallel)")
+        console.print(
+            f"  [cyan]4.[/cyan] Character Designer creates visual profiles for {num_characters} characters (parallel)"
+        )
         console.print("  [cyan]5.[/cyan] Scene Artist generates backgrounds for unique scenes (parallel)")
         console.print("  [cyan]6.[/cyan] Music Director assigns BGM tracks")
     else:

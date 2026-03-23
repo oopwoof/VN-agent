@@ -4,10 +4,9 @@ from __future__ import annotations
 import logging
 
 from vn_agent.agents.state import AgentState
-from vn_agent.schema.script import VNScript, Scene
-from vn_agent.schema.music import Mood, MusicCue
+from vn_agent.schema.music import Mood
+from vn_agent.schema.script import Scene, VNScript
 from vn_agent.services.music_gen import resolve_music_cue
-from vn_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
 

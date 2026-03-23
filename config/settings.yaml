@@ -39,3 +39,6 @@ generation:
   max_revision_rounds: 3
   min_dialogue_lines: 5
   max_dialogue_lines: 20
+  reviewer_skip_llm: false
+
+corpus_path: "data\final_annotations.csv"

@@ -6,6 +6,7 @@ Usage:
 from __future__ import annotations
 
 import os
+
 import pytest
 
 from vn_agent.agents.graph import build_graph

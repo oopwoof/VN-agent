@@ -1,12 +1,13 @@
 """Full pipeline integration tests (text-only, mocked LLM)."""
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from vn_agent.agents.graph import build_graph
 from vn_agent.agents.state import initial_state
 from vn_agent.compiler.renpy_compiler import compile_to_string
-
 
 DIRECTOR_STEP1_RESPONSE = """{
   "title": "Echoes of Tomorrow",
@@ -97,16 +98,18 @@ class MockMessage:
 
 @pytest.fixture
 def mock_ainvoke(mocker):
-    call_count = [0]
+    from vn_agent.services.mock_llm import _dispatch
 
     async def side_effect(system, user, schema=None, model=None, caller="llm"):
-        call_count[0] += 1
         system_lower = system.lower()
 
-        if "reviewer" in system_lower:
+        # For non-Chinese English tests, keep the original inline fixtures for backward compat
+        has_cjk = bool(re.search(r'[\u4e00-\u9fff]', user))
+        if has_cjk:
+            content = _dispatch(system_lower, user, caller)
+        elif "reviewer" in system_lower:
             content = REVIEWER_MOCK_RESPONSE
         elif "director" in system_lower:
-            # Distinguish step1 (outline) from step2 (navigation/music)
             if "navigation" in system_lower or "next_scene_id" in system_lower:
                 content = DIRECTOR_STEP2_RESPONSE
             else:
@@ -126,11 +129,11 @@ def mock_ainvoke(mocker):
     return mocker.patch("vn_agent.services.llm.ainvoke_llm", side_effect=side_effect)
 
 
-async def _run_pipeline(text_only: bool = True) -> dict:
+async def _run_pipeline(text_only: bool = True, theme: str = "A school romance about choices") -> dict:
     """Helper to run the full pipeline and return the final state."""
     graph = build_graph()
     state = initial_state(
-        theme="A school romance about choices",
+        theme=theme,
         output_dir="/tmp/test_vn",
         text_only=text_only,
     )
@@ -190,3 +193,20 @@ class TestPipelineIntegration:
                 f"Character {char_id} has a visual profile set — "
                 "CharacterDesigner must not run in text_only mode"
             )
+
+    @pytest.mark.asyncio
+    async def test_chinese_theme_pipeline(self, mock_ainvoke):
+        """Chinese theme should produce Chinese dialogue in the output."""
+        final_state = await _run_pipeline(text_only=True, theme="校园恋爱")
+
+        vn_script = final_state["vn_script"]
+        assert vn_script is not None
+        assert len(vn_script.scenes) > 0
+
+        # At least some dialogue lines should contain CJK characters
+        all_text = " ".join(
+            line.text for scene in vn_script.scenes for line in scene.dialogue
+        )
+        assert re.search(r'[\u4e00-\u9fff]', all_text), (
+            f"Expected Chinese characters in dialogue but got: {all_text[:200]}"
+        )

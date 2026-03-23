@@ -1,9 +1,10 @@
 """Music-related schema models."""
-from enum import Enum
+from enum import StrEnum
+
 from pydantic import BaseModel, Field
 
 
-class Mood(str, Enum):
+class Mood(StrEnum):
     PEACEFUL = "peaceful"
     ROMANTIC = "romantic"
     TENSE = "tense"
