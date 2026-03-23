@@ -16,9 +16,9 @@
 
 **VN-Agent：基于多 Agent 架构的 AI 视觉小说自动生成系统** | Python · LangGraph · FAISS · Ren'Py &emsp; 01/2026—03/2026
 
-- 设计 LangGraph 6 Agent 协作管线（Director/Writer/Reviewer + CharacterDesigner/SceneArtist/MusicDirector 并行），条件边驱动 Reviewer↔Writer 修订循环（最多 3 轮自动回退）、资产生成阶段 `asyncio.gather` 并发执行 + 单 Agent 故障隔离；用户输入一行主题即端到端输出含多分支剧情、角色立绘、场景背景、BGM 的完整 Ren'Py 可运行游戏
-- 针对 Writer 生成质量不足（分支死胡同、对话缺乏叙事策略感），构建 sentence-transformers + FAISS 语义 RAG 从 1,036 条学术标注语料按余弦相似度检索 few-shot 示例注入生成上下文（策略分类 F1：keyword 0.21 → LLM 0.34，+57%），设计 CoT 4 步推理 prompt + Reviewer 5 维度 rubric 评分（LLM-as-Judge，≥3.5/5→PASS），结构校验覆盖 4 类图缺陷（BFS 可达性/分支引用/角色一致性），形成"生成→检索→评估→修订"质量闭环
-- 实现 LLM Tool Calling（Pydantic schema → function definition）替代正则 JSON 提取消除解析失败，LLM 流式输出（`.astream()` + SSE）支持 CLI/Web 实时预览，多模型分级路由（Sonnet 规划创作 / Haiku 审查资产，预算模式全 Haiku 降本 ~73%）；FastAPI 异步 API + Docker + GitHub Actions CI（140 测试 + 覆盖率 ≥70% 门控）
+- 将"一行主题→完整可运行游戏"拆解为 LangGraph 6 Agent DAG（3 阶段：规划→创作修订→资产并行），每个 Agent 对应独立决策域避免 prompt 过长导致输出不稳定；Director 两步生成防 max_tokens 截断，Reviewer↔Writer 条件边修订循环（3 轮上限 + 强制 proceed 防无限循环），资产阶段 `asyncio.gather` 并发 + `return_exceptions` 故障隔离；端到端产出含多分支剧情、立绘、背景、BGM 的 Ren'Py 可运行项目
+- 诊断 Writer 生成瓶颈为**上下文不足**（Reviewer 反馈集中在分支缺陷和策略偏离），逐模块优化 RAG 链：Query 层拼接场景语义+策略标签提升召回相关性，检索排序层 sentence-transformers + FAISS 从 1,036 条学术语料按余弦相似度召回并策略优先排序，生成层注入 few-shot 示例 + CoT 4 步推理 prompt；Reviewer 5 维度 rubric（LLM-as-Judge）+ BFS 可达性等 4 类结构校验形成修订闭环，策略分类 F1：keyword 0.21 → LLM 0.34（+57%）
+- 实现 Tool Calling（Pydantic schema → function definition）替代正则 JSON 提取消除解析失败，流式输出（`.astream()` + SSE）支持 CLI/Web 实时预览，多模型分级路由（Sonnet 规划 / Haiku 审查，预算模式全 Haiku 降本 ~73%）；FastAPI 异步 API + Docker + CI（140 测试 + 覆盖率 ≥70% 门控）
 
 ---
 
@@ -101,23 +101,25 @@
 - `max_revision_rounds=3` 硬上限，超过后强制 proceed
 - `_after_review()` 条件函数：PASS → 资产生成 / FAIL 且 rounds < 3 → writer / rounds ≥ 3 或 text_only → END
 
-### Bullet 2 — RAG 优化闭环
+### Bullet 2 — RAG 诊断方法论（核心亮点，引面试官深挖）
 
-**面试官会问**: "怎么发现是 Writer 的问题？"
+**面试官会问**: "怎么定位到问题在 Writer？"
 
-- Reviewer 反馈分析：FAIL 原因集中在"分支缺出口"和"对话缺乏策略感"，均指向 Writer 生成环节
-- 纯 prompt 优化天花板低（迭代多版后收益递减），Writer 需要具体范例才能模仿目标风格 → few-shot 注入是标准方案
+- 分析 Reviewer FAIL 反馈的分布：80%+ 集中在两类——"分支缺出口"（结构问题）和"对话缺策略感"（质量问题）
+- 结构问题由 Reviewer 结构校验拦截（4 类 BFS 检查，100% 检出），所以核心瓶颈在 Writer **生成质量**
+- 纯 prompt 迭代多版后收益递减 → 判断是上下文不足，不是指令不清
 
-**面试官会问**: "query 怎么构造？为什么不直接用 scene 描述？"
+**面试官会问**: "RAG 具体优化了哪些模块？"（展示你有"地图"）
 
-- `"{scene.description} | strategy: {strategy_label}"` — 拼接语义描述 + 策略标签
-- 纯描述检索会忽略策略维度（两个内容相似但策略不同的场景，需要不同的对话风格）
-- 检索排序：策略匹配项优先排列，保证 top-K 中策略相关示例占多数
+- **Query 构造模块**：纯场景描述检索忽略策略维度（两个内容相似但策略不同的场景需要不同对话风格），拼接 `"{description} | strategy: {label}"` 同时覆盖语义和策略两个召回维度
+- **检索排序模块**：sentence-transformers 编码 + FAISS `IndexFlatIP` 余弦相似度召回 top-5K，然后策略匹配项优先排列，保证 top-K 中策略相关示例占多数
+- **生成注入模块**：few-shot 示例 + CoT 4 步推理 prompt（情感状态→策略引导→潜台词→角色声音），让 Writer 先规划再写作
+- **效果**：策略分类 F1 从 keyword baseline 0.21 → LLM 0.34（+57%）
 
-**面试官会问**: "FAISS 为什么不用向量数据库？"
+**面试官会问**: "为什么不用向量数据库？"
 
-- 1,036 条，内存 < 10MB，`IndexFlatIP` 精确搜索延迟 < 1ms，无需外部依赖
-- Graceful degradation: 无 FAISS → numpy `np.dot` 暴力搜索，无 sentence-transformers → 标签过滤 fallback
+- 1,036 条语料，内存 < 10MB，`IndexFlatIP` 精确搜索延迟 < 1ms。Pinecone/Weaviate 在这个规模是 over-engineering
+- Graceful degradation 三级降级：FAISS → numpy 暴力搜索 → 标签过滤 fallback
 
 ### Bullet 3 — 结构化交互 + 工程成熟度
 
