@@ -1,8 +1,6 @@
 """Tests for LLM client configuration and retry logic."""
 from unittest.mock import patch
 
-import pytest
-
 from vn_agent.services.llm import _RETRIABLE, _make_retry_decorator, get_llm
 
 
