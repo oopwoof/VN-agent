@@ -18,7 +18,7 @@
 
 - **架构**：将"主题→可运行游戏"拆解为 LangGraph 6 Agent DAG（规划→创作修订→资产并行），Agent 解耦避免 prompt scaling 导致输出不稳定；Reviewer↔Writer 条件边修订循环保障生成质量，资产阶段 3 Agent 并发 + 故障隔离；端到端产出含多分支剧情、立绘、背景、BGM 的 Ren'Py 可运行项目
 - **算法**：通过 error analysis 定位生成瓶颈为上下文不足，逐模块优化 RAG 链（Query 构造 / 语义检索排序 / few-shot 注入），基于 1,036 条学术语料 + FAISS 向量检索提升召回相关性；设计 **LLM-as-Judge** 5 维度 rubric + 4 类结构校验（BFS 可达性）形成自动修订闭环，生成策略匹配度 F1 提升 **57%**（0.21→0.34）
-- **工程**：**Tool Calling** 替代正则解析消除格式错误，多模型路由平衡质量与成本（Sonnet 规划 / Haiku 审查，降本 ~73%）；FastAPI 异步 API + Docker + GitHub Actions CI（140 测试，覆盖率 ≥70%）
+- **工程**：**Tool Calling** 替代正则解析消除格式错误，多模型路由平衡质量与成本（Sonnet 规划 / Haiku 审查，降本 ~73%）；FastAPI 异步 API + Docker + GitHub Actions CI（140+ 测试，覆盖率门控）
 
 ---
 

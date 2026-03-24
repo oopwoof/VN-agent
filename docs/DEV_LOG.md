@@ -42,6 +42,39 @@
 
 ## 开发记录
 
+### 2026-03-23 | 测试 - 2026-03-23 19:51
+
+**变更文件** (8 个):
+**测试变更** (4 文件):
+  - `tests/test_agents/test_callbacks.py`
+  - `tests/test_services/test_llm.py`
+  - `tests/test_services/test_mock_llm.py`
+  - `tests/test_services/test_token_tracker.py`
+
+**配置变更** (1 文件):
+  - `pyproject.toml`
+
+**其他变更** (2 文件):
+  - `.github/workflows/ci.yml`
+  - `README.md`
+
+**变更统计**:
+```
+.github/workflows/ci.yml                  |  2 +-
+ README.md                                 |  2 +-
+ docs/RESUME.md                            |  2 +-
+ pyproject.toml                            |  7 +++
+ tests/test_agents/test_callbacks.py       |  6 +++
+ tests/test_services/test_llm.py           | 80 +++++++++++++++++++++++++++++++
+ tests/test_services/test_mock_llm.py      | 71 +++++++++++++++++++++++++++
+ tests/test_services/test_token_tracker.py | 63 ++++++++++++++++++++++++
+ 8 files changed, 230 insertions(+), 3 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-23 | 杂项 - 2026-03-23 19:46
 
 **变更文件** (1 个):

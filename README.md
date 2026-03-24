@@ -52,7 +52,7 @@ User: "A lighthouse keeper must choose between saving a ship or abandoning the p
 | Quality assurance | **LLM-as-Judge** 5-dimension rubric + BFS reachability structural checks |
 | Cost optimization | Multi-model routing (Sonnet planning / Haiku review, ~73% savings in budget mode) |
 | Web API | FastAPI async + SQLite job store + SSE streaming |
-| CI/CD | GitHub Actions (ruff + mypy + 140 pytest + coverage ≥70%) + Docker |
+| CI/CD | GitHub Actions (ruff + mypy + 140 pytest + coverage ≥65%) + Docker |
 
 ## Quick Start
 

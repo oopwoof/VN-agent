@@ -58,3 +58,10 @@ select = ["E", "F", "I", "UP"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = ["slow: marks tests that call real APIs (deselect with '-m \"not slow\"')"]
+
+[tool.coverage.run]
+omit = [
+    "src/vn_agent/eval/embedder.py",      # requires sentence-transformers + faiss (optional [rag] extra)
+    "src/vn_agent/eval/pipeline_eval.py",  # requires real LLM API
+    "src/vn_agent/services/image_gen.py",  # requires OpenAI DALL-E API
+]
