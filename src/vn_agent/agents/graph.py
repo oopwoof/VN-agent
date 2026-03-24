@@ -120,7 +120,7 @@ def _after_review(state: AgentState) -> str:
     return "proceed"
 
 
-def build_graph() -> StateGraph:
+def build_graph():  # type: ignore[return]
     """Build the full VN generation pipeline.
 
     Topology:
@@ -131,15 +131,15 @@ def build_graph() -> StateGraph:
     asset_generation runs character_designer, scene_artist, and music_director
     concurrently via asyncio.gather with per-agent fault isolation.
     """
-    graph = StateGraph(AgentState)
+    graph = StateGraph(AgentState)  # type: ignore[type-var]
 
     # Core pipeline nodes (traced individually)
-    graph.add_node("director", _make_traced_node("director", run_director))
-    graph.add_node("writer", _make_traced_node("writer", run_writer))
-    graph.add_node("reviewer", _make_traced_node("reviewer", run_reviewer))
+    graph.add_node("director", _make_traced_node("director", run_director))  # type: ignore[call-overload]
+    graph.add_node("writer", _make_traced_node("writer", run_writer))  # type: ignore[call-overload]
+    graph.add_node("reviewer", _make_traced_node("reviewer", run_reviewer))  # type: ignore[call-overload]
 
     # Parallel asset generation (3 sub-agents run concurrently inside one node)
-    graph.add_node("asset_generation", _run_assets_parallel)
+    graph.add_node("asset_generation", _run_assets_parallel)  # type: ignore[call-overload]
 
     # Linear flow: director → writer → reviewer
     graph.set_entry_point("director")

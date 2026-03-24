@@ -66,8 +66,8 @@ class EmbeddingIndex:
 
         if _HAS_FAISS:
             dim = self._embeddings.shape[1]
-            self._faiss_index = faiss.IndexFlatIP(dim)
-            self._faiss_index.add(self._embeddings)
+            self._faiss_index = faiss.IndexFlatIP(dim)  # type: ignore[union-attr]
+            self._faiss_index.add(self._embeddings)  # type: ignore[union-attr]
             logger.debug(f"Built FAISS index: {len(corpus)} vectors, dim={dim}")
         else:
             logger.debug(f"Built numpy index: {len(corpus)} vectors (FAISS not available)")
@@ -96,7 +96,7 @@ class EmbeddingIndex:
         fetch_k = min(k * 5, len(self._sessions))
 
         if _HAS_FAISS and self._faiss_index is not None:
-            scores, indices = self._faiss_index.search(q_emb, fetch_k)
+            scores, indices = self._faiss_index.search(q_emb, fetch_k)  # type: ignore[attr-defined]
             candidates = [
                 (self._sessions[idx], float(scores[0][i]))
                 for i, idx in enumerate(indices[0])
@@ -123,7 +123,7 @@ class EmbeddingIndex:
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
 
-        np.save(str(path / "embeddings.npy"), self._embeddings)
+        np.save(str(path / "embeddings.npy"), self._embeddings)  # type: ignore[arg-type]
 
         metadata = {
             "model_name": self._model_name,

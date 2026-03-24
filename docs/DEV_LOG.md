@@ -42,6 +42,42 @@
 
 ## 开发记录
 
+### 2026-03-23 | 实现 - 2026-03-23 19:44
+
+**变更文件** (9 个):
+**源码变更** (7 文件):
+  - `src/vn_agent/agents/character_designer.py`
+  - `src/vn_agent/agents/graph.py`
+  - `src/vn_agent/agents/scene_artist.py`
+  - `src/vn_agent/cli.py`
+  - `src/vn_agent/eval/embedder.py`
+  - `src/vn_agent/eval/retriever.py`
+  - `src/vn_agent/services/llm.py`
+
+**配置变更** (1 文件):
+  - `pyproject.toml`
+
+**其他变更** (1 文件):
+  - `uv.lock`
+
+**变更统计**:
+```
+pyproject.toml                            |  1 +
+ src/vn_agent/agents/character_designer.py |  2 +-
+ src/vn_agent/agents/graph.py              | 12 ++++++------
+ src/vn_agent/agents/scene_artist.py       |  4 ++--
+ src/vn_agent/cli.py                       | 10 +++++-----
+ src/vn_agent/eval/embedder.py             |  8 ++++----
+ src/vn_agent/eval/retriever.py            |  2 +-
+ src/vn_agent/services/llm.py              | 13 +++++++------
+ uv.lock                                   | 11 +++++++++++
+ 9 files changed, 38 insertions(+), 25 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-22 | 文档 - 2026-03-22 19:17
 
 **变更文件** (3 个):
@@ -1292,4 +1328,4 @@ _（每次 commit 后更新）_
 
 ---
 
-_最后更新: 2026-03-22_
+_最后更新: 2026-03-23_

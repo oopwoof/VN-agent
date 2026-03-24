@@ -45,7 +45,7 @@ async def run_character_designer(state: AgentState) -> dict:
             updated_characters[char_id] = characters[char_id]
             all_errors.append(f"CharacterDesigner: {result}")
         else:
-            updated_char, sprite_errors = result
+            updated_char, sprite_errors = result  # type: ignore[misc]
             updated_characters[char_id] = updated_char
             all_errors.extend(sprite_errors)
 

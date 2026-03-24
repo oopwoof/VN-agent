@@ -48,7 +48,7 @@ def retrieve_examples_semantic(
         strategy: optional strategy label to prefer
         k: number of examples to return
     """
-    return index.search(query=query, k=k, strategy=strategy or None)
+    return index.search(query=query, k=k, strategy=strategy or None)  # type: ignore[attr-defined]
 
 
 def format_examples(examples: list[AnnotatedSession]) -> str:

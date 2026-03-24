@@ -16,18 +16,19 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
-_RETRIABLE = (TimeoutError, ConnectionError)
+_RETRIABLE_LIST: list[type[Exception]] = [TimeoutError, ConnectionError]
 try:
     from anthropic import APIConnectionError, InternalServerError, RateLimitError
-    _RETRIABLE += (APIConnectionError, RateLimitError, InternalServerError)
+    _RETRIABLE_LIST.extend([APIConnectionError, RateLimitError, InternalServerError])
 except ImportError:
     pass
 try:
     from openai import APIConnectionError as OC
     from openai import RateLimitError as OR
-    _RETRIABLE += (OC, OR)
+    _RETRIABLE_LIST.extend([OC, OR])
 except ImportError:
     pass
+_RETRIABLE = tuple(_RETRIABLE_LIST)
 
 
 def _make_retry_decorator(max_retries: int):
@@ -57,10 +58,10 @@ def _get_llm_cached(
     if provider == "anthropic" and not base_url:
         from langchain_anthropic import ChatAnthropic
         return ChatAnthropic(
-            model=model,
-            api_key=api_key,
+            model=model,  # type: ignore[call-arg]
+            api_key=api_key,  # type: ignore[arg-type]
             temperature=temperature,
-            max_tokens=max_tokens,
+            max_tokens=max_tokens,  # type: ignore[call-arg]
         )
     else:
         # "openai" provider, OR any provider with a custom base_url

@@ -55,8 +55,8 @@ def setup_logging(verbose: bool = False) -> None:
     # Ensure UTF-8 output on Windows (non-destructive reconfigure)
     if sys.platform == "win32":
         try:
-            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
         except AttributeError:
             pass  # not available in all environments (e.g. pytest capture)
     level = logging.DEBUG if verbose else logging.INFO
@@ -274,13 +274,13 @@ async def _resume_async(
 
         try:
             progress.update(task, description="Character Designer: Creating characters...")
-            state.update(await run_character_designer(state))
+            state.update(await run_character_designer(state))  # type: ignore[arg-type]
 
             progress.update(task, description="Scene Artist: Generating backgrounds...")
-            state.update(await run_scene_artist(state))
+            state.update(await run_scene_artist(state))  # type: ignore[arg-type]
 
             progress.update(task, description="Music Director: Assigning BGM...")
-            state.update(await run_music_director(state))
+            state.update(await run_music_director(state))  # type: ignore[arg-type]
         except Exception as e:
             console.print(f"\n[red]Error during resume: {e}[/red]")
             raise typer.Exit(1)

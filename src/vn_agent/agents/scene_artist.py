@@ -53,7 +53,7 @@ async def run_scene_artist(state: AgentState) -> dict:
             bg_prompt_map[bg_id] = None
             all_errors.append(f"SceneArtist: background {bg_id}: {result}")
         else:
-            bg_scene, bg_errors = result
+            bg_scene, bg_errors = result  # type: ignore[misc]
             bg_prompt_map[bg_id] = bg_scene.background_prompt
             all_errors.extend(bg_errors)
 
@@ -103,7 +103,7 @@ Return a JSON object:
                 model=settings.llm_scene_artist_model,
                 caller=f"scene_artist/{scene.background_id}",
             )
-            bg_prompt = result.prompt
+            bg_prompt = result.prompt  # type: ignore[attr-defined]
         except Exception as e:
             logger.debug(f"Tool calling fallback for {scene.background_id}: {e}")
             bg_prompt = await _text_fallback_prompt(
