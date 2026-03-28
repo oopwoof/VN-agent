@@ -20,7 +20,7 @@ export interface JobSummary {
 }
 
 export interface StatusResponse {
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  status: string
   progress: string
   errors: string[]
 }

@@ -2,17 +2,17 @@ import { useRef, useEffect, useState } from 'react'
 import useStore from '../store'
 
 export default function ChatPanel() {
-  const { messages, config, setConfig, status } = useStore()
+  const { messages, config, setConfig, step } = useStore()
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
+  const busy = step === 'generating_setting' || step === 'generating_script'
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
   const handleSend = () => {
-    if (!input.trim() || status === 'generating') return
+    if (!input.trim() || busy) return
     setConfig({ theme: input.trim() })
     setInput('')
-    // Delay generate to let config update
     setTimeout(() => useStore.getState().generate(), 50)
   }
 
@@ -34,7 +34,7 @@ export default function ChatPanel() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Config (collapsible) */}
+      {/* Config */}
       <details className="px-4 py-2 border-t border-gray-800">
         <summary className="text-xs text-gray-500 cursor-pointer select-none">Settings</summary>
         <div className="grid grid-cols-3 gap-3 mt-2 text-xs">
@@ -67,18 +67,18 @@ export default function ChatPanel() {
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
             placeholder="Enter your story theme..."
-            disabled={status === 'generating'}
+            disabled={busy}
             className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm
               text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2
               focus:ring-indigo-500 disabled:opacity-50"
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim() || status === 'generating'}
+            disabled={!input.trim() || busy}
             className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium
               rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {status === 'generating' ? 'Generating...' : 'Generate'}
+            {busy ? '...' : 'Send'}
           </button>
         </div>
       </div>

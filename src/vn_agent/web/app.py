@@ -241,6 +241,219 @@ async def generate_stream(req: GenerateRequest):
     )
 
 
+# ── Step-by-step project APIs (Sprint 2) ────────────────────────────────────
+
+
+class SettingUpdate(BaseModel):
+    """User edits to world setting, characters, or outline."""
+    world_setting: dict | None = None
+    characters: dict | None = None
+    plot_outline: dict | None = None
+
+
+@app.post("/api/projects/{job_id}/generate-setting")
+async def generate_setting(job_id: str):
+    """Run Director only — generate world setting, characters, outline. Save to blackboard."""
+    store = _get_store()
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    store.update_status(job_id, "running", progress="Director planning story structure")
+
+    try:
+        from vn_agent.agents.director import _merge_outline_details, _step1_outline, _step2_details
+        from vn_agent.config import get_settings
+
+        settings = get_settings()
+        config = job.get("config", {})
+        output_dir = job.get("output_dir", ".")
+
+        outline = await _step1_outline(
+            job["theme"],
+            config.get("max_scenes", 10),
+            config.get("num_characters", 3),
+            output_dir,
+            settings,
+        )
+
+        details = await _step2_details(outline, output_dir, settings)
+        plan = _merge_outline_details(outline, details)
+
+        # Build blackboard from Director output
+        blackboard = {
+            "theme": job["theme"],
+            "world_setting": {
+                "title": plan.get("title", ""),
+                "description": plan.get("description", ""),
+            },
+            "characters": {
+                c.get("id", f"char_{i}"): c
+                for i, c in enumerate(plan.get("characters", []))
+            },
+            "plot_outline": {
+                "scenes": plan.get("scenes", []),
+                "start_scene_id": plan.get("start_scene_id", ""),
+            },
+            "raw_plan": plan,
+        }
+
+        store.update_blackboard(job_id, blackboard)
+        store.update_status(job_id, "setting_generated", progress="Setting ready for review")
+        return {"status": "setting_generated", "blackboard": blackboard}
+
+    except Exception as e:
+        logger.exception(f"generate-setting failed for {job_id}")
+        store.update_status(job_id, "failed", errors=[str(e)])
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{job_id}/blackboard")
+async def get_blackboard(job_id: str):
+    """Return the current blackboard state."""
+    store = _get_store()
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"blackboard": job.get("blackboard", {})}
+
+
+@app.put("/api/projects/{job_id}/setting")
+async def update_setting(job_id: str, update: SettingUpdate):
+    """User edits setting fields on the blackboard."""
+    store = _get_store()
+    bb = store.get_blackboard(job_id)
+    if not bb:
+        raise HTTPException(status_code=404, detail="No blackboard found")
+
+    if update.world_setting is not None:
+        bb["world_setting"] = {**bb.get("world_setting", {}), **update.world_setting}
+    if update.characters is not None:
+        bb["characters"] = update.characters
+    if update.plot_outline is not None:
+        bb["plot_outline"] = {**bb.get("plot_outline", {}), **update.plot_outline}
+
+    store.update_blackboard(job_id, bb)
+    store.update_status(job_id, "setting_confirmed", progress="Setting confirmed by user")
+    return {"status": "updated", "blackboard": bb}
+
+
+@app.post("/api/projects/{job_id}/generate-script")
+async def generate_script(job_id: str):
+    """Run Writer + Reviewer on the confirmed setting. Returns when complete."""
+    store = _get_store()
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    bb = job.get("blackboard", {})
+    plan = bb.get("raw_plan")
+    if not plan:
+        raise HTTPException(status_code=400, detail="No setting generated yet")
+
+    store.update_status(job_id, "running", progress="Writer creating dialogue")
+    asyncio.create_task(_run_script_generation(job_id, job, plan))
+    return {"status": "script_generating"}
+
+
+@app.post("/api/projects/{job_id}/compile")
+async def compile_project(job_id: str):
+    """Compile the Ren'Py project from the current blackboard state."""
+    store = _get_store()
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    output_dir = job.get("output_dir", "")
+    if not output_dir:
+        raise HTTPException(status_code=400, detail="No output directory")
+
+    try:
+        from vn_agent.compiler.project_builder import build_project
+
+        bb = job.get("blackboard", {})
+        script = bb.get("vn_script_obj")
+        characters = bb.get("characters_obj", {})
+
+        if not script:
+            raise HTTPException(status_code=400, detail="No script generated yet")
+
+        build_project(script, characters, Path(output_dir))
+        store.update_status(job_id, "completed", progress=f"done - {len(script.scenes)} scenes")
+        return {"status": "completed"}
+    except Exception as e:
+        store.update_status(job_id, "failed", errors=[str(e)])
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
+    """Background task: run Writer + Reviewer pipeline from plan data."""
+    store = _get_store()
+    try:
+        from vn_agent.agents.director import _build_from_plan
+        from vn_agent.agents.graph import build_graph
+        from vn_agent.agents.state import initial_state
+        from vn_agent.compiler.project_builder import build_project
+
+        theme = job["theme"]
+        config = job.get("config", {})
+        output_dir = job.get("output_dir", ".")
+
+        script, characters = _build_from_plan(plan, theme)
+
+        # Run Writer + Reviewer via the graph
+        graph = build_graph()
+        state = initial_state(
+            theme=theme,
+            output_dir=output_dir,
+            text_only=config.get("text_only", True),
+            max_scenes=config.get("max_scenes", 10),
+            num_characters=config.get("num_characters", 3),
+        )
+        state["vn_script"] = script
+        state["characters"] = characters
+
+        # Stream through writer → reviewer (skip director since we already have plan)
+        final_state: dict = dict(state)
+        async for update in graph.astream(state, stream_mode="updates"):
+            for node_name, chunk in update.items():
+                if node_name != "__end__":
+                    label = _STEP_LABELS.get(node_name, f"Running {node_name}")
+                    store.update_status(job_id, "running", progress=label)
+                if isinstance(chunk, dict):
+                    final_state.update(chunk)
+
+        result_script = final_state.get("vn_script")
+        result_chars = final_state.get("characters", {})
+
+        if not result_script:
+            store.update_status(job_id, "failed", errors=["No script produced"])
+            return
+
+        # Update blackboard with script results
+        bb = store.get_blackboard(job_id)
+        bb["scene_scripts"] = [
+            {"id": s.id, "title": s.title, "dialogue_count": len(s.dialogue)}
+            for s in result_script.scenes
+        ]
+        bb["vn_script_obj"] = result_script
+        bb["characters_obj"] = result_chars
+        store.update_blackboard(job_id, bb)
+
+        # Auto-compile
+        store.update_status(job_id, "running", progress="building project")
+        build_project(result_script, result_chars, Path(output_dir))
+
+        store.update_status(
+            job_id, "completed",
+            progress=f"done - {len(result_script.scenes)} scenes",
+            errors=final_state.get("errors", []),
+        )
+    except Exception as e:
+        logger.exception(f"Script generation failed for {job_id}")
+        store.update_status(job_id, "failed", errors=[str(e)])
+
+
 # ── Background runner ────────────────────────────────────────────────────────
 
 _STEP_LABELS = {

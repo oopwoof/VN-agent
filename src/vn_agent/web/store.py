@@ -19,14 +19,19 @@ CREATE TABLE IF NOT EXISTS jobs (
     progress TEXT NOT NULL DEFAULT 'queued',
     errors TEXT NOT NULL DEFAULT '[]',
     output_dir TEXT,
+    blackboard TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )
 """
 
+_MIGRATE_BLACKBOARD = """
+ALTER TABLE jobs ADD COLUMN blackboard TEXT NOT NULL DEFAULT '{}'
+"""
+
 
 class JobStore:
-    """SQLite-backed job persistence."""
+    """SQLite-backed job persistence with blackboard support."""
 
     def __init__(self, db_path: Path | str = "vn_jobs.db"):
         self._db_path = str(db_path)
@@ -34,6 +39,17 @@ class JobStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute(_CREATE_TABLE)
         self._conn.commit()
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Add blackboard column if missing (backward compat)."""
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        if "blackboard" not in cols:
+            try:
+                self._conn.execute(_MIGRATE_BLACKBOARD)
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass  # already exists
 
     def close(self) -> None:
         self._conn.close()
@@ -71,6 +87,23 @@ class JobStore:
         )
         self._conn.commit()
 
+    def update_blackboard(self, job_id: str, blackboard: dict) -> None:
+        """Save the full blackboard JSON snapshot."""
+        now = datetime.now(UTC).isoformat()
+        self._conn.execute(
+            "UPDATE jobs SET blackboard = ?, updated_at = ? WHERE job_id = ?",
+            (json.dumps(blackboard, ensure_ascii=False), now, job_id),
+        )
+        self._conn.commit()
+
+    def get_blackboard(self, job_id: str) -> dict:
+        row = self._conn.execute(
+            "SELECT blackboard FROM jobs WHERE job_id = ?", (job_id,)
+        ).fetchone()
+        if row is None:
+            return {}
+        return json.loads(row["blackboard"] or "{}")
+
     def get(self, job_id: str) -> dict | None:
         row = self._conn.execute(
             "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
@@ -95,4 +128,5 @@ class JobStore:
         d = dict(row)
         d["errors"] = json.loads(d.get("errors", "[]"))
         d["config"] = json.loads(d.get("config", "{}"))
+        d["blackboard"] = json.loads(d.get("blackboard", "{}"))
         return d

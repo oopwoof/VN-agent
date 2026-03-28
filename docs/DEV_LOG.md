@@ -42,6 +42,44 @@
 
 ## 开发记录
 
+### 2026-03-28 | 实现 - 2026-03-28 15:10
+
+**变更文件** (15 个):
+**源码变更** (2 文件):
+  - `src/vn_agent/web/app.py`
+  - `src/vn_agent/web/store.py`
+
+**其他变更** (13 文件):
+  - `frontend/.gitignore`
+  - `frontend/README.md`
+  - `frontend/eslint.config.js`
+  - `frontend/public/favicon.svg`
+  - `frontend/public/icons.svg`
+
+**变更统计**:
+```
+frontend/.gitignore                      |  24 ++++
+ frontend/README.md                       |  73 +++++++++++
+ frontend/eslint.config.js                |  23 ++++
+ frontend/public/favicon.svg              |   1 +
+ frontend/public/icons.svg                |  24 ++++
+ frontend/src/api.ts                      |  29 +++++
+ frontend/src/components/ChatPanel.tsx    |  14 +-
+ frontend/src/components/PreviewPanel.tsx | 123 ++++++++++--------
+ frontend/src/components/SettingPanel.tsx | 110 ++++++++++++++++
+ frontend/src/components/StatusBar.tsx    |   6 +-
+ frontend/src/store.ts                    | 123 +++++++++++++-----
+ frontend/src/types.ts                    |   2 +-
+ frontend/vite.config.ts                  |   1 +
+ src/vn_agent/web/app.py                  | 213 +++++++++++++++++++++++++++++++
+ src/vn_agent/web/store.py                |  36 +++++-
+ 15 files changed, 704 insertions(+), 98 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-28 | 实现 - 2026-03-28 13:30
 
 **变更文件** (28 个):

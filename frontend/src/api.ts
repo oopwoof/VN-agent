@@ -30,6 +30,35 @@ const api = {
   downloadUrl(jobId: string): string {
     return `/download/${jobId}`
   },
+
+  // ── Step APIs (Sprint 2) ──────────────────────────────────────────────────
+
+  async generateSetting(jobId: string): Promise<{ blackboard: Record<string, unknown> }> {
+    const resp = await fetch(`/api/projects/${jobId}/generate-setting`, { method: 'POST' })
+    if (!resp.ok) throw new Error(await resp.text())
+    return resp.json()
+  },
+
+  async getBlackboard(jobId: string): Promise<{ blackboard: Record<string, unknown> }> {
+    const resp = await fetch(`/api/projects/${jobId}/blackboard`)
+    if (!resp.ok) throw new Error(await resp.text())
+    return resp.json()
+  },
+
+  async updateSetting(jobId: string, update: Record<string, unknown>): Promise<{ blackboard: Record<string, unknown> }> {
+    const resp = await fetch(`/api/projects/${jobId}/setting`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(update),
+    })
+    if (!resp.ok) throw new Error(await resp.text())
+    return resp.json()
+  },
+
+  async generateScript(jobId: string): Promise<void> {
+    const resp = await fetch(`/api/projects/${jobId}/generate-script`, { method: 'POST' })
+    if (!resp.ok) throw new Error(await resp.text())
+  },
 }
 
 export default api
