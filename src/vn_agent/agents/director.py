@@ -23,6 +23,27 @@ logger = logging.getLogger(__name__)
 _SYSTEM_OUTLINE = DIRECTOR_OUTLINE_SYSTEM
 _SYSTEM_DETAILS = DIRECTOR_DETAILS_SYSTEM
 
+# Simplified prompts for small models (7B and below) that struggle with complex instructions
+_SMALL_MODEL_KEYWORDS = ("qwen", "llama", "phi", "mistral", "gemma", "yi-")
+
+_SYSTEM_OUTLINE_SIMPLE = (
+    "You are a visual novel story planner. "
+    "Given a theme, output a JSON story outline with scenes and characters. "
+    "Output ONLY valid JSON, no explanation."
+)
+
+_SYSTEM_DETAILS_SIMPLE = (
+    "You are a visual novel story planner. "
+    "Given a scene list, add navigation (next_scene_id or branches) and music mood. "
+    "Output ONLY valid JSON, no explanation."
+)
+
+
+def _is_small_model(model_name: str) -> bool:
+    """Detect if the model is a small local model that needs simplified prompts."""
+    name = model_name.lower()
+    return any(kw in name for kw in _SMALL_MODEL_KEYWORDS)
+
 
 async def run_director(state: AgentState) -> dict:
     """Director node: two-step plan — outline first, then navigation + music."""
@@ -73,10 +94,38 @@ async def _step1_outline(
     theme: str, max_scenes: int, num_characters: int, output_dir: str, settings
 ) -> dict:
     """Step 1: generate scene outlines + characters (no branches/music)."""
-    strategies = format_strategies_for_prompt()
-    system = _SYSTEM_OUTLINE.format(strategies=strategies)
+    small = _is_small_model(settings.llm_director_model)
 
-    user_prompt = f"""Create a visual novel story outline for this theme:
+    if small:
+        system = _SYSTEM_OUTLINE_SIMPLE
+        # Simplified prompt with compact JSON example showing 3 scenes
+        example = (
+            '{{"title":"Story Title","description":"One sentence","start_scene_id":"s1",'
+            '"scenes":['
+            '{{"id":"s1","title":"Opening","description":"What happens",'
+            '"background_id":"bg_place","characters_present":["char_hero"],'
+            '"narrative_strategy":"accumulate"}},'
+            '{{"id":"s2","title":"Conflict","description":"What happens",'
+            '"background_id":"bg_place2","characters_present":["char_hero"],'
+            '"narrative_strategy":"erode"}},'
+            '{{"id":"s3","title":"Resolution","description":"What happens",'
+            '"background_id":"bg_place3","characters_present":["char_hero"],'
+            '"narrative_strategy":"rupture"}}],'
+            '"characters":[{{"id":"char_hero","name":"Name","color":"#ff9966",'
+            '"personality":"Brief","background":"Brief","role":"protagonist"}}]}}'
+        )
+        user_prompt = f"""Theme: {theme}
+
+Create a visual novel with {max_scenes} scenes and {num_characters} characters.
+
+Return this JSON:
+{example}
+
+IMPORTANT: Include exactly {max_scenes} scenes and {num_characters} characters. Output ONLY JSON."""
+    else:
+        strategies = format_strategies_for_prompt()
+        system = _SYSTEM_OUTLINE.format(strategies=strategies)
+        user_prompt = f"""Create a visual novel story outline for this theme:
 
 Theme: {theme}
 
@@ -126,13 +175,31 @@ Return ONLY this JSON (no branches, no music yet):
 
 async def _step2_details(outline: dict, output_dir: str, settings) -> dict:
     """Step 2: add navigation (next_scene_id/branches) and music mood to each scene."""
+    small = _is_small_model(settings.llm_director_model)
     scene_ids = [s["id"] for s in (outline.get("scenes") or [])]
     scene_list = "\n".join(
         f'  - {s["id"]}: {s.get("title", "")} — {s.get("description", "")[:60]}'
         for s in (outline.get("scenes") or [])
     )
 
-    user_prompt = f"""You have this scene list:
+    if small:
+        system = _SYSTEM_DETAILS_SIMPLE
+        example = (
+            '{{"scenes":[{{"id":"scene_id","next_scene_id":"next_or_null",'
+            '"branches":[],"music_mood":"peaceful","music_description":"soft piano"}}]}}'
+        )
+        user_prompt = f"""Scenes: {json.dumps(scene_ids)}
+Start: {outline.get("start_scene_id", "")}
+
+For each scene add next_scene_id and music_mood. Last scene has next_scene_id=null.
+Add branches (choices) to at least 1 scene.
+
+Return JSON: {example}
+
+Output ONLY JSON."""
+    else:
+        system = _SYSTEM_DETAILS
+        user_prompt = f"""You have this scene list:
 {scene_list}
 
 All valid scene IDs: {json.dumps(scene_ids)}
@@ -158,7 +225,7 @@ Rules:
 - Include at least 2 scenes with meaningful branches"""
 
     response = await ainvoke_llm(
-        _SYSTEM_DETAILS, user_prompt, model=settings.llm_director_model, caller="director/step2",
+        system, user_prompt, model=settings.llm_director_model, caller="director/step2",
     )
     content = response.content if hasattr(response, "content") else str(response)
     _save_debug_raw(output_dir, "director_step2_raw.txt", content)
