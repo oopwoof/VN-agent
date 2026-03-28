@@ -6,10 +6,12 @@ Endpoints:
     GET    /download/{job_id} — download output as zip
     GET    /jobs           — list recent jobs
     DELETE /jobs/{job_id}  — delete a job and its output
+    POST   /generate/stream — SSE streaming outline preview
 """
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import shutil
@@ -17,21 +19,64 @@ import tempfile
 import uuid
 from pathlib import Path
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
 from vn_agent.web.store import JobStore
 
+logger = logging.getLogger(__name__)
+
 # ── Configuration from environment ──────────────────────────────────────────
 
 _DB_PATH = os.environ.get("VN_AGENT_DB_PATH", "vn_jobs.db")
 _MAX_CONCURRENT = int(os.environ.get("VN_AGENT_MAX_CONCURRENT", "3"))
 _OUTPUT_DIR = os.environ.get("VN_AGENT_OUTPUT_DIR", "")
+_MOCK_MODE = os.environ.get("VN_AGENT_MOCK", "").lower() in ("1", "true", "yes")
 
-app = FastAPI(title="VN-Agent API", version="0.2.0")
+
+@asynccontextmanager
+async def _lifespan(application: FastAPI):  # noqa: ARG001
+    """Patch LLM calls with mock responses if VN_AGENT_MOCK is set."""
+    if _MOCK_MODE:
+        from unittest.mock import patch as _patch
+
+        from vn_agent.services.mock_llm import mock_ainvoke
+
+        targets = [
+            "vn_agent.agents.director.ainvoke_llm",
+            "vn_agent.agents.writer.ainvoke_llm",
+            "vn_agent.agents.reviewer.ainvoke_llm",
+            "vn_agent.agents.character_designer.ainvoke_llm",
+            "vn_agent.agents.scene_artist.ainvoke_llm",
+        ]
+        patches = [_patch(t, side_effect=mock_ainvoke) for t in targets]
+        for p in patches:
+            p.start()
+        logger.info("Mock mode enabled — all LLM calls patched")
+        yield
+        for p in patches:
+            p.stop()
+    else:
+        yield
+
+
+app = FastAPI(title="VN-Agent API", version="0.3.0", lifespan=_lifespan)
+
+# CORS — allow frontend dev on different port
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 _store: JobStore | None = None
 _semaphore: asyncio.Semaphore | None = None
 
@@ -198,6 +243,14 @@ async def generate_stream(req: GenerateRequest):
 
 # ── Background runner ────────────────────────────────────────────────────────
 
+_STEP_LABELS = {
+    "director": "Director planning story structure",
+    "writer": "Writer creating dialogue",
+    "reviewer": "Reviewer checking quality",
+    "asset_generation": "Generating assets (characters, scenes, music)",
+}
+
+
 async def _run_job(job_id: str, req: GenerateRequest, output_dir: Path) -> None:
     store = _get_store()
     sem = _get_semaphore()
@@ -218,11 +271,18 @@ async def _run_job(job_id: str, req: GenerateRequest, output_dir: Path) -> None:
                 num_characters=req.num_characters,
             )
 
-            store.update_status(job_id, "running", progress="running pipeline")
-            result = await graph.ainvoke(state)
+            # Use astream for per-node progress updates
+            final_state: dict = {}
+            async for update in graph.astream(state, stream_mode="updates"):
+                for node_name, output_chunk in update.items():
+                    if node_name != "__end__":
+                        label = _STEP_LABELS.get(node_name, f"Running {node_name}")
+                        store.update_status(job_id, "running", progress=label)
+                    if isinstance(output_chunk, dict):
+                        final_state.update(output_chunk)
 
-            script = result.get("vn_script")
-            characters = result.get("characters", {})
+            script = final_state.get("vn_script")
+            characters = final_state.get("characters", {})
 
             if not script:
                 store.update_status(job_id, "failed", errors=["No script produced"])
@@ -235,8 +295,16 @@ async def _run_job(job_id: str, req: GenerateRequest, output_dir: Path) -> None:
                 job_id,
                 "completed",
                 progress=f"done - {len(script.scenes)} scenes",
-                errors=result.get("errors", []),
+                errors=final_state.get("errors", []),
             )
 
         except Exception as e:
+            logger.exception(f"Job {job_id} failed")
             store.update_status(job_id, "failed", errors=[str(e)])
+
+
+# ── Static frontend (must be AFTER all API route definitions) ───────────────
+
+_FRONTEND_DIR = Path(__file__).parent.parent.parent.parent / "frontend"
+if _FRONTEND_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=str(_FRONTEND_DIR), html=True), name="frontend")

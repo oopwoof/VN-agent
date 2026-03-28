@@ -42,6 +42,37 @@
 
 ## 开发记录
 
+### 2026-03-28 | 实现 - 2026-03-28 10:22
+
+**变更文件** (9 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/web/app.py`
+
+**其他变更** (8 文件):
+  - `.dockerignore`
+  - `Dockerfile`
+  - `docker-compose.yml`
+  - `frontend/css/style.css`
+  - `frontend/index.html`
+
+**变更统计**:
+```
+.dockerignore           |  12 +++
+ Dockerfile              |   8 +-
+ docker-compose.yml      |  30 ++++++++
+ frontend/css/style.css  |  81 ++++++++++++++++++++
+ frontend/index.html     | 147 +++++++++++++++++++++++++++++++++++++
+ frontend/js/api.js      |  85 +++++++++++++++++++++
+ frontend/js/app.js      | 191 ++++++++++++++++++++++++++++++++++++++++++++++++
+ frontend/js/ui.js       | 116 +++++++++++++++++++++++++++++
+ src/vn_agent/web/app.py |  80 ++++++++++++++++++--
+ 9 files changed, 743 insertions(+), 7 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-23 | 测试 - 2026-03-23 19:54
 
 **变更文件** (1 个):
@@ -1393,4 +1424,4 @@ _（每次 commit 后更新）_
 
 ---
 
-_最后更新: 2026-03-23_
+_最后更新: 2026-03-28_

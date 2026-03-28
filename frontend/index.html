@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VN-Agent Studio</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            primary: { 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca' },
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="bg-gray-950 text-gray-100 h-screen flex overflow-hidden">
+
+  <!-- Sidebar: Job History -->
+  <aside class="w-72 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0">
+    <div class="p-4 border-b border-gray-800">
+      <h1 class="text-lg font-bold text-indigo-400">VN-Agent Studio</h1>
+      <p class="text-xs text-gray-500 mt-1">AI Visual Novel Generator</p>
+    </div>
+    <div class="p-3">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">History</h2>
+    </div>
+    <div id="job-list" class="flex-1 overflow-y-auto px-3 space-y-1 custom-scrollbar">
+      <p class="text-xs text-gray-600 px-2">No jobs yet</p>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="flex-1 flex flex-col overflow-hidden">
+
+    <!-- Form Section -->
+    <section class="p-6 border-b border-gray-800">
+      <div class="max-w-2xl mx-auto space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-300 mb-1">Story Theme</label>
+          <textarea id="theme-input" rows="2"
+            class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+            placeholder="A lighthouse keeper must choose between saving a ship or abandoning the post during a catastrophic storm..."></textarea>
+        </div>
+
+        <div class="grid grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Max Scenes: <span id="max-scenes-val" class="text-indigo-400">10</span></label>
+            <input type="range" id="max-scenes" min="2" max="30" value="10" class="w-full accent-indigo-500">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Characters: <span id="num-chars-val" class="text-indigo-400">3</span></label>
+            <input type="range" id="num-characters" min="1" max="8" value="3" class="w-full accent-indigo-500">
+          </div>
+          <div class="flex items-end">
+            <label class="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+              <input type="checkbox" id="text-only" class="accent-indigo-500 w-4 h-4">
+              Text Only
+            </label>
+          </div>
+        </div>
+
+        <div class="flex gap-3">
+          <button id="generate-btn"
+            class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            Generate
+          </button>
+          <button id="preview-btn"
+            class="px-6 py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            Preview Outline
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Content Area (scrollable) -->
+    <div class="flex-1 overflow-y-auto p-6 custom-scrollbar">
+      <div class="max-w-2xl mx-auto space-y-6">
+
+        <!-- Progress Section (hidden by default) -->
+        <section id="progress-section" class="hidden">
+          <div class="bg-gray-900 border border-gray-800 rounded-lg p-6">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="spinner"></div>
+              <span id="progress-text" class="text-sm text-gray-300">Starting...</span>
+            </div>
+            <div class="w-full bg-gray-800 rounded-full h-2">
+              <div id="progress-bar" class="bg-indigo-500 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+            <div id="progress-steps" class="mt-4 space-y-1"></div>
+          </div>
+        </section>
+
+        <!-- Result Section (hidden by default) -->
+        <section id="result-section" class="hidden">
+          <div class="bg-gray-900 border border-green-800 rounded-lg p-6">
+            <div class="flex items-center gap-3 mb-3">
+              <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+              </svg>
+              <span id="result-text" class="text-green-400 font-medium">Generation complete!</span>
+            </div>
+            <button id="download-btn"
+              class="px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white font-medium rounded-lg transition-colors">
+              Download ZIP
+            </button>
+          </div>
+        </section>
+
+        <!-- Error Section (hidden by default) -->
+        <section id="error-section" class="hidden">
+          <div class="bg-gray-900 border border-red-800 rounded-lg p-6">
+            <div class="flex items-center gap-3 mb-2">
+              <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+              <span class="text-red-400 font-medium">Generation failed</span>
+            </div>
+            <pre id="error-text" class="text-xs text-red-300 bg-gray-950 rounded p-3 overflow-x-auto"></pre>
+          </div>
+        </section>
+
+        <!-- Preview Section (hidden by default) -->
+        <section id="preview-section" class="hidden">
+          <div class="bg-gray-900 border border-gray-800 rounded-lg">
+            <div class="flex items-center justify-between px-4 py-2 border-b border-gray-800">
+              <span class="text-xs text-gray-400 font-medium uppercase tracking-wider">Story Outline Preview</span>
+              <button id="close-preview" class="text-gray-500 hover:text-gray-300 text-xs">[close]</button>
+            </div>
+            <pre id="preview-output" class="p-4 text-sm text-gray-300 whitespace-pre-wrap max-h-96 overflow-y-auto custom-scrollbar font-mono leading-relaxed"></pre>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </main>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/ui.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
