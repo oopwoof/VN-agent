@@ -43,6 +43,7 @@ _MOCK_MODE = os.environ.get("VN_AGENT_MOCK", "").lower() in ("1", "true", "yes")
 @asynccontextmanager
 async def _lifespan(application: FastAPI):  # noqa: ARG001
     """Patch LLM calls with mock responses if VN_AGENT_MOCK is set."""
+    logger.info(f"VN_AGENT_MOCK={os.environ.get('VN_AGENT_MOCK')!r}, _MOCK_MODE={_MOCK_MODE}")
     if _MOCK_MODE:
         from unittest.mock import patch as _patch
 

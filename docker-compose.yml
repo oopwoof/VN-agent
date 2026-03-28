@@ -3,12 +3,11 @@ services:
     build: .
     ports:
       - "8000:8000"
+    env_file:
+      - .env.docker
     environment:
-      - VN_AGENT_MOCK=${VN_AGENT_MOCK:-false}
       - VN_AGENT_OUTPUT_DIR=/app/output
       - VN_AGENT_DB_PATH=/app/data/vn_jobs.db
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     volumes:
       - vn-output:/app/output
       - vn-data:/app/data

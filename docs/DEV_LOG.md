@@ -42,6 +42,30 @@
 
 ## 开发记录
 
+### 2026-03-28 | 实现 - 2026-03-28 11:38
+
+**变更文件** (4 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/web/app.py`
+
+**其他变更** (3 文件):
+  - `.dockerignore`
+  - `.env.docker`
+  - `docker-compose.yml`
+
+**变更统计**:
+```
+.dockerignore           | 1 +
+ .env.docker             | 8 ++++++++
+ docker-compose.yml      | 5 ++---
+ src/vn_agent/web/app.py | 1 +
+ 4 files changed, 12 insertions(+), 3 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-28 | 配置 - 2026-03-28 10:35
 
 **变更文件** (2 个):

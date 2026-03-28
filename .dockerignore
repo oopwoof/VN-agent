@@ -8,5 +8,6 @@ __pycache__
 *.pyc
 _eval_*
 .env
+.env.docker
 .claude/
 data/
