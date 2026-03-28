@@ -1,14 +1,18 @@
+# Stage 1: Build React frontend
+FROM node:20-slim AS frontend
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 2: Python backend + built frontend
 FROM python:3.11-slim
-
 WORKDIR /app
-
-# Copy source + deps together (hatchling needs src/ to build the package)
 COPY pyproject.toml uv.lock ./
 COPY src/ src/
 RUN pip install --no-cache-dir uv && uv sync --extra web --no-dev
-
-# Frontend + config (separate layer for faster rebuilds)
-COPY frontend/ frontend/
+COPY --from=frontend /app/frontend/dist frontend/dist
 COPY config/ config/
 
 EXPOSE 8000

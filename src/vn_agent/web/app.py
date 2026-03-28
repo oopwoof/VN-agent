@@ -305,6 +305,9 @@ async def _run_job(job_id: str, req: GenerateRequest, output_dir: Path) -> None:
 
 # ── Static frontend (must be AFTER all API route definitions) ───────────────
 
-_FRONTEND_DIR = Path(__file__).parent.parent.parent.parent / "frontend"
+# Serve built React app from frontend/dist/, or raw frontend/ for dev
+_FRONTEND_DIR = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
+if not _FRONTEND_DIR.is_dir():
+    _FRONTEND_DIR = Path(__file__).parent.parent.parent.parent / "frontend"
 if _FRONTEND_DIR.is_dir():
     app.mount("/", StaticFiles(directory=str(_FRONTEND_DIR), html=True), name="frontend")

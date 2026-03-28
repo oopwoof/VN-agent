@@ -42,6 +42,56 @@
 
 ## 开发记录
 
+### 2026-03-28 | 实现 - 2026-03-28 13:30
+
+**变更文件** (28 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/web/app.py`
+
+**其他变更** (27 文件):
+  - `.dockerignore`
+  - `.gitignore`
+  - `Dockerfile`
+  - `frontend/css/style.css`
+  - `frontend/index.html`
+
+**变更统计**:
+```
+.dockerignore                            |    2 +
+ .gitignore                               |    4 +
+ Dockerfile                               |   16 +-
+ frontend/css/style.css                   |   81 -
+ frontend/index.html                      |  157 +-
+ frontend/js/api.js                       |   85 -
+ frontend/js/app.js                       |  191 --
+ frontend/js/ui.js                        |  116 --
+ frontend/package-lock.json               | 3012 ++++++++++++++++++++++++++++++
+ frontend/package.json                    |   31 +
+ frontend/src/App.tsx                     |   30 +
+ frontend/src/api.ts                      |   35 +
+ frontend/src/app.css                     |   14 +
+ frontend/src/assets/hero.png             |  Bin 0 -> 44919 bytes
+ frontend/src/assets/vite.svg             |    1 +
+ frontend/src/components/ChatPanel.tsx    |   87 +
+ frontend/src/components/JobHistory.tsx   |   57 +
+ frontend/src/components/PreviewPanel.tsx |   86 +
+ frontend/src/components/ProgressBar.tsx  |   31 +
+ frontend/src/components/StatusBar.tsx    |   16 +
+ frontend/src/main.tsx                    |   10 +
+ frontend/src/store.ts                    |  122 ++
+ frontend/src/types.ts                    |   26 +
+ frontend/tsconfig.app.json               |   28 +
+ frontend/tsconfig.json                   |    7 +
+ frontend/tsconfig.node.json              |   26 +
+ frontend/vite.config.ts                  |   15 +
+ src/vn_agent/web/app.py                  |    5 +-
+ 28 files changed, 3666 insertions(+), 625 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-28 | 实现 - 2026-03-28 13:19
 
 **变更文件** (1 个):

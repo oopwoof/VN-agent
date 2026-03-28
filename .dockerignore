@@ -5,6 +5,8 @@
 .ruff_cache
 .coverage
 __pycache__
+node_modules
+frontend/dist
 *.pyc
 _eval_*
 .env
