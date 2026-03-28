@@ -2,12 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Dependencies first for layer caching
+# Copy source + deps together (hatchling needs src/ to build the package)
 COPY pyproject.toml uv.lock ./
-RUN pip install --no-cache-dir uv && uv sync --extra web
-
-# Source + frontend + config
 COPY src/ src/
+RUN pip install --no-cache-dir uv && uv sync --extra web --no-dev
+
+# Frontend + config (separate layer for faster rebuilds)
 COPY frontend/ frontend/
 COPY config/ config/
 
