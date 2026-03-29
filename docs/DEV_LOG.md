@@ -42,6 +42,22 @@
 
 ## 开发记录
 
+### 2026-03-28 | 杂项 - 2026-03-28 21:38
+
+**变更文件** (1 个):
+**其他变更** (1 文件):
+  - `.github/workflows/ci.yml`
+
+**变更统计**:
+```
+.github/workflows/ci.yml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-28 | Phase 9: Web 前端交互层（PRD v2 Sprint 1-3）
 
 **状态**: ✅ Sprint 1-3 完成

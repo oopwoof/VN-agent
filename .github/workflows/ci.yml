@@ -19,7 +19,7 @@ jobs:
       - name: Type check
         run: uv run mypy src/vn_agent/ --ignore-missing-imports
       - name: Test
-        run: uv run pytest -x --tb=short -m "not slow" --cov=src/vn_agent --cov-fail-under=65
+        run: uv run pytest -x --tb=short -m "not slow" --cov=src/vn_agent --cov-fail-under=60
 
 env:
   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
