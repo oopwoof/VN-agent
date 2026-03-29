@@ -42,6 +42,30 @@
 
 ## 开发记录
 
+### 2026-03-28 | 实现 - 2026-03-28 21:25
+
+**变更文件** (4 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/web/app.py`
+
+**其他变更** (3 文件):
+  - `frontend/src/api.ts`
+  - `frontend/src/components/PreviewPanel.tsx`
+  - `frontend/src/components/ScriptPanel.tsx`
+
+**变更统计**:
+```
+frontend/src/api.ts                      |  17 ++-
+ frontend/src/components/PreviewPanel.tsx |  22 +--
+ frontend/src/components/ScriptPanel.tsx  | 231 +++++++++++++++++++++++++++++++
+ src/vn_agent/web/app.py                  |  99 ++++++++++++-
+ 4 files changed, 342 insertions(+), 27 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-28 | 实现 - 2026-03-28 15:10
 
 **变更文件** (15 个):

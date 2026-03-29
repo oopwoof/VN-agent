@@ -31,7 +31,7 @@ const api = {
     return `/download/${jobId}`
   },
 
-  // ── Step APIs (Sprint 2) ──────────────────────────────────────────────────
+  // ── Step APIs ─────────────────────────────────────────────────────────────
 
   async generateSetting(jobId: string): Promise<{ blackboard: Record<string, unknown> }> {
     const resp = await fetch(`/api/projects/${jobId}/generate-setting`, { method: 'POST' })
@@ -58,6 +58,21 @@ const api = {
   async generateScript(jobId: string): Promise<void> {
     const resp = await fetch(`/api/projects/${jobId}/generate-script`, { method: 'POST' })
     if (!resp.ok) throw new Error(await resp.text())
+  },
+
+  async updateScene(jobId: string, sceneId: string, update: Record<string, unknown>): Promise<void> {
+    const resp = await fetch(`/api/projects/${jobId}/script/${sceneId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(update),
+    })
+    if (!resp.ok) throw new Error(await resp.text())
+  },
+
+  async exportScript(jobId: string): Promise<Record<string, unknown>> {
+    const resp = await fetch(`/api/projects/${jobId}/export-script`)
+    if (!resp.ok) throw new Error(await resp.text())
+    return resp.json()
   },
 }
 

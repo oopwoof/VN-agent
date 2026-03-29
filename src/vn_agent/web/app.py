@@ -356,6 +356,64 @@ async def generate_script(job_id: str):
     return {"status": "script_generating"}
 
 
+class SceneUpdate(BaseModel):
+    """User edits to a single scene's dialogue."""
+    dialogue: list[dict] | None = None
+    title: str | None = None
+    description: str | None = None
+
+
+@app.put("/api/projects/{job_id}/script/{scene_id}")
+async def update_scene(job_id: str, scene_id: str, update: SceneUpdate):
+    """User edits a single scene in the blackboard."""
+    store = _get_store()
+    bb = store.get_blackboard(job_id)
+    scenes = bb.get("scene_scripts", [])
+
+    found = False
+    for s in scenes:
+        if s.get("id") == scene_id:
+            if update.dialogue is not None:
+                s["dialogue"] = update.dialogue
+            if update.title is not None:
+                s["title"] = update.title
+            if update.description is not None:
+                s["description"] = update.description
+            found = True
+            break
+
+    if not found:
+        raise HTTPException(status_code=404, detail=f"Scene {scene_id} not found")
+
+    bb["scene_scripts"] = scenes
+    # Also update the serialized script
+    script_json = bb.get("_script_json", {})
+    for sj in script_json.get("scenes", []):
+        if sj.get("id") == scene_id:
+            if update.dialogue is not None:
+                sj["dialogue"] = update.dialogue
+            if update.title is not None:
+                sj["title"] = update.title
+            if update.description is not None:
+                sj["description"] = update.description
+            break
+    bb["_script_json"] = script_json
+
+    store.update_blackboard(job_id, bb)
+    return {"status": "updated", "scene_id": scene_id}
+
+
+@app.get("/api/projects/{job_id}/export-script")
+async def export_script(job_id: str):
+    """Export the current script as JSON."""
+    store = _get_store()
+    bb = store.get_blackboard(job_id)
+    script_json = bb.get("_script_json")
+    if not script_json:
+        raise HTTPException(status_code=400, detail="No script generated yet")
+    return script_json
+
+
 @app.post("/api/projects/{job_id}/compile")
 async def compile_project(job_id: str):
     """Compile the Ren'Py project from the current blackboard state."""
@@ -370,13 +428,18 @@ async def compile_project(job_id: str):
 
     try:
         from vn_agent.compiler.project_builder import build_project
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import VNScript
 
         bb = job.get("blackboard", {})
-        script = bb.get("vn_script_obj")
-        characters = bb.get("characters_obj", {})
+        script_json = bb.get("_script_json")
+        chars_json = bb.get("_characters_json", {})
 
-        if not script:
+        if not script_json:
             raise HTTPException(status_code=400, detail="No script generated yet")
+
+        script = VNScript.model_validate(script_json)
+        characters = {k: CharacterProfile.model_validate(v) for k, v in chars_json.items()}
 
         build_project(script, characters, Path(output_dir))
         store.update_status(job_id, "completed", progress=f"done - {len(script.scenes)} scenes")
@@ -430,14 +493,36 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
             store.update_status(job_id, "failed", errors=["No script produced"])
             return
 
-        # Update blackboard with script results
+        # Update blackboard with full script + reviewer data
         bb = store.get_blackboard(job_id)
         bb["scene_scripts"] = [
-            {"id": s.id, "title": s.title, "dialogue_count": len(s.dialogue)}
+            {
+                "id": s.id,
+                "title": s.title,
+                "description": s.description,
+                "background_id": s.background_id,
+                "characters_present": s.characters_present,
+                "narrative_strategy": s.narrative_strategy,
+                "dialogue": [
+                    {"character_id": d.character_id, "text": d.text, "emotion": d.emotion}
+                    for d in s.dialogue
+                ],
+                "branches": [
+                    {"text": b.text, "next_scene_id": b.next_scene_id}
+                    for b in s.branches
+                ],
+                "next_scene_id": s.next_scene_id,
+            }
             for s in result_script.scenes
         ]
-        bb["vn_script_obj"] = result_script
-        bb["characters_obj"] = result_chars
+        bb["reviewer"] = {
+            "passed": final_state.get("review_passed", False),
+            "feedback": final_state.get("review_feedback", ""),
+            "revision_count": final_state.get("revision_count", 0),
+        }
+        # Serialize Pydantic objects for later use
+        bb["_script_json"] = result_script.model_dump()
+        bb["_characters_json"] = {k: v.model_dump() for k, v in result_chars.items()}
         store.update_blackboard(job_id, bb)
 
         # Auto-compile
