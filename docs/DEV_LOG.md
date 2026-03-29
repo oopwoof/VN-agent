@@ -42,191 +42,66 @@
 
 ## 开发记录
 
-### 2026-03-28 | 实现 - 2026-03-28 21:25
+### 2026-03-28 | Phase 9: Web 前端交互层（PRD v2 Sprint 1-3）
 
-**变更文件** (4 个):
-**源码变更** (1 文件):
-  - `src/vn_agent/web/app.py`
+**状态**: ✅ Sprint 1-3 完成
 
-**其他变更** (3 文件):
-  - `frontend/src/api.ts`
-  - `frontend/src/components/PreviewPanel.tsx`
-  - `frontend/src/components/ScriptPanel.tsx`
-
-**变更统计**:
-```
-frontend/src/api.ts                      |  17 ++-
- frontend/src/components/PreviewPanel.tsx |  22 +--
- frontend/src/components/ScriptPanel.tsx  | 231 +++++++++++++++++++++++++++++++
- src/vn_agent/web/app.py                  |  99 ++++++++++++-
- 4 files changed, 342 insertions(+), 27 deletions(-)
-```
-
-**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+**目标**: 基于 PRD v2，构建 React + TypeScript Web 前端，实现分步生成 + 用户检查点 + 场景编辑
 
 ---
 
-### 2026-03-28 | 实现 - 2026-03-28 15:10
+#### Sprint 1: React 前端骨架 + 端到端联通
 
-**变更文件** (15 个):
-**源码变更** (2 文件):
-  - `src/vn_agent/web/app.py`
-  - `src/vn_agent/web/store.py`
+**技术决策**:
+- 选择 React + TypeScript + Vite 替代原 vanilla HTML/JS：后续 Sprint 需要复杂组件交互（编辑器、树状可视化），vanilla 无法支撑
+- Tailwind CSS 使用 CDN 而非 `@tailwindcss/vite` 插件：v4 原生插件在 Windows 上有 `@tailwindcss/oxide` 二进制文件加载问题
+- 状态管理选择 Zustand（不用 Redux）：中等复杂度应用，Zustand 更轻量
+- Vite proxy 配置：开发模式前端 :5173 → 后端 :8000 API 透传，避免 CORS 问题
 
-**其他变更** (13 文件):
-  - `frontend/.gitignore`
-  - `frontend/README.md`
-  - `frontend/eslint.config.js`
-  - `frontend/public/favicon.svg`
-  - `frontend/public/icons.svg`
+**架构**: 左右分栏（ChatPanel + PreviewPanel），侧栏 JobHistory
 
-**变更统计**:
-```
-frontend/.gitignore                      |  24 ++++
- frontend/README.md                       |  73 +++++++++++
- frontend/eslint.config.js                |  23 ++++
- frontend/public/favicon.svg              |   1 +
- frontend/public/icons.svg                |  24 ++++
- frontend/src/api.ts                      |  29 +++++
- frontend/src/components/ChatPanel.tsx    |  14 +-
- frontend/src/components/PreviewPanel.tsx | 123 ++++++++++--------
- frontend/src/components/SettingPanel.tsx | 110 ++++++++++++++++
- frontend/src/components/StatusBar.tsx    |   6 +-
- frontend/src/store.ts                    | 123 +++++++++++++-----
- frontend/src/types.ts                    |   2 +-
- frontend/vite.config.ts                  |   1 +
- src/vn_agent/web/app.py                  | 213 +++++++++++++++++++++++++++++++
- src/vn_agent/web/store.py                |  36 +++++-
- 15 files changed, 704 insertions(+), 98 deletions(-)
-```
-
-**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+**交付**: 6 个组件 + API 客户端 + Zustand store + 多阶段 Dockerfile
 
 ---
 
-### 2026-03-28 | 实现 - 2026-03-28 13:30
+#### Sprint 2: 设定确认检查点
 
-**变更文件** (28 个):
-**源码变更** (1 文件):
-  - `src/vn_agent/web/app.py`
+**技术决策**:
+- 后端引入"黑板"（Blackboard）机制：Director 输出写入 `jobs.blackboard` JSON 列，前端通过 API 读取/编辑
+- SQLite schema 迁移：`ALTER TABLE jobs ADD COLUMN blackboard`，带向后兼容检测
+- 分步 API 设计：`generate-setting` 仅跑 Director 并返回，不启动 Writer，用户确认后才触发 `generate-script`
+- 前端状态机：`idle → generating_setting → setting_review → generating_script → completed`
 
-**其他变更** (27 文件):
-  - `.dockerignore`
-  - `.gitignore`
-  - `Dockerfile`
-  - `frontend/css/style.css`
-  - `frontend/index.html`
+**问题与反思**:
+- Windows 上 `VN_AGENT_MOCK=true docker compose up` 的 shell 变量不传入容器 → 改用 `.env.docker` 文件方案
+- Pydantic 对象无法 JSON 序列化存入 SQLite → Sprint 3 改为 `model_dump()` 序列化
 
-**变更统计**:
-```
-.dockerignore                            |    2 +
- .gitignore                               |    4 +
- Dockerfile                               |   16 +-
- frontend/css/style.css                   |   81 -
- frontend/index.html                      |  157 +-
- frontend/js/api.js                       |   85 -
- frontend/js/app.js                       |  191 --
- frontend/js/ui.js                        |  116 --
- frontend/package-lock.json               | 3012 ++++++++++++++++++++++++++++++
- frontend/package.json                    |   31 +
- frontend/src/App.tsx                     |   30 +
- frontend/src/api.ts                      |   35 +
- frontend/src/app.css                     |   14 +
- frontend/src/assets/hero.png             |  Bin 0 -> 44919 bytes
- frontend/src/assets/vite.svg             |    1 +
- frontend/src/components/ChatPanel.tsx    |   87 +
- frontend/src/components/JobHistory.tsx   |   57 +
- frontend/src/components/PreviewPanel.tsx |   86 +
- frontend/src/components/ProgressBar.tsx  |   31 +
- frontend/src/components/StatusBar.tsx    |   16 +
- frontend/src/main.tsx                    |   10 +
- frontend/src/store.ts                    |  122 ++
- frontend/src/types.ts                    |   26 +
- frontend/tsconfig.app.json               |   28 +
- frontend/tsconfig.json                   |    7 +
- frontend/tsconfig.node.json              |   26 +
- frontend/vite.config.ts                  |   15 +
- src/vn_agent/web/app.py                  |    5 +-
- 28 files changed, 3666 insertions(+), 625 deletions(-)
-```
-
-**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+**交付**: 5 个新 API + SettingPanel 组件（世界观/角色/大纲卡片 + 确认/重新生成按钮）
 
 ---
 
-### 2026-03-28 | 实现 - 2026-03-28 13:19
+#### Sprint 3: 脚本生成 + 审阅交互
 
-**变更文件** (1 个):
-**源码变更** (1 文件):
-  - `src/vn_agent/agents/director.py`
+**技术决策**:
+- 黑板存储完整对话（不仅是摘要）：`scene_scripts[].dialogue[]` 含 character_id/text/emotion
+- Reviewer 反馈写入黑板：`reviewer.passed` / `reviewer.feedback` / `reviewer.revision_count`
+- 场景编辑 API：`PUT /api/projects/{id}/script/{scene_id}` 同时更新 `scene_scripts` 和 `_script_json`（保持双份数据一致）
+- 前端 ScriptPanel：标签页导航切换场景，inline 编辑模式（character_id 输入 + emotion 下拉 + text 文本框）
 
-**变更统计**:
-```
-src/vn_agent/agents/director.py | 77 ++++++++++++++++++++++++++++++++++++++---
- 1 file changed, 72 insertions(+), 5 deletions(-)
-```
-
-**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+**交付**: ScriptPanel 组件 + 场景编辑 API + 导出 JSON API + Reviewer banner
 
 ---
 
-### 2026-03-28 | 实现 - 2026-03-28 11:38
+#### Director 7B 本地模型适配
 
-**变更文件** (4 个):
-**源码变更** (1 文件):
-  - `src/vn_agent/web/app.py`
+**问题**: qwen2.5:7b 只生成 1 个场景（应 3-5 个），原因是 Director prompt 过于复杂（CoT `<thinking>` 标签 + 策略列表 + 复杂 JSON schema）超出 7B 模型能力
 
-**其他变更** (3 文件):
-  - `.dockerignore`
-  - `.env.docker`
-  - `docker-compose.yml`
+**方案**: 自动检测小模型（模型名含 qwen/llama/phi/mistral/gemma），启用简化 prompt 路径
+- 去掉 `<thinking>` 指令和策略列表
+- 用紧凑 JSON 示例（含 3 个场景）代替 schema 说明
+- 明确指示 `Include exactly N scenes`
 
-**变更统计**:
-```
-.dockerignore           | 1 +
- .env.docker             | 8 ++++++++
- docker-compose.yml      | 5 ++---
- src/vn_agent/web/app.py | 1 +
- 4 files changed, 12 insertions(+), 3 deletions(-)
-```
-
-**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
-
----
-
-### 2026-03-28 | 配置 - 2026-03-28 10:35
-
-**变更文件** (2 个):
-**配置变更** (1 文件):
-  - `pyproject.toml`
-
-**其他变更** (1 文件):
-  - `Dockerfile`
-
-**变更统计**:
-```
-Dockerfile     | 8 ++++----
- pyproject.toml | 3 +++
- 2 files changed, 7 insertions(+), 4 deletions(-)
-```
-
-**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
-
----
-
-### 2026-03-28 | 实现 - 2026-03-28 10:25
-
-**变更文件** (1 个):
-**源码变更** (1 文件):
-  - `src/vn_agent/web/app.py`
-
-**变更统计**:
-```
-src/vn_agent/web/app.py | 3 +--
- 1 file changed, 1 insertion(+), 2 deletions(-)
-```
-
-**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+**效果**: qwen2.5:7b 稳定输出 4 场景 + 2 个分支选择，生成完整可玩 Ren'Py 脚本
 
 ---
 
@@ -1604,10 +1479,13 @@ _（每次 commit 后更新）_
 | P0 | Phase 1-5 核心管线 | ✅ 完成 |
 | P0 | Phase 6 迭代体验（5 Sprint） | ✅ 完成（56 测试） |
 | P0 | Phase 7 工业化（Sprint 7-11） | ✅ 完成（122 测试） |
-| P0 | Phase 8 AI深度补全（Sprint 12-15） | ✅ 完成（140 测试） |
-| P1 | Web 前端（React/Vue） | 待开始 |
+| P0 | Phase 8 AI 深度补全（Sprint 12-15） | ✅ 完成（140 测试） |
+| P0 | Phase 9 Web 前端 Sprint 1-3 | ✅ 完成（React + 分步生成 + 场景编辑） |
+| P0 | Ollama 7B 本地模型适配 | ✅ 完成（4 场景+分支） |
+| P1 | Phase 9 Sprint 4：资产管理面板 | 🔜 下一步 |
+| P1 | Phase 9 Sprint 5：体验打磨 + 双 Key Pool | 🔜 后续 |
 | P1 | 真实 BGM 文件替换占位 WAV | 待开始 |
-| P2 | Ollama 本地模型验证 | 待开始 |
+| P2 | 自然语言编辑（对话式修改设定/脚本） | 待开始 |
 | P2 | Suno API 音乐生成 | 待 API 公开 |
 
 ---

@@ -23,7 +23,7 @@
 
 ## 产品状态
 
-**当前阶段**: Phase 8 AI 深度补全完成（140 测试全部通过）
+**当前阶段**: Phase 9 Web 前端交互层完成（PRD v2 Sprint 1-3）
 
 | 功能模块 | 计划 | 状态 |
 |---------|------|------|
@@ -67,6 +67,19 @@
 | Embedding RAG (sentence-transformers + FAISS) | Phase 8 | ✅ 完成 |
 | LLM Tool Calling (Pydantic schema) | Phase 8 | ✅ 完成 |
 | 流式 LLM 输出 (CLI + SSE) | Phase 8 | ✅ 完成 |
+| Director 7B 本地模型适配 | Phase 9 | ✅ 完成（简化 prompt，4 场景+分支） |
+| React + TypeScript 前端 (Vite) | Phase 9 Sprint 1 | ✅ 完成 |
+| 对话式交互 + 左右分栏布局 | Phase 9 Sprint 1 | ✅ 完成 |
+| 分步生成 API（黑板机制） | Phase 9 Sprint 2 | ✅ 完成 |
+| 设定确认检查点（世界观/角色/大纲） | Phase 9 Sprint 2 | ✅ 完成 |
+| 场景导航 + 场景级脚本编辑器 | Phase 9 Sprint 3 | ✅ 完成 |
+| Reviewer 审核结果展示 | Phase 9 Sprint 3 | ✅ 完成 |
+| 导出 JSON / 下载 ZIP | Phase 9 Sprint 3 | ✅ 完成 |
+| Docker 多阶段构建（Node + Python） | Phase 9 | ✅ 完成 |
+| Mock 模式 Web 支持 | Phase 9 | ✅ 完成 |
+| 资产管理面板（上传/替换） | Phase 9 Sprint 4 | 🔜 下一步 |
+| VN 预览播放器 | Phase 9 Sprint 4 | 🔜 下一步 |
+| 双 Key Pool + Prompt Caching | Phase 9 Sprint 5 | 🔜 后续 |
 | Suno API 音乐生成 | Phase 3 | ⏳ 待 Suno API 公开 |
 
 ---
