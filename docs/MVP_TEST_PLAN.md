@@ -33,7 +33,7 @@ LLM_REVIEWER_MODEL=qwen2.5:7b
 | M1 | 端到端生成成功率 | ≥ 90% | Mock 跑 10 次统计成功率 | Mock: 100% / Ollama: 待测 |
 | M2 | 单次生成成本 | ≤ $0.15 | budget preset 下 token tracker 统计 | Budget: ~$0.12 PASS / 默认: ~$0.25 |
 | M3 | 输入到下载耗时 | ≤ 5 分钟 | 计时器已内置 (StatusBar) | Mock: ~5s / Ollama: ~52s / Sonnet: 预估 2-4min |
-| M4 | Reviewer 评分 | ≥ 3.5/5.0 | Reviewer rubric prompt + 分数解析 | Prompt 有 rubric，代码仅 PASS/FAIL |
+| M4 | Reviewer 评分 | ≥ 3.5/5.0 | Reviewer rubric prompt + 分数解析 | 5 维度分数解析已实现（coherence/voice/arc/branches/pacing） |
 | M5 | Ren'Py 编译零报错 | 100% | 生成后用 Ren'Py SDK lint | PASS（Jinja2 + placeholder） |
 | M6 | 首次可用（无引导） | 定性 | 找非技术人员测试 | 对话式输入 + Fast Mode |
 | M7 | 首个成果 ≤30s | ≤ 30s | Director 返回时间 | Mock: 即时 / Ollama: ~12s |

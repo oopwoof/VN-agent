@@ -30,7 +30,10 @@ const EMOTIONS = ['neutral', 'happy', 'sad', 'angry', 'surprised', 'scared', 'th
 export default function ScriptPanel() {
   const { blackboard, currentJobId, step } = useStore()
   const scenes = (blackboard.scene_scripts || []) as SceneScript[]
-  const reviewer = (blackboard.reviewer || {}) as { passed?: boolean; feedback?: string; revision_count?: number }
+  const reviewer = (blackboard.reviewer || {}) as {
+    passed?: boolean; feedback?: string; revision_count?: number;
+    scores?: Record<string, number> | null
+  }
   const [activeScene, setActiveScene] = useState(0)
   const [editing, setEditing] = useState(false)
   const [editDialogue, setEditDialogue] = useState<DialogueLine[]>([])
@@ -86,7 +89,12 @@ export default function ScriptPanel() {
         <span className="font-semibold">
           {reviewer.passed ? '\u2705 Reviewer: PASS' : `\u26A0\uFE0F Reviewer: ${reviewer.revision_count || 0} revision(s)`}
         </span>
-        {reviewer.feedback && (
+        {reviewer.scores && (
+          <span className="ml-3 text-[10px] opacity-70">
+            {Object.entries(reviewer.scores).map(([k, v]) => `${k}=${v}`).join(' ')}
+          </span>
+        )}
+        {reviewer.feedback && !reviewer.passed && (
           <p className="mt-1 text-[11px] opacity-80 line-clamp-2">{reviewer.feedback}</p>
         )}
       </div>
@@ -211,12 +219,18 @@ export default function ScriptPanel() {
 
       {/* Actions */}
       {step === 'script_review' && (
-        <div className="flex gap-3 p-4 border-t border-gray-800">
+        <div className="flex flex-wrap gap-2 p-4 border-t border-gray-800">
           <button
             onClick={() => useStore.getState().confirmScript()}
             className="px-5 py-2 bg-green-600 hover:bg-green-500 text-white text-sm font-medium rounded-lg transition-colors"
           >
-            Confirm Script & Continue
+            Confirm & Continue
+          </button>
+          <button
+            onClick={() => useStore.getState().confirmSetting()}
+            className="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            Regenerate Script
           </button>
           <button
             onClick={() => useStore.getState().toggleVNPreview()}
@@ -229,6 +243,12 @@ export default function ScriptPanel() {
             className="px-5 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm font-medium rounded-lg transition-colors"
           >
             Export JSON
+          </button>
+          <button
+            onClick={() => useStore.setState({ step: 'setting_review' })}
+            className="px-5 py-2 bg-gray-800 hover:bg-gray-700 text-gray-400 text-sm rounded-lg transition-colors"
+          >
+            Back to Setting
           </button>
         </div>
       )}

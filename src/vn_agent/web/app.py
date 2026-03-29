@@ -568,6 +568,19 @@ async def upload_asset(
     return {"status": "uploaded", "asset_type": asset_type, "asset_id": asset_id, "size": len(content)}
 
 
+@app.get("/api/projects/{job_id}/token-usage")
+async def get_token_usage(job_id: str):
+    """Return token usage and estimated cost for this project."""
+    from vn_agent.services.token_tracker import tracker
+
+    return {
+        "total_input": tracker.total_input(),
+        "total_output": tracker.total_output(),
+        "estimated_cost_usd": round(tracker.estimated_cost(), 4),
+        "calls": len(tracker.calls),
+    }
+
+
 @app.post("/api/projects/{job_id}/compile")
 async def compile_project(job_id: str):
     """Compile the Ren'Py project from the current blackboard state."""
@@ -673,6 +686,7 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
             "passed": final_state.get("review_passed", False),
             "feedback": final_state.get("review_feedback", ""),
             "revision_count": final_state.get("revision_count", 0),
+            "scores": final_state.get("review_scores"),
         }
         # Serialize Pydantic objects for later use
         bb["_script_json"] = result_script.model_dump()

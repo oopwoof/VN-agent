@@ -42,6 +42,33 @@
 
 ## 开发记录
 
+### 2026-03-28 | 实现 - 2026-03-28 23:12
+
+**变更文件** (6 个):
+**源码变更** (2 文件):
+  - `src/vn_agent/agents/reviewer.py`
+  - `src/vn_agent/web/app.py`
+
+**其他变更** (3 文件):
+  - `frontend/src/components/ScriptPanel.tsx`
+  - `frontend/src/components/SettingPanel.tsx`
+  - `frontend/src/components/StatusBar.tsx`
+
+**变更统计**:
+```
+docs/MVP_TEST_PLAN.md                    |   2 +-
+ frontend/src/components/ScriptPanel.tsx  |  28 +++++-
+ frontend/src/components/SettingPanel.tsx | 142 ++++++++++++++++++++-----------
+ frontend/src/components/StatusBar.tsx    |  20 +++++
+ src/vn_agent/agents/reviewer.py          |  43 +++++++++-
+ src/vn_agent/web/app.py                  |  14 +++
+ 6 files changed, 192 insertions(+), 57 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-28 | 实现 - 2026-03-28 22:49
 
 **变更文件** (8 个):

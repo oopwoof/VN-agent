@@ -20,6 +20,7 @@ class ReviewResult:
     passed: bool
     feedback: str
     issues: list[str]
+    scores: dict[str, float] | None = None  # {coherence, voice, arc, branches, pacing, avg}
 
 
 async def run_reviewer(state: AgentState) -> dict:
@@ -61,11 +62,14 @@ async def run_reviewer(state: AgentState) -> dict:
     if strategy_warnings:
         feedback += "\n\nStrategy consistency warnings:\n" + "\n".join(f"- {w}" for w in strategy_warnings)
 
+    if result.scores:
+        logger.info(f"Reviewer scores: {result.scores}")
     logger.info(f"Reviewer result: {'PASS' if result.passed else 'FAIL'} - {result.feedback[:80]}")
 
     return {
         "review_passed": result.passed,
         "review_feedback": feedback,
+        "review_scores": result.scores,
         "revision_count": state.get("revision_count", 0) + 1,
     }
 
@@ -181,13 +185,46 @@ If issues found, list them clearly."""
 
     stripped = content.strip()
     first_line = stripped.split("\n", 1)[0].strip().upper()
+
+    # Parse numeric scores if present (format: coherence=X voice=X arc=X branches=X pacing=X avg=X.X)
+    scores = _parse_scores(stripped)
+
     has_issues = "\n-" in stripped or "\n*" in stripped or "\n1." in stripped
     is_pass = first_line.startswith("PASS") and not has_issues
 
     if is_pass:
-        return ReviewResult(passed=True, feedback="Quality check passed", issues=[])
+        return ReviewResult(passed=True, feedback="Quality check passed", issues=[], scores=scores)
 
-    return ReviewResult(passed=False, feedback=content, issues=[content])
+    return ReviewResult(passed=False, feedback=content, issues=[content], scores=scores)
+
+
+def _parse_scores(text: str) -> dict[str, float] | None:
+    """Extract reviewer rubric scores from response text."""
+    import re as _re
+
+    scores: dict[str, float] = {}
+    # Match patterns like "coherence=4" or "coherence: 4" or "Narrative Coherence (4/5)"
+    for key, patterns in {
+        "coherence": [r"coherence[=:\s]+(\d+(?:\.\d+)?)", r"narrative coherence[^0-9]*(\d+)"],
+        "voice": [r"voice[=:\s]+(\d+(?:\.\d+)?)", r"character voice[^0-9]*(\d+)"],
+        "arc": [r"arc[=:\s]+(\d+(?:\.\d+)?)", r"emotional arc[^0-9]*(\d+)"],
+        "branches": [r"branches[=:\s]+(\d+(?:\.\d+)?)", r"branch quality[^0-9]*(\d+)"],
+        "pacing": [r"pacing[=:\s]+(\d+(?:\.\d+)?)", r"pacing[^0-9]*(\d+)"],
+    }.items():
+        for pattern in patterns:
+            m = _re.search(pattern, text, _re.IGNORECASE)
+            if m:
+                scores[key] = float(m.group(1))
+                break
+
+    if not scores:
+        return None
+
+    # Compute average if we have at least 3 dimensions
+    if len(scores) >= 3:
+        scores["avg"] = round(sum(scores.values()) / len(scores), 2)
+
+    return scores
 
 
 # ── Strategy consistency check (non-blocking warnings) ─────────────────────
