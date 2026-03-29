@@ -42,6 +42,37 @@
 
 ## 开发记录
 
+### 2026-03-28 | 实现 - 2026-03-28 22:49
+
+**变更文件** (8 个):
+**源码变更** (5 文件):
+  - `src/vn_agent/agents/character_designer.py`
+  - `src/vn_agent/agents/director.py`
+  - `src/vn_agent/agents/scene_artist.py`
+  - `src/vn_agent/prompts/templates.py`
+  - `src/vn_agent/services/mock_llm.py`
+
+**测试变更** (2 文件):
+  - `tests/test_integration/test_pipeline.py`
+  - `tests/test_prompts/test_templates.py`
+
+**变更统计**:
+```
+docs/MVP_TEST_PLAN.md                     | 147 +++++++++++++++++++++++++
+ src/vn_agent/agents/character_designer.py |   6 +-
+ src/vn_agent/agents/director.py           |  15 ++-
+ src/vn_agent/agents/scene_artist.py       |   6 +-
+ src/vn_agent/prompts/templates.py         | 172 ++++++++++++++++++++++--------
+ src/vn_agent/services/mock_llm.py         |   9 +-
+ tests/test_integration/test_pipeline.py   |   5 +-
+ tests/test_prompts/test_templates.py      |   2 +-
+ 8 files changed, 300 insertions(+), 62 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-28 | 杂项 - 2026-03-28 22:08
 
 **变更文件** (7 个):

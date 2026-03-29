@@ -47,7 +47,7 @@ class TestTemplateContent:
 
     def test_writer_has_thinking_guidance(self):
         assert "<thinking>" in WRITER_SYSTEM
-        assert "emotional state" in WRITER_SYSTEM.lower()
+        assert "emotion" in WRITER_SYSTEM.lower()
 
     def test_reviewer_has_rubric(self):
         assert "<rubric>" in REVIEWER_SYSTEM

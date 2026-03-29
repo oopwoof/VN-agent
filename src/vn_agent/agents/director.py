@@ -28,14 +28,21 @@ _SMALL_MODEL_KEYWORDS = ("qwen", "llama", "phi", "mistral", "gemma", "yi-")
 
 _SYSTEM_OUTLINE_SIMPLE = (
     "You are a visual novel story planner. "
-    "Given a theme, output a JSON story outline with scenes and characters. "
-    "Output ONLY valid JSON, no explanation."
+    "Given a theme, create a story with interesting characters and emotional scenes. "
+    "Each scene should advance the plot — avoid filler scenes. "
+    "Characters need distinct personalities that create conflict. "
+    "Include a mix of narrative strategies: accumulate (build tension), "
+    "erode (wear down certainty), rupture (sudden revelation). "
+    "Output ONLY valid JSON, no explanation or commentary."
 )
 
 _SYSTEM_DETAILS_SIMPLE = (
     "You are a visual novel story planner. "
-    "Given a scene list, add navigation (next_scene_id or branches) and music mood. "
-    "Output ONLY valid JSON, no explanation."
+    "Given a scene list, add navigation and music. "
+    "Place branches at emotional turning points where the player's choice "
+    "changes the story outcome. Each branch choice should feel like a real dilemma. "
+    "Music moods: peaceful, romantic, tense, melancholic, joyful, mysterious, epic, neutral. "
+    "Output ONLY valid JSON, no explanation or commentary."
 )
 
 

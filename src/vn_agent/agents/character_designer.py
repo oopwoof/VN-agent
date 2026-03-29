@@ -7,16 +7,14 @@ from pathlib import Path
 
 from vn_agent.agents.state import AgentState
 from vn_agent.config import get_settings
+from vn_agent.prompts.templates import CHARACTER_DESIGNER_SYSTEM
 from vn_agent.schema.character import CharacterProfile, EmotionSprite, VisualProfile
 from vn_agent.services.image_gen import generate_image
 from vn_agent.services.llm import ainvoke_llm
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a character visual designer for anime-style visual novels.
-Given a character description, create a detailed visual profile for consistent image generation.
-Be specific about: hair color/style, eye color, outfit, distinctive features.
-"""
+SYSTEM_PROMPT = CHARACTER_DESIGNER_SYSTEM
 
 
 async def run_character_designer(state: AgentState) -> dict:

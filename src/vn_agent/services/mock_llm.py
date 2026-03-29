@@ -290,11 +290,14 @@ def _has_cjk(text: str) -> bool:
 def _dispatch(sys_lower: str, user_prompt: str, caller: str) -> str:
     is_chinese = _has_cjk(user_prompt)
 
-    # Director step2: system mentions navigation
-    if "director" in sys_lower and ("navigation" in sys_lower or "next_scene_id" in sys_lower):
+    # Director step2: detected by caller tag or system prompt content
+    if "director" in sys_lower and (
+        "step2" in caller or "details" in caller
+        or ("navigation" in sys_lower and "plan the overall" not in sys_lower)
+    ):
         return DIRECTOR_STEP2_CN if is_chinese else DIRECTOR_STEP2
 
-    # Director step1: system mentions director but not navigation
+    # Director step1
     if "director" in sys_lower:
         return DIRECTOR_STEP1_CN if is_chinese else DIRECTOR_STEP1
 

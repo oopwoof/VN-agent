@@ -7,16 +7,14 @@ from pathlib import Path
 
 from vn_agent.agents.state import AgentState
 from vn_agent.config import get_settings
+from vn_agent.prompts.templates import SCENE_ARTIST_SYSTEM
 from vn_agent.schema.script import Scene
 from vn_agent.services.image_gen import generate_image
 from vn_agent.services.llm import ainvoke_llm
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a background artist for visual novels.
-Generate detailed image prompts for scene backgrounds.
-Style: painterly anime background art, wide aspect ratio composition, detailed environments.
-"""
+SYSTEM_PROMPT = SCENE_ARTIST_SYSTEM
 
 
 async def run_scene_artist(state: AgentState) -> dict:

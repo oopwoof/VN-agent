@@ -110,7 +110,10 @@ def mock_ainvoke(mocker):
         elif "reviewer" in system_lower:
             content = REVIEWER_MOCK_RESPONSE
         elif "director" in system_lower:
-            if "navigation" in system_lower or "next_scene_id" in system_lower:
+            # Dispatch by caller tag (more reliable than system prompt content matching)
+            if "step2" in caller or "details" in caller:
+                content = DIRECTOR_STEP2_RESPONSE
+            elif "navigation" in system_lower and "plan the overall" not in system_lower:
                 content = DIRECTOR_STEP2_RESPONSE
             else:
                 content = DIRECTOR_STEP1_RESPONSE
