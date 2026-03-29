@@ -3,6 +3,7 @@ export interface GenerateConfig {
   max_scenes: number
   num_characters: number
   text_only: boolean
+  fast_mode: boolean
 }
 
 export interface ChatMessage {

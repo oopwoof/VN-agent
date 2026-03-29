@@ -1,11 +1,26 @@
 import { useRef, useEffect, useState } from 'react'
 import useStore from '../store'
 
+function TypewriterText({ text }: { text: string }) {
+  const [displayed, setDisplayed] = useState('')
+  useEffect(() => {
+    setDisplayed('')
+    let i = 0
+    const timer = setInterval(() => {
+      i++
+      setDisplayed(text.slice(0, i))
+      if (i >= text.length) clearInterval(timer)
+    }, 15)
+    return () => clearInterval(timer)
+  }, [text])
+  return <>{displayed}</>
+}
+
 export default function ChatPanel() {
   const { messages, config, setConfig, step } = useStore()
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
-  const busy = step === 'generating_setting' || step === 'generating_script'
+  const busy = step === 'generating_setting' || step === 'generating_script' || step === 'compiling'
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
@@ -27,17 +42,31 @@ export default function ChatPanel() {
                 ? 'bg-indigo-600 text-white rounded-br-md'
                 : 'bg-gray-800 text-gray-200 rounded-bl-md'
             }`}>
-              {m.content}
+              {m.role === 'system' && i === messages.length - 1 ? (
+                <TypewriterText text={m.content} />
+              ) : (
+                m.content
+              )}
             </div>
           </div>
         ))}
         <div ref={bottomRef} />
       </div>
 
+      {/* Error retry */}
+      {step === 'failed' && (
+        <div className="px-4 py-2 border-t border-red-900/50 bg-red-950/20">
+          <button onClick={() => useStore.getState().generate()}
+            className="text-xs text-red-400 hover:text-red-300 underline">
+            Retry generation
+          </button>
+        </div>
+      )}
+
       {/* Config */}
       <details className="px-4 py-2 border-t border-gray-800">
         <summary className="text-xs text-gray-500 cursor-pointer select-none">Settings</summary>
-        <div className="grid grid-cols-3 gap-3 mt-2 text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2 text-xs">
           <label className="text-gray-400">
             Scenes: <span className="text-indigo-400">{config.max_scenes}</span>
             <input type="range" min={2} max={20} value={config.max_scenes}
@@ -55,6 +84,12 @@ export default function ChatPanel() {
               onChange={e => setConfig({ text_only: e.target.checked })}
               className="accent-indigo-500" />
             Text Only
+          </label>
+          <label className="flex items-center gap-2 text-gray-400">
+            <input type="checkbox" checked={config.fast_mode}
+              onChange={e => setConfig({ fast_mode: e.target.checked })}
+              className="accent-indigo-500" />
+            Fast Mode
           </label>
         </div>
       </details>

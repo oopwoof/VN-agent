@@ -42,6 +42,32 @@
 
 ## 开发记录
 
+### 2026-03-28 | 杂项 - 2026-03-28 22:08
+
+**变更文件** (7 个):
+**其他变更** (7 文件):
+  - `frontend/src/App.tsx`
+  - `frontend/src/app.css`
+  - `frontend/src/components/ChatPanel.tsx`
+  - `frontend/src/components/ProgressBar.tsx`
+  - `frontend/src/components/StatusBar.tsx`
+
+**变更统计**:
+```
+frontend/src/App.tsx                    | 29 +++++++++++++++++++----
+ frontend/src/app.css                    |  7 ++++++
+ frontend/src/components/ChatPanel.tsx   | 41 ++++++++++++++++++++++++++++++---
+ frontend/src/components/ProgressBar.tsx | 20 ++++++++++------
+ frontend/src/components/StatusBar.tsx   | 26 ++++++++++++++++-----
+ frontend/src/store.ts                   | 24 +++++++++++++++++--
+ frontend/src/types.ts                   |  1 +
+ 7 files changed, 126 insertions(+), 22 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-28 | 实现 - 2026-03-28 22:01
 
 **变更文件** (10 个):

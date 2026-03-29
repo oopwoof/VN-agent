@@ -63,7 +63,7 @@ const useStore = create<AppState>((set, get) => ({
   errors: [],
   blackboard: {},
   messages: [{ role: 'system', content: 'Welcome to VN-Agent Studio! Enter a story theme to generate a visual novel.', timestamp: Date.now() }],
-  config: { theme: '', max_scenes: 5, num_characters: 3, text_only: true },
+  config: { theme: '', max_scenes: 5, num_characters: 3, text_only: true, fast_mode: false },
   jobs: [],
   assets: null,
   vnPreview: false,
@@ -91,8 +91,18 @@ const useStore = create<AppState>((set, get) => ({
       const { blackboard } = await api.generateSetting(job_id)
       stopTimers()
 
-      set({ step: 'setting_review', blackboard, progress: 'Setting ready for review' })
       const ws = blackboard.world_setting as Record<string, string> | undefined
+
+      if (get().config.fast_mode) {
+        // Fast mode: skip setting review, auto-confirm
+        set({ blackboard, progress: 'Fast mode: auto-confirming setting...' })
+        addMsg(get, set, 'system', `Story: "${ws?.title || 'Untitled'}". Fast mode — auto-generating script...`)
+        get().refreshJobs()
+        await get().confirmSetting()
+        return
+      }
+
+      set({ step: 'setting_review', blackboard, progress: 'Setting ready for review' })
       addMsg(get, set, 'system', `Story outline ready: "${ws?.title || 'Untitled'}". Review and confirm.`)
       get().refreshJobs()
     } catch (e) {
@@ -120,6 +130,16 @@ const useStore = create<AppState>((set, get) => ({
           if (res.status === 'completed') {
             stopTimers()
             const { blackboard } = await api.getBlackboard(currentJobId)
+
+            if (get().config.fast_mode) {
+              // Fast mode: skip script review, auto-compile
+              set({ blackboard, errors: res.errors })
+              addMsg(get, set, 'system', `Script done. Fast mode — compiling...`)
+              get().refreshJobs()
+              await get().confirmScript()
+              return
+            }
+
             set({ step: 'script_review', blackboard, errors: res.errors })
             addMsg(get, set, 'system', `Script ready! ${res.progress}. Review and confirm.`)
             get().refreshJobs()
