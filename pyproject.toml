@@ -25,6 +25,7 @@ dependencies = [
     "pillow>=10.0",
     "pydub>=0.25",
     "rich>=13.0",
+    "python-multipart>=0.0.22",
 ]
 
 [project.optional-dependencies]

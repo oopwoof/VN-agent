@@ -210,14 +210,20 @@ export default function ScriptPanel() {
       )}
 
       {/* Actions */}
-      {step === 'completed' && (
+      {step === 'script_review' && (
         <div className="flex gap-3 p-4 border-t border-gray-800">
-          <a
-            href={currentJobId ? api.downloadUrl(currentJobId) : '#'}
+          <button
+            onClick={() => useStore.getState().confirmScript()}
             className="px-5 py-2 bg-green-600 hover:bg-green-500 text-white text-sm font-medium rounded-lg transition-colors"
           >
-            Download ZIP
-          </a>
+            Confirm Script & Continue
+          </button>
+          <button
+            onClick={() => useStore.getState().toggleVNPreview()}
+            className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            Preview VN
+          </button>
           <button
             onClick={exportJSON}
             className="px-5 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm font-medium rounded-lg transition-colors"

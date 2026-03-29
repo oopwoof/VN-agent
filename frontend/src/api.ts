@@ -1,4 +1,4 @@
-import type { GenerateConfig, JobSummary, StatusResponse } from './types'
+import type { AssetManifest, GenerateConfig, JobSummary, StatusResponse } from './types'
 
 const api = {
   async generate(config: GenerateConfig): Promise<{ job_id: string }> {
@@ -73,6 +73,32 @@ const api = {
     const resp = await fetch(`/api/projects/${jobId}/export-script`)
     if (!resp.ok) throw new Error(await resp.text())
     return resp.json()
+  },
+
+  // ── Asset APIs (Sprint 4) ────────────────────────────────────────────────
+
+  async listAssets(jobId: string): Promise<AssetManifest> {
+    const resp = await fetch(`/api/projects/${jobId}/assets`)
+    if (!resp.ok) throw new Error(await resp.text())
+    return resp.json()
+  },
+
+  async uploadAsset(jobId: string, file: File, assetType: string, assetId: string): Promise<void> {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('asset_type', assetType)
+    form.append('asset_id', assetId)
+    const resp = await fetch(`/api/projects/${jobId}/assets/upload`, { method: 'POST', body: form })
+    if (!resp.ok) throw new Error(await resp.text())
+  },
+
+  assetFileUrl(jobId: string, path: string): string {
+    return `/api/projects/${jobId}/assets/file/${path}`
+  },
+
+  async compile(jobId: string): Promise<void> {
+    const resp = await fetch(`/api/projects/${jobId}/compile`, { method: 'POST' })
+    if (!resp.ok) throw new Error(await resp.text())
   },
 }
 

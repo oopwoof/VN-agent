@@ -24,3 +24,19 @@ export interface StatusResponse {
   progress: string
   errors: string[]
 }
+
+export interface AssetEntry {
+  id?: string
+  char_id?: string
+  emotion?: string
+  mood?: string
+  path: string
+  is_placeholder: boolean
+  url: string
+}
+
+export interface AssetManifest {
+  backgrounds: AssetEntry[]
+  characters: AssetEntry[]
+  bgm: AssetEntry[]
+}

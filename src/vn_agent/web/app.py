@@ -20,7 +20,7 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -412,6 +412,160 @@ async def export_script(job_id: str):
     if not script_json:
         raise HTTPException(status_code=400, detail="No script generated yet")
     return script_json
+
+
+# ── Asset management (Sprint 4) ─────────────────────────────────────────────
+
+_PLACEHOLDER_PNG_SIZE = 67
+_PLACEHOLDER_OGG_SIZE = 44
+_IMG_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+_AUDIO_EXTENSIONS = {".ogg", ".mp3", ".wav"}
+_MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
+_MAX_AUDIO_SIZE = 10 * 1024 * 1024  # 10MB
+
+_MIME_MAP = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+             ".webp": "image/webp", ".ogg": "audio/ogg", ".mp3": "audio/mpeg", ".wav": "audio/wav"}
+
+
+def _is_placeholder(file_path: Path) -> bool:
+    if not file_path.exists():
+        return True
+    size = file_path.stat().st_size
+    return size <= _PLACEHOLDER_PNG_SIZE or size <= _PLACEHOLDER_OGG_SIZE
+
+
+def _asset_url(job_id: str, rel_path: str) -> str:
+    return f"/api/projects/{job_id}/assets/file/{rel_path}"
+
+
+@app.get("/api/projects/{job_id}/assets")
+async def list_assets(job_id: str):
+    """List all assets in the project with placeholder detection."""
+    store = _get_store()
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    output_dir = Path(job.get("output_dir", ""))
+    bb = job.get("blackboard", {})
+    scenes = bb.get("scene_scripts", [])
+    chars = bb.get("characters", bb.get("_characters_json", {}))
+
+    backgrounds = []
+    bg_seen: set[str] = set()
+    for s in scenes:
+        bg_id = s.get("background_id", "")
+        if bg_id and bg_id not in bg_seen:
+            bg_seen.add(bg_id)
+            rel = f"game/images/backgrounds/{bg_id}.png"
+            backgrounds.append({
+                "id": bg_id, "path": rel,
+                "is_placeholder": _is_placeholder(output_dir / rel),
+                "url": _asset_url(job_id, rel),
+            })
+
+    characters = []
+    for char_id in chars:
+        for emotion in ["neutral", "happy", "sad"]:
+            rel = f"game/images/characters/{char_id}/{emotion}.png"
+            characters.append({
+                "char_id": char_id, "emotion": emotion, "path": rel,
+                "is_placeholder": _is_placeholder(output_dir / rel),
+                "url": _asset_url(job_id, rel),
+            })
+
+    bgm_list = []
+    bgm_seen: set[str] = set()
+    for s in scenes:
+        music = s.get("music") or {}
+        mood = music.get("mood") if isinstance(music, dict) else None
+        if not mood:
+            strategy = s.get("narrative_strategy", "neutral")
+            mood = strategy if strategy else "neutral"
+        if mood and mood not in bgm_seen:
+            bgm_seen.add(mood)
+            rel = f"game/audio/bgm/{mood}.ogg"
+            bgm_list.append({
+                "mood": mood, "path": rel,
+                "is_placeholder": _is_placeholder(output_dir / rel),
+                "url": _asset_url(job_id, rel),
+            })
+
+    return {"backgrounds": backgrounds, "characters": characters, "bgm": bgm_list}
+
+
+@app.get("/api/projects/{job_id}/assets/file/{path:path}")
+async def serve_asset(job_id: str, path: str):
+    """Serve an asset file from the project output directory."""
+    store = _get_store()
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    output_dir = Path(job.get("output_dir", ""))
+    file_path = (output_dir / path).resolve()
+
+    if not str(file_path).startswith(str(output_dir.resolve())):
+        raise HTTPException(status_code=403, detail="Path traversal denied")
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = file_path.suffix.lower()
+    media_type = _MIME_MAP.get(ext, "application/octet-stream")
+    return FileResponse(str(file_path), media_type=media_type)
+
+
+@app.post("/api/projects/{job_id}/assets/upload")
+async def upload_asset(
+    job_id: str,
+    file: UploadFile,
+    asset_type: str = Form(...),
+    asset_id: str = Form(...),
+):
+    """Upload an asset file to replace a placeholder."""
+    store = _get_store()
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if not re.fullmatch(r"[a-zA-Z0-9_/.-]+", asset_id):
+        raise HTTPException(status_code=400, detail="Invalid asset_id format")
+
+    output_dir = Path(job.get("output_dir", ""))
+
+    if asset_type == "background":
+        target = output_dir / "game" / "images" / "backgrounds" / f"{asset_id}.png"
+        allowed_ext = _IMG_EXTENSIONS
+        max_size = _MAX_IMAGE_SIZE
+    elif asset_type == "character_sprite":
+        target = output_dir / "game" / "images" / "characters" / f"{asset_id}.png"
+        allowed_ext = _IMG_EXTENSIONS
+        max_size = _MAX_IMAGE_SIZE
+    elif asset_type == "bgm":
+        target = output_dir / "game" / "audio" / "bgm" / f"{asset_id}.ogg"
+        allowed_ext = _AUDIO_EXTENSIONS
+        max_size = _MAX_AUDIO_SIZE
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown asset_type: {asset_type}")
+
+    # Path traversal check
+    if not str(target.resolve()).startswith(str(output_dir.resolve())):
+        raise HTTPException(status_code=403, detail="Path traversal denied")
+
+    # Extension check
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in allowed_ext:
+        raise HTTPException(status_code=400, detail=f"Invalid file format {ext}, allowed: {allowed_ext}")
+
+    # Size check
+    content = await file.read()
+    if len(content) > max_size:
+        raise HTTPException(status_code=400, detail=f"File too large ({len(content)} bytes), max {max_size}")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(content)
+
+    return {"status": "uploaded", "asset_type": asset_type, "asset_id": asset_id, "size": len(content)}
 
 
 @app.post("/api/projects/{job_id}/compile")

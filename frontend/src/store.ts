@@ -1,8 +1,11 @@
 import { create } from 'zustand'
-import type { ChatMessage, GenerateConfig, JobSummary } from './types'
+import type { AssetManifest, ChatMessage, GenerateConfig, JobSummary } from './types'
 import api from './api'
 
-export type AppStep = 'idle' | 'generating_setting' | 'setting_review' | 'generating_script' | 'completed' | 'failed'
+export type AppStep =
+  | 'idle' | 'generating_setting' | 'setting_review'
+  | 'generating_script' | 'script_review'
+  | 'asset_management' | 'compiling' | 'completed' | 'failed'
 
 interface AppState {
   currentJobId: string | null
@@ -13,6 +16,8 @@ interface AppState {
   messages: ChatMessage[]
   config: GenerateConfig
   jobs: JobSummary[]
+  assets: AssetManifest | null
+  vnPreview: boolean
   startTime: number | null
   elapsed: number
 
@@ -20,6 +25,11 @@ interface AppState {
   generate: () => Promise<void>
   confirmSetting: () => Promise<void>
   regenerateSetting: () => Promise<void>
+  confirmScript: () => Promise<void>
+  fetchAssets: () => Promise<void>
+  uploadAsset: (file: File, assetType: string, assetId: string) => Promise<void>
+  recompile: () => Promise<void>
+  toggleVNPreview: () => void
   selectJob: (jobId: string) => Promise<void>
   deleteJob: (jobId: string) => Promise<void>
   refreshJobs: () => Promise<void>
@@ -55,6 +65,8 @@ const useStore = create<AppState>((set, get) => ({
   messages: [{ role: 'system', content: 'Welcome to VN-Agent Studio! Enter a story theme to generate a visual novel.', timestamp: Date.now() }],
   config: { theme: '', max_scenes: 5, num_characters: 3, text_only: true },
   jobs: [],
+  assets: null,
+  vnPreview: false,
   startTime: null,
   elapsed: 0,
 
@@ -65,17 +77,15 @@ const useStore = create<AppState>((set, get) => ({
     if (!config.theme.trim()) return
 
     addMsg(get, set, 'user', config.theme)
-    set({ step: 'generating_setting', progress: 'Creating project...', errors: [], blackboard: {} })
+    set({ step: 'generating_setting', progress: 'Creating project...', errors: [], blackboard: {}, assets: null, vnPreview: false })
     startElapsed(set, get)
 
     try {
-      // Step 1: Create project
       const { job_id } = await api.generate(config)
       set({ currentJobId: job_id })
       addMsg(get, set, 'system', `Project ${job_id} created.`)
       get().refreshJobs()
 
-      // Step 2: Generate setting (Director)
       addMsg(get, set, 'system', 'Director is planning the story...')
       set({ progress: 'Director planning story structure' })
       const { blackboard } = await api.generateSetting(job_id)
@@ -83,10 +93,7 @@ const useStore = create<AppState>((set, get) => ({
 
       set({ step: 'setting_review', blackboard, progress: 'Setting ready for review' })
       const ws = blackboard.world_setting as Record<string, string> | undefined
-      addMsg(get, set, 'system',
-        `Story outline ready: "${ws?.title || 'Untitled'}". ` +
-        `Review the setting on the right, then click Confirm to continue.`
-      )
+      addMsg(get, set, 'system', `Story outline ready: "${ws?.title || 'Untitled'}". Review and confirm.`)
       get().refreshJobs()
     } catch (e) {
       stopTimers()
@@ -105,8 +112,6 @@ const useStore = create<AppState>((set, get) => ({
 
     try {
       await api.generateScript(currentJobId)
-
-      // Poll for completion
       pollTimer = setInterval(async () => {
         try {
           const res = await api.status(currentJobId)
@@ -114,8 +119,9 @@ const useStore = create<AppState>((set, get) => ({
 
           if (res.status === 'completed') {
             stopTimers()
-            set({ step: 'completed', errors: res.errors })
-            addMsg(get, set, 'system', `Done! ${res.progress}`)
+            const { blackboard } = await api.getBlackboard(currentJobId)
+            set({ step: 'script_review', blackboard, errors: res.errors })
+            addMsg(get, set, 'system', `Script ready! ${res.progress}. Review and confirm.`)
             get().refreshJobs()
           } else if (res.status === 'failed') {
             stopTimers()
@@ -131,7 +137,6 @@ const useStore = create<AppState>((set, get) => ({
     } catch (e) {
       stopTimers()
       set({ step: 'failed', errors: [String(e)] })
-      addMsg(get, set, 'system', `Error: ${e}`)
     }
   },
 
@@ -154,23 +159,75 @@ const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  confirmScript: async () => {
+    const { currentJobId } = get()
+    if (!currentJobId) return
+
+    set({ step: 'compiling', progress: 'Compiling Ren\'Py project...' })
+    addMsg(get, set, 'system', 'Script confirmed. Compiling project...')
+
+    try {
+      await api.compile(currentJobId)
+      await get().fetchAssets()
+      set({ step: 'asset_management', progress: 'Assets ready for review' })
+      addMsg(get, set, 'system', 'Project compiled! Review assets, upload replacements, or download.')
+      get().refreshJobs()
+    } catch (e) {
+      set({ step: 'failed', errors: [String(e)] })
+    }
+  },
+
+  fetchAssets: async () => {
+    const { currentJobId } = get()
+    if (!currentJobId) return
+    try {
+      const assets = await api.listAssets(currentJobId)
+      set({ assets })
+    } catch { /* ignore */ }
+  },
+
+  uploadAsset: async (file, assetType, assetId) => {
+    const { currentJobId } = get()
+    if (!currentJobId) return
+    await api.uploadAsset(currentJobId, file, assetType, assetId)
+    await get().fetchAssets()
+  },
+
+  recompile: async () => {
+    const { currentJobId } = get()
+    if (!currentJobId) return
+    set({ step: 'compiling', progress: 'Re-compiling with updated assets...' })
+    try {
+      await api.compile(currentJobId)
+      await get().fetchAssets()
+      set({ step: 'completed', progress: 'Project ready for download' })
+      addMsg(get, set, 'system', 'Re-compiled! Download your project.')
+      get().refreshJobs()
+    } catch (e) {
+      set({ step: 'failed', errors: [String(e)] })
+    }
+  },
+
+  toggleVNPreview: () => set({ vnPreview: !get().vnPreview }),
+
   selectJob: async (jobId) => {
     try {
       const res = await api.status(jobId)
       const { blackboard } = await api.getBlackboard(jobId)
-      let step: AppStep = 'idle'
-      if (res.status === 'completed') step = 'completed'
-      else if (res.status === 'failed') step = 'failed'
-      else if (res.status === 'setting_generated') step = 'setting_review'
-      else if (res.status === 'running') step = 'generating_script'
+      const statusMap: Record<string, AppStep> = {
+        completed: 'completed', failed: 'failed',
+        setting_generated: 'setting_review', running: 'generating_script',
+      }
+      const step: AppStep = statusMap[res.status] || 'idle'
 
-      set({ currentJobId: jobId, step, progress: res.progress, errors: res.errors, blackboard })
+      set({ currentJobId: jobId, step, progress: res.progress, errors: res.errors, blackboard, vnPreview: false })
+      if (step === 'completed' as AppStep) get().fetchAssets()
     } catch { /* ignore */ }
   },
 
   deleteJob: async (jobId) => {
     await api.deleteJob(jobId)
-    if (get().currentJobId === jobId) set({ currentJobId: null, step: 'idle', blackboard: {} })
+    if (get().currentJobId === jobId) set({ currentJobId: null, step: 'idle', blackboard: {}, assets: null })
     get().refreshJobs()
   },
 

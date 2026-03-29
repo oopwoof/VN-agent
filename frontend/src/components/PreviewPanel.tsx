@@ -2,20 +2,26 @@ import useStore from '../store'
 import ProgressBar from './ProgressBar'
 import SettingPanel from './SettingPanel'
 import ScriptPanel from './ScriptPanel'
+import AssetPanel from './AssetPanel'
+import VNPreview from './VNPreview'
 
-const STEPS = ['Setting', 'Script', 'Review', 'Assets', 'Compile']
+const STEPS = ['Setting', 'Script', 'Review', 'Assets', 'Done']
 
-function stepIndex(step: string): number {
-  if (step.includes('setting')) return 0
-  if (step.includes('script')) return 1
-  if (step.includes('review') || step.includes('Reviewer')) return 2
-  if (step.includes('asset')) return 3
-  if (step.includes('build') || step.includes('compil')) return 4
+function stepIndex(step: string, progress: string): number {
+  const p = (progress + ' ' + step).toLowerCase()
+  if (p.includes('setting')) return 0
+  if (p.includes('script') || p.includes('writer')) return 1
+  if (p.includes('review') || p.includes('reviewer')) return 2
+  if (p.includes('asset') || p.includes('compil')) return 3
+  if (p.includes('completed') || p.includes('done')) return 4
   return -1
 }
 
 export default function PreviewPanel() {
-  const { step, progress, errors, currentJobId, elapsed } = useStore()
+  const { step, progress, errors, elapsed, vnPreview } = useStore()
+
+  // VN Preview mode takes over the entire panel
+  if (vnPreview) return <VNPreview />
 
   if (step === 'idle') {
     return (
@@ -28,23 +34,23 @@ export default function PreviewPanel() {
     )
   }
 
-  const si = step === 'completed' ? STEPS.length : stepIndex(progress || step)
+  const si = step === 'completed' ? STEPS.length : stepIndex(step, progress)
   const pct = step === 'completed' ? 100 : Math.min(10 + (si + 1) * 18, 90)
 
   return (
     <div className="flex flex-col h-full">
-      {/* Progress bar */}
       <div className="p-4 border-b border-gray-800">
         <ProgressBar steps={STEPS} currentStep={si} percent={pct} />
       </div>
 
-      {/* Content */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">
-        {/* Setting review */}
         {step === 'setting_review' && <SettingPanel />}
 
-        {/* Generating states */}
-        {(step === 'generating_setting' || step === 'generating_script') && (
+        {step === 'script_review' && <ScriptPanel />}
+
+        {(step === 'asset_management' || step === 'completed') && <AssetPanel />}
+
+        {(step === 'generating_setting' || step === 'generating_script' || step === 'compiling') && (
           <div className="p-6">
             <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
               <div className="flex items-center gap-3">
@@ -56,12 +62,6 @@ export default function PreviewPanel() {
           </div>
         )}
 
-        {/* Completed — show ScriptPanel with full dialogue */}
-        {step === 'completed' && currentJobId && (
-          <ScriptPanel />
-        )}
-
-        {/* Failed */}
         {step === 'failed' && (
           <div className="p-6">
             <div className="bg-gray-900 border border-red-800/50 rounded-lg p-6">

@@ -42,6 +42,41 @@
 
 ## 开发记录
 
+### 2026-03-28 | 实现 - 2026-03-28 22:01
+
+**变更文件** (10 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/web/app.py`
+
+**配置变更** (1 文件):
+  - `pyproject.toml`
+
+**其他变更** (8 文件):
+  - `frontend/src/api.ts`
+  - `frontend/src/components/AssetPanel.tsx`
+  - `frontend/src/components/PreviewPanel.tsx`
+  - `frontend/src/components/ScriptPanel.tsx`
+  - `frontend/src/components/VNPreview.tsx`
+
+**变更统计**:
+```
+frontend/src/api.ts                      |  28 +++++-
+ frontend/src/components/AssetPanel.tsx   | 142 ++++++++++++++++++++++++++++
+ frontend/src/components/PreviewPanel.tsx |  40 ++++----
+ frontend/src/components/ScriptPanel.tsx  |  16 +++-
+ frontend/src/components/VNPreview.tsx    | 136 +++++++++++++++++++++++++++
+ frontend/src/store.ts                    | 101 +++++++++++++++-----
+ frontend/src/types.ts                    |  16 ++++
+ pyproject.toml                           |   1 +
+ src/vn_agent/web/app.py                  | 156 ++++++++++++++++++++++++++++++-
+ uv.lock                                  |  11 +++
+ 10 files changed, 598 insertions(+), 49 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-03-28 | 杂项 - 2026-03-28 21:38
 
 **变更文件** (1 个):
