@@ -14,11 +14,11 @@
 
 ## 简历条目（终稿，3 bullet）
 
-**VN-Agent：基于多 Agent 架构的 AI 视觉小说自动生成系统** | Python · LangGraph · FAISS · Ren'Py &emsp; 01/2026—03/2026
+**VN-Agent：基于多 Agent 架构的 AI 视觉小说自动生成系统** | Python · LangGraph · FAISS · Ren'Py &emsp; 11/2025—04/2026
 
-- **架构**：将"主题→可运行游戏"拆解为 LangGraph 6 Agent DAG（规划→创作修订→资产并行），Agent 解耦避免 prompt scaling 导致输出不稳定；Reviewer↔Writer 条件边修订循环保障生成质量，资产阶段 3 Agent 并发 + 故障隔离；端到端产出含多分支剧情、立绘、背景、BGM 的 Ren'Py 可运行项目
-- **算法**：通过 error analysis 定位生成瓶颈为上下文不足，逐模块优化 RAG 链（Query 构造 / 语义检索排序 / few-shot 注入），基于 1,036 条学术语料 + FAISS 向量检索提升召回相关性；设计 **LLM-as-Judge** 5 维度 rubric + 4 类结构校验（BFS 可达性）形成自动修订闭环，生成策略匹配度 F1 提升 **57%**（0.21→0.34）
-- **工程**：**Tool Calling** 替代正则解析消除格式错误，多模型路由平衡质量与成本（Sonnet 规划 / Haiku 审查，降本 ~73%）；FastAPI 异步 API + Docker + GitHub Actions CI（140+ 测试，覆盖率门控）
+- **架构**：单次 LLM 调用难以稳定生成完整游戏（prompt 膨胀致输出截断/格式崩坏），将任务拆解为 LangGraph 6 Agent DAG + 黑板共享状态，通过条件边驱动 Writer↔Reviewer 修订循环（最多 3 轮）保障剧本质量，资产阶段 3 Agent 并发 + 故障隔离；实现从一行主题到含多分支剧情、立绘、BGM 的完整可运行 Ren'Py 项目的端到端生成，配套 React 分步交互前端（设定确认→脚本编辑→资产管理→VN 预览）
+- **算法**：Writer 生成的对话缺乏策略一致性且分支缺陷频发，通过 error analysis 定位瓶颈为上下文不足，逐模块优化 RAG 链——Query 层拼接语义+策略标签、检索层 FAISS 向量召回 1,036 条学术语料并策略优先排序、生成层注入 few-shot 示例 + CoT 推理 prompt，策略分类 F1 提升 **57%**（0.21→0.34）；搭建 **LLM-as-Judge** 5 维度评分 rubric（数值解析 + ≥3.5 阈值）+ BFS 可达性等 4 类结构校验，形成"生成→检索→评估→修订"质量闭环
+- **工程**：LLM 自由文本输出格式不稳定致管线中断，采用 **Tool Calling**（Pydantic schema → function definition）替代正则解析消除解析失败；设计多模型分级路由（Sonnet 规划创作 / Haiku 审查资产，预算模式降本 **~73%**）+ token 全链路归因；FastAPI 异步 Web API（17 端点）+ Docker 多阶段构建 + GitHub Actions CI（165 测试 + 覆盖率门控）
 
 ---
 
@@ -37,7 +37,11 @@
 | 流式 SSE | `services/streaming.py`: `astream_sse()` | 代码直接可见 |
 | Sonnet/Haiku 路由 | `config.py`: 6 个 `llm_*_model` 配置项 | 代码直接可见 |
 | 预算模式降本 ~73% | Haiku $0.80/$4 vs Sonnet $3/$15，同 token 量计算 | 公开定价可算 |
-| 140 测试 + 覆盖率 ≥70% | `pytest` 输出 + `.github/workflows/ci.yml`: `--cov-fail-under=70` | CI 日志可验证 |
+| 165 测试 + 覆盖率门控 | `pytest --co -q` 输出 165 + `.github/workflows/ci.yml`: `--cov-fail-under=60` | CI 日志可验证 |
+| 17 个 API 端点 | `grep "@app\." app.py` | 代码直接可见 |
+| React 9 组件前端 | `ls frontend/src/components/` | 文件系统可见 |
+| Reviewer 5 维度分数解析 | `reviewer.py`: `_parse_scores()` 正则提取 + `scores` 字段 | 代码直接可见 |
+| 黑板共享状态 + 分步交互 | `store.py`: `blackboard` 列 + 7 个 step API | 代码 + API 可见 |
 
 **已删除的不可验证声明**: ~~分支死胡同率 30%→95%~~、~~角色一致性 3.2→4.1/5~~、~~CLIP 相似度 0.72→0.88~~、~~沉浸感评分 3.0→3.8~~、~~降本 60%~~
 
