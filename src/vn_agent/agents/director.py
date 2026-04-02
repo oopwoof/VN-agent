@@ -91,9 +91,15 @@ async def run_director(state: AgentState) -> dict:
     # Checkpoint: save immediately so --resume works if Writer crashes
     _save_checkpoint(output_dir, script, characters)
 
+    # Extract art direction from plan (set by Director for style consistency)
+    art_direction = plan_data.get("art_direction", "")
+    if not art_direction:
+        art_direction = "painterly anime style, consistent color palette, atmospheric lighting"
+
     return {
         "vn_script": script,
         "characters": characters,
+        "art_direction": art_direction,
     }
 
 
@@ -145,6 +151,7 @@ Return ONLY this JSON (no branches, no music yet):
 {{
   "title": "Story Title",
   "description": "One-sentence story description",
+  "art_direction": "unified visual style, e.g. 'painterly anime, warm lighting'",
   "start_scene_id": "ch1_opening",
   "scenes": [
     {{

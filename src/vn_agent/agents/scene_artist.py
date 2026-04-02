@@ -21,11 +21,12 @@ async def run_scene_artist(state: AgentState) -> dict:
     """SceneArtist node: generates background images for all scenes."""
     script = state["vn_script"]
     output_dir = state["output_dir"]
+    art_direction = state.get("art_direction", "")
 
     if not script:
         return {}
 
-    logger.info(f"SceneArtist: generating {len(script.scenes)} backgrounds")
+    logger.info(f"SceneArtist: generating {len(script.scenes)} backgrounds (style: {art_direction[:50]})")
 
     # Build a map: background_id -> scene (use first scene with that bg_id)
     unique_bgs: dict = {}
@@ -38,7 +39,7 @@ async def run_scene_artist(state: AgentState) -> dict:
     # Generate all unique backgrounds in parallel
     bg_ids = list(unique_bgs.keys())
     results = await asyncio.gather(
-        *[_generate_background(scene, output_dir) for scene in unique_bgs.values()],
+        *[_generate_background(scene, output_dir, art_direction) for scene in unique_bgs.values()],
         return_exceptions=True,
     )
 
@@ -68,11 +69,14 @@ async def run_scene_artist(state: AgentState) -> dict:
     return {"vn_script": updated_script, "errors": all_errors}
 
 
-async def _generate_background(scene: Scene, output_dir: str) -> tuple[Scene, list[str]]:
+async def _generate_background(
+    scene: Scene, output_dir: str, art_direction: str = "",
+) -> tuple[Scene, list[str]]:
     """Generate background image prompt and optionally the image.
 
     Returns a tuple of (updated_scene, errors).
     """
+    style_line = art_direction if art_direction else "Painterly anime background art style"
     user_prompt = f"""Create an image generation prompt for this scene background:
 
 Scene: {scene.title}
@@ -80,7 +84,7 @@ Description: {scene.description}
 Background ID: {scene.background_id}
 
 Requirements:
-- Painterly anime background art style
+- Art style: {style_line}
 - Wide landscape composition (16:9 ratio feeling)
 - Detailed environment, atmospheric lighting
 - No characters in the image

@@ -28,6 +28,7 @@ class AgentState(dict):
         text_only: Skip image and music generation when True
         max_scenes: Maximum number of scenes to generate
         num_characters: Number of characters to create
+        art_direction: Global art style shared across all asset agents
     """
     theme: str
     vn_script: VNScript | None
@@ -35,6 +36,7 @@ class AgentState(dict):
     revision_count: int
     review_passed: bool
     review_feedback: str
+    review_scores: dict | None
     assets_generated: bool
     output_dir: str
     messages: Annotated[list[BaseMessage], add_messages]
@@ -42,6 +44,7 @@ class AgentState(dict):
     text_only: bool
     max_scenes: int
     num_characters: int
+    art_direction: str
 
 
 def initial_state(
@@ -66,4 +69,5 @@ def initial_state(
         "text_only": text_only,
         "max_scenes": max_scenes,
         "num_characters": num_characters,
+        "art_direction": "",
     }

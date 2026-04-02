@@ -21,17 +21,18 @@ async def run_character_designer(state: AgentState) -> dict:
     """CharacterDesigner node: creates visual profiles and optionally generates sprites."""
     characters = state["characters"]
     output_dir = state["output_dir"]
+    art_direction = state.get("art_direction", "")
 
     if not characters:
         return {}
 
-    logger.info(f"CharacterDesigner: designing {len(characters)} characters")
+    logger.info(f"CharacterDesigner: designing {len(characters)} characters (style: {art_direction[:50]})")
 
     char_ids = list(characters.keys())
     char_list = list(characters.values())
 
     results = await asyncio.gather(
-        *[_design_character(char, output_dir) for char in char_list],
+        *[_design_character(char, output_dir, art_direction) for char in char_list],
         return_exceptions=True,
     )
 
@@ -50,12 +51,15 @@ async def run_character_designer(state: AgentState) -> dict:
     return {"characters": updated_characters, "errors": all_errors}
 
 
-async def _design_character(char: CharacterProfile, output_dir: str) -> tuple[CharacterProfile, list[str]]:
+async def _design_character(
+    char: CharacterProfile, output_dir: str, art_direction: str = "",
+) -> tuple[CharacterProfile, list[str]]:
     """Design visual profile for a character.
 
     Returns a tuple of (updated_character, errors).
     """
-    user_prompt = f"""Create a visual profile for this character:
+    style_note = f"\nProject art direction (MUST follow): {art_direction}" if art_direction else ""
+    user_prompt = f"""Create a visual profile for this character:{style_note}
 
 Name: {char.name}
 Role: {char.role}
@@ -63,7 +67,7 @@ Personality: {char.personality}
 Background: {char.background}
 
 Provide:
-1. Art style (e.g. "anime style, soft watercolor, high quality")
+1. Art style — MUST be consistent with the project art direction above
 2. Detailed appearance (hair, eyes, build, distinctive features) - be very specific for consistency
 3. Default outfit description
 
