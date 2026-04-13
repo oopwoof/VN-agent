@@ -29,7 +29,20 @@ try:
 except ImportError:
     _HAS_FAISS = False
 
+try:
+    from rank_bm25 import BM25Okapi
+
+    _HAS_BM25 = True
+except ImportError:
+    _HAS_BM25 = False
+
 _DEFAULT_MODEL = "all-MiniLM-L6-v2"
+
+# BM25 fusion weights — see fusion.py docstring for why BM25 is under-weighted
+# in this corpus. Override via EmbeddingIndex(rrf_weights=(0.6, 0.4)) if your
+# queries carry more exact-match signal (character names, specific keywords).
+_DEFAULT_FAISS_WEIGHT = 0.7
+_DEFAULT_BM25_WEIGHT = 0.3
 
 
 class EmbeddingIndex:
@@ -38,7 +51,11 @@ class EmbeddingIndex:
     Build once, search many times. Supports optional persistence.
     """
 
-    def __init__(self, model_name: str = _DEFAULT_MODEL):
+    def __init__(
+        self,
+        model_name: str = _DEFAULT_MODEL,
+        rrf_weights: tuple[float, float] = (_DEFAULT_FAISS_WEIGHT, _DEFAULT_BM25_WEIGHT),
+    ):
         if not _HAS_SBERT:
             raise ImportError(
                 "sentence-transformers is required for embedding RAG. "
@@ -48,14 +65,16 @@ class EmbeddingIndex:
         self._model = SentenceTransformer(model_name)
         self._embeddings: np.ndarray | None = None
         self._faiss_index: object | None = None  # faiss.IndexFlatIP
+        self._bm25: object | None = None  # BM25Okapi
         self._sessions: list[AnnotatedSession] = []
+        self._rrf_weights = rrf_weights
 
     @property
     def size(self) -> int:
         return len(self._sessions)
 
     def build(self, corpus: list[AnnotatedSession]) -> None:
-        """Encode all corpus texts and build the search index."""
+        """Encode all corpus texts and build both FAISS + BM25 indexes."""
         if not corpus:
             return
         texts = [s.text for s in corpus]
@@ -72,33 +91,34 @@ class EmbeddingIndex:
         else:
             logger.debug(f"Built numpy index: {len(corpus)} vectors (FAISS not available)")
 
+        # Build BM25 index in parallel for hybrid retrieval
+        if _HAS_BM25:
+            from vn_agent.eval.fusion import simple_tokenize
+
+            tokenized = [simple_tokenize(t) for t in texts]
+            self._bm25 = BM25Okapi(tokenized)
+            logger.debug(f"Built BM25 index: {len(corpus)} documents")
+        else:
+            logger.debug("BM25 not available — hybrid retrieval falls back to vector only")
+
     def search(
         self,
         query: str,
         k: int = 3,
         strategy: str | None = None,
         pre_filter_strategy: bool = True,
+        hybrid: bool = True,
     ) -> list[AnnotatedSession]:
-        """Find the k most semantically similar sessions to the query.
+        """Find the k most relevant sessions to the query.
 
         Args:
             query: search text (e.g. scene description)
             k: number of results
             strategy: optional strategy constraint
-            pre_filter_strategy: if True and `strategy` is set, restrict vector
-                search to the strategy-matched subset first (hard constraint),
-                then backfill with cross-strategy results only when the subset
-                is too small (soft degradation). If False, keeps legacy
-                post-filter behavior (vector on full index, then rerank by
-                strategy match).
-
-        Retrieval strategy when pre_filter_strategy=True:
-          1. Partition sessions by `strategy == target` → matched / others
-          2. If |matched| >= 2k: vector-rank within matched only, return top k
-          3. Else: vector-rank the whole matched subset (keep all) + fill
-             remaining slots from top-ranked `others`
-          4. Unannotated sessions (strategy is None) never appear in matched
-             and are only used as backfill. They remain low priority.
+            pre_filter_strategy: hard-constrain to strategy-matched subset
+                before ranking. See class docs for soft-degradation rules.
+            hybrid: when True and BM25 is available, fuse FAISS + BM25 rankings
+                via weighted RRF (see fusion.py). When False, pure vector.
         """
         if not self._sessions or self._embeddings is None:
             return []
@@ -108,64 +128,56 @@ class EmbeddingIndex:
         )
 
         if strategy and pre_filter_strategy:
-            return self._search_pre_filter(q_emb, k, strategy)
-        return self._search_post_filter(q_emb, k, strategy)
+            return self._search_pre_filter(q_emb, k, strategy, hybrid=hybrid, query=query)
+        return self._search_post_filter(q_emb, k, strategy, hybrid=hybrid, query=query)
 
     def _search_pre_filter(
         self, q_emb: np.ndarray, k: int, strategy: str,
+        hybrid: bool = True, query: str = "",
     ) -> list[AnnotatedSession]:
         """Strategy hard-constraint: rank within matched subset first."""
         matched_idx = [i for i, s in enumerate(self._sessions) if s.strategy == strategy]
         others_idx = [i for i, s in enumerate(self._sessions) if s.strategy != strategy]
 
-        matched_ranked = self._vector_rank(q_emb, matched_idx)
+        matched_ranked = self._rank_subset(q_emb, matched_idx, hybrid=hybrid, query=query)
         if len(matched_ranked) >= 2 * k:
-            # Enough matching samples — pure subset ranking
-            return [self._sessions[i] for i, _ in matched_ranked[:k]]
+            return [self._sessions[i] for i in matched_ranked[:k]]
 
         # Soft degradation: take all matched + backfill with top others
-        result_indices = [i for i, _ in matched_ranked]
+        result_indices = list(matched_ranked)
         need = k - len(result_indices)
         if need > 0 and others_idx:
-            others_ranked = self._vector_rank(q_emb, others_idx)
-            result_indices.extend(i for i, _ in others_ranked[:need])
+            others_ranked = self._rank_subset(q_emb, others_idx, hybrid=hybrid, query=query)
+            result_indices.extend(others_ranked[:need])
         return [self._sessions[i] for i in result_indices[:k]]
 
     def _search_post_filter(
         self, q_emb: np.ndarray, k: int, strategy: str | None,
+        hybrid: bool = True, query: str = "",
     ) -> list[AnnotatedSession]:
         """Legacy behavior: rank full index, then bubble strategy-matched up."""
         fetch_k = min(k * 5, len(self._sessions))
-
-        if _HAS_FAISS and self._faiss_index is not None:
-            scores, indices = self._faiss_index.search(q_emb, fetch_k)  # type: ignore[attr-defined]
-            candidates = [
-                (self._sessions[idx], float(scores[0][i]))
-                for i, idx in enumerate(indices[0])
-                if idx >= 0
-            ]
-        else:
-            sims = np.dot(self._embeddings, q_emb.T).flatten()  # type: ignore[arg-type]
-            top_indices = np.argsort(sims)[::-1][:fetch_k]
-            candidates = [(self._sessions[i], float(sims[i])) for i in top_indices]
+        all_idx = list(range(len(self._sessions)))
+        ranked_indices = self._rank_subset(q_emb, all_idx, hybrid=hybrid, query=query)[:fetch_k]
+        candidates = [self._sessions[i] for i in ranked_indices]
 
         if strategy:
-            matched = [(s, sc) for s, sc in candidates if s.strategy == strategy]
-            others = [(s, sc) for s, sc in candidates if s.strategy != strategy]
+            matched = [s for s in candidates if s.strategy == strategy]
+            others = [s for s in candidates if s.strategy != strategy]
             ranked = matched + others
         else:
             ranked = candidates
 
-        return [s for s, _ in ranked[:k]]
+        return ranked[:k]
 
     def _vector_rank(
         self, q_emb: np.ndarray, subset_idx: list[int],
     ) -> list[tuple[int, float]]:
-        """Rank a subset of sessions by cosine similarity against query.
+        """Rank a subset by FAISS-style cosine similarity against query.
 
-        Returns list of (corpus_index, score) sorted descending.
-        Uses numpy on the subset directly — FAISS can't filter by index list
-        without rebuilding, and numpy is fast enough for subsets.
+        Uses numpy on the subset directly — FAISS doesn't support searching
+        an arbitrary index subset without rebuilding, and numpy is fast enough
+        for subsets (O(|subset| * dim)).
         """
         if not subset_idx or self._embeddings is None:
             return []
@@ -173,6 +185,50 @@ class EmbeddingIndex:
         sims = np.dot(subset_emb, q_emb.T).flatten()
         order = np.argsort(sims)[::-1]
         return [(subset_idx[int(j)], float(sims[int(j)])) for j in order]
+
+    def _bm25_rank(self, query: str, subset_idx: list[int]) -> list[int]:
+        """Rank a subset by BM25 score on the query. Empty list if unavailable."""
+        if not _HAS_BM25 or self._bm25 is None or not subset_idx or not query.strip():
+            return []
+        from vn_agent.eval.fusion import simple_tokenize
+
+        tokens = simple_tokenize(query)
+        if not tokens:
+            return []
+        scores = self._bm25.get_scores(tokens)  # type: ignore[attr-defined]
+        # Restrict to subset and sort by score descending
+        subset_scored = [(i, float(scores[i])) for i in subset_idx]
+        subset_scored.sort(key=lambda pair: pair[1], reverse=True)
+        return [i for i, _ in subset_scored]
+
+    def _rank_subset(
+        self,
+        q_emb: np.ndarray,
+        subset_idx: list[int],
+        hybrid: bool = True,
+        query: str = "",
+    ) -> list[int]:
+        """Return indices of subset ordered by relevance.
+
+        If hybrid=True and BM25 available, fuses vector + BM25 rankings via
+        weighted RRF. Otherwise falls back to pure vector.
+        """
+        vector_ranked = [i for i, _ in self._vector_rank(q_emb, subset_idx)]
+
+        if not hybrid or not _HAS_BM25 or self._bm25 is None:
+            return vector_ranked
+
+        bm25_ranked = self._bm25_rank(query, subset_idx)
+        if not bm25_ranked:
+            return vector_ranked
+
+        from vn_agent.eval.fusion import weighted_rrf
+
+        faiss_w, bm25_w = self._rrf_weights
+        fused = weighted_rrf(
+            [(vector_ranked, faiss_w), (bm25_ranked, bm25_w)],
+        )
+        return fused
 
     def save(self, path: Path) -> None:
         """Persist index to disk (embeddings + metadata)."""
@@ -214,6 +270,13 @@ class EmbeddingIndex:
         faiss_path = path / "index.faiss"
         if _HAS_FAISS and faiss_path.exists():
             idx._faiss_index = faiss.read_index(str(faiss_path))
+
+        # Rebuild BM25 from session texts (fast, no serialization needed)
+        if _HAS_BM25 and idx._sessions:
+            from vn_agent.eval.fusion import simple_tokenize
+
+            tokenized = [simple_tokenize(s.text) for s in idx._sessions]
+            idx._bm25 = BM25Okapi(tokenized)
 
         logger.info(f"Loaded embedding index from {path} ({len(idx._sessions)} vectors)")
         return idx

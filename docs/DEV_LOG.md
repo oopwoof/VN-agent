@@ -42,6 +42,36 @@
 
 ## 开发记录
 
+### 2026-04-13 | 实现 - 2026-04-13 08:23
+
+**变更文件** (5 个):
+**源码变更** (2 文件):
+  - `src/vn_agent/eval/embedder.py`
+  - `src/vn_agent/eval/fusion.py`
+
+**测试变更** (1 文件):
+  - `tests/test_eval/test_fusion.py`
+
+**配置变更** (1 文件):
+  - `pyproject.toml`
+
+**其他变更** (1 文件):
+  - `uv.lock`
+
+**变更统计**:
+```
+pyproject.toml                 |   1 +
+ src/vn_agent/eval/embedder.py  | 151 +++++++++++++++++++++++++++++------------
+ src/vn_agent/eval/fusion.py    |  70 +++++++++++++++++++
+ tests/test_eval/test_fusion.py |  60 ++++++++++++++++
+ uv.lock                        |  14 ++++
+ 5 files changed, 252 insertions(+), 44 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-13 | 实现 - 2026-04-13 08:12
 
 **变更文件** (4 个):
