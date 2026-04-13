@@ -86,6 +86,38 @@ async def run_director(state: AgentState) -> dict:
     if not script.scenes:
         logger.warning("Director produced 0 scenes — LLM may have returned empty/null scenes list")
 
+    # ── Branch structural validation (Sprint 6-6) ─────────────────────────────
+    # Defense-in-depth: fail fast on structurally-meaningless branches before
+    # Writer wastes tokens generating dialogue for a cosmetic choice tree.
+    branch_issues = _validate_branch_structure(script)
+    if branch_issues:
+        logger.warning(
+            f"Director branch structure issues: {len(branch_issues)} — "
+            f"attempting repair. First: {branch_issues[0]}"
+        )
+        repaired = await _attempt_repair(
+            plan_data,
+            "Branch structure invalid: " + "; ".join(branch_issues[:3]),
+            output_dir,
+            settings,
+        )
+        if repaired:
+            try:
+                script, characters = _build_from_plan(repaired, theme)
+                plan_data = repaired
+                # Re-validate after repair
+                branch_issues = _validate_branch_structure(script)
+            except Exception as e:
+                logger.warning(f"Repaired plan failed to build: {e}")
+
+        if branch_issues:
+            # Graceful degradation: drop bad branches rather than block pipeline
+            logger.warning(
+                f"Branches still invalid after repair — degrading to linear flow "
+                f"for {len(branch_issues)} scene(s). Reviewer will flag as warning."
+            )
+            _degrade_invalid_branches(script, branch_issues)
+
     logger.info(f"Director created: '{script.title}' with {len(script.scenes)} scenes, {len(characters)} characters")
 
     # Checkpoint: save immediately so --resume works if Writer crashes
@@ -431,6 +463,104 @@ def _salvage_truncated_json(text: str) -> dict | None:
         return _close_and_parse(text[:last_root_comma])
 
     return None
+
+
+def _validate_branch_structure(script: VNScript) -> list[str]:
+    """Structural check on branch design (Sprint 6-6, Director layer).
+
+    Validates:
+      1. Each scene's branches point to distinct `next_scene_id`s — two
+         branches leading to the same scene is always cosmetic.
+      2. Each branch's downstream reachable set has at least one scene
+         exclusive to that path (checked via BFS up to depth 3). If both
+         branch paths converge immediately without any independent content,
+         the choice is meaningless.
+
+    Returns a list of human-readable issues. Empty list means structure is OK.
+    This is pure code, no LLM — it catches the most obvious structural bugs
+    before Writer burns tokens on a broken tree.
+    """
+    issues: list[str] = []
+    scene_map = {s.id: s for s in script.scenes}
+
+    for scene in script.scenes:
+        if len(scene.branches) < 2:
+            continue  # no branch or single branch degenerates to linear
+
+        # Rule 1: branches must target distinct scenes
+        targets = [b.next_scene_id for b in scene.branches]
+        if len(set(targets)) < len(targets):
+            issues.append(
+                f"Scene '{scene.id}': branches share the same next_scene_id "
+                f"({targets}) — at least two choices lead to the same place."
+            )
+            continue  # skip rule 2, already broken
+
+        # Rule 2: each branch should have exclusive downstream content
+        reachable_sets = [
+            _reachable_within(scene_map, b.next_scene_id, max_depth=3)
+            for b in scene.branches
+        ]
+        # Find pairwise intersections — if every scene in one path is also in
+        # another path, the choice had no independent consequence.
+        for i, ri in enumerate(reachable_sets):
+            if not ri:
+                continue
+            for j, rj in enumerate(reachable_sets):
+                if j <= i or not rj:
+                    continue
+                exclusive_i = ri - rj
+                exclusive_j = rj - ri
+                if not exclusive_i and not exclusive_j:
+                    issues.append(
+                        f"Scene '{scene.id}': branches {i} and {j} converge with "
+                        f"no exclusive downstream content — cosmetic choice."
+                    )
+    return issues
+
+
+def _reachable_within(
+    scene_map: dict[str, Scene], start_id: str, max_depth: int = 3,
+) -> set[str]:
+    """BFS reachable scene ids from start_id up to max_depth hops (inclusive)."""
+    if start_id not in scene_map:
+        return set()
+    reached: set[str] = set()
+    frontier: list[tuple[str, int]] = [(start_id, 0)]
+    while frontier:
+        sid, depth = frontier.pop(0)
+        if sid in reached or depth > max_depth:
+            continue
+        reached.add(sid)
+        scene = scene_map.get(sid)
+        if not scene:
+            continue
+        next_ids: list[str] = []
+        if scene.next_scene_id:
+            next_ids.append(scene.next_scene_id)
+        next_ids.extend(b.next_scene_id for b in scene.branches if b.next_scene_id)
+        for nid in next_ids:
+            if nid not in reached:
+                frontier.append((nid, depth + 1))
+    return reached
+
+
+def _degrade_invalid_branches(script: VNScript, issues: list[str]) -> None:
+    """Fallback: strip branches from scenes flagged as structurally invalid.
+
+    Picks the first branch as the linear next_scene_id. Preserves the rest of
+    the script so the pipeline can continue and Reviewer can report the warning.
+    """
+    flagged_scenes = {
+        # issues start with "Scene '<id>':"
+        issue.split("'")[1] for issue in issues if "'" in issue
+    }
+    for scene in script.scenes:
+        if scene.id in flagged_scenes and scene.branches:
+            first_target = scene.branches[0].next_scene_id
+            scene.branches = []
+            if not scene.next_scene_id:
+                scene.next_scene_id = first_target
 
 
 async def _attempt_repair(plan_data: dict, error_msg: str, output_dir: str, settings) -> dict | None:
