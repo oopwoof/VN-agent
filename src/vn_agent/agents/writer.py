@@ -169,6 +169,7 @@ After dialogue, if branches exist, the player will choose:
                 query = f"{scene.description} | strategy: {strategy_label}"
                 examples = retrieve_examples_semantic(
                     embedding_index, query, strategy_label, k=settings.few_shot_k,
+                    pre_filter_strategy=settings.rag_pre_filter_strategy,
                 )
             else:
                 examples = retrieve_examples(

@@ -83,6 +83,58 @@ class TestEmbeddingIndex:
         # Rupture session should appear
         assert any(r.strategy == "rupture" for r in results)
 
+    def test_pre_filter_hard_constraint(self, corpus):
+        """Pre-filter should return ONLY matched strategy when subset is large enough."""
+        from vn_agent.eval.embedder import EmbeddingIndex
+
+        # Add more accumulate samples so subset >= 2*k
+        big_corpus = corpus + [
+            AnnotatedSession(
+                id=f"s_extra_{i}", title=f"Extra {i}",
+                text=f"Slowly building tension layer {i} through careful moments.",
+                strategy="accumulate", pivot_line_idx=None, pacing="slow",
+            )
+            for i in range(4)
+        ]
+
+        index = EmbeddingIndex()
+        index.build(big_corpus)
+        # k=2 so subset >= 4 required for pure pre-filter
+        results = index.search(
+            "a character slowly changes", k=2,
+            strategy="accumulate", pre_filter_strategy=True,
+        )
+        # All top-k should be accumulate — no leak from others
+        assert len(results) == 2
+        assert all(r.strategy == "accumulate" for r in results)
+
+    def test_pre_filter_soft_degradation(self, corpus):
+        """Pre-filter should backfill with others when matched subset is small."""
+        from vn_agent.eval.embedder import EmbeddingIndex
+
+        index = EmbeddingIndex()
+        index.build(corpus)
+        # Only 1 "rupture" sample in corpus, k=3 → must backfill
+        results = index.search(
+            "any content", k=3,
+            strategy="rupture", pre_filter_strategy=True,
+        )
+        assert len(results) == 3
+        # At least the one rupture sample is present
+        assert any(r.strategy == "rupture" for r in results)
+
+    def test_pre_filter_vs_post_filter(self, corpus):
+        """pre_filter=False should fall back to legacy post-filter behavior."""
+        from vn_agent.eval.embedder import EmbeddingIndex
+
+        index = EmbeddingIndex()
+        index.build(corpus)
+        # Both modes should return something for a valid query
+        pre = index.search("test", k=2, strategy="reveal", pre_filter_strategy=True)
+        post = index.search("test", k=2, strategy="reveal", pre_filter_strategy=False)
+        assert len(pre) == 2
+        assert len(post) == 2
+
     def test_search_empty_index(self):
         from vn_agent.eval.embedder import EmbeddingIndex
 

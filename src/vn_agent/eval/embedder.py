@@ -77,13 +77,28 @@ class EmbeddingIndex:
         query: str,
         k: int = 3,
         strategy: str | None = None,
+        pre_filter_strategy: bool = True,
     ) -> list[AnnotatedSession]:
         """Find the k most semantically similar sessions to the query.
 
         Args:
             query: search text (e.g. scene description)
             k: number of results
-            strategy: optional filter — prefer results matching this strategy
+            strategy: optional strategy constraint
+            pre_filter_strategy: if True and `strategy` is set, restrict vector
+                search to the strategy-matched subset first (hard constraint),
+                then backfill with cross-strategy results only when the subset
+                is too small (soft degradation). If False, keeps legacy
+                post-filter behavior (vector on full index, then rerank by
+                strategy match).
+
+        Retrieval strategy when pre_filter_strategy=True:
+          1. Partition sessions by `strategy == target` → matched / others
+          2. If |matched| >= 2k: vector-rank within matched only, return top k
+          3. Else: vector-rank the whole matched subset (keep all) + fill
+             remaining slots from top-ranked `others`
+          4. Unannotated sessions (strategy is None) never appear in matched
+             and are only used as backfill. They remain low priority.
         """
         if not self._sessions or self._embeddings is None:
             return []
@@ -92,7 +107,34 @@ class EmbeddingIndex:
             [query], normalize_embeddings=True, show_progress_bar=False,
         )
 
-        # Over-retrieve to allow for strategy filtering
+        if strategy and pre_filter_strategy:
+            return self._search_pre_filter(q_emb, k, strategy)
+        return self._search_post_filter(q_emb, k, strategy)
+
+    def _search_pre_filter(
+        self, q_emb: np.ndarray, k: int, strategy: str,
+    ) -> list[AnnotatedSession]:
+        """Strategy hard-constraint: rank within matched subset first."""
+        matched_idx = [i for i, s in enumerate(self._sessions) if s.strategy == strategy]
+        others_idx = [i for i, s in enumerate(self._sessions) if s.strategy != strategy]
+
+        matched_ranked = self._vector_rank(q_emb, matched_idx)
+        if len(matched_ranked) >= 2 * k:
+            # Enough matching samples — pure subset ranking
+            return [self._sessions[i] for i, _ in matched_ranked[:k]]
+
+        # Soft degradation: take all matched + backfill with top others
+        result_indices = [i for i, _ in matched_ranked]
+        need = k - len(result_indices)
+        if need > 0 and others_idx:
+            others_ranked = self._vector_rank(q_emb, others_idx)
+            result_indices.extend(i for i, _ in others_ranked[:need])
+        return [self._sessions[i] for i in result_indices[:k]]
+
+    def _search_post_filter(
+        self, q_emb: np.ndarray, k: int, strategy: str | None,
+    ) -> list[AnnotatedSession]:
+        """Legacy behavior: rank full index, then bubble strategy-matched up."""
         fetch_k = min(k * 5, len(self._sessions))
 
         if _HAS_FAISS and self._faiss_index is not None:
@@ -103,12 +145,10 @@ class EmbeddingIndex:
                 if idx >= 0
             ]
         else:
-            # Numpy fallback: brute-force cosine similarity
-            sims = np.dot(self._embeddings, q_emb.T).flatten()
+            sims = np.dot(self._embeddings, q_emb.T).flatten()  # type: ignore[arg-type]
             top_indices = np.argsort(sims)[::-1][:fetch_k]
             candidates = [(self._sessions[i], float(sims[i])) for i in top_indices]
 
-        # Strategy-aware ranking: boost matching strategy results
         if strategy:
             matched = [(s, sc) for s, sc in candidates if s.strategy == strategy]
             others = [(s, sc) for s, sc in candidates if s.strategy != strategy]
@@ -117,6 +157,22 @@ class EmbeddingIndex:
             ranked = candidates
 
         return [s for s, _ in ranked[:k]]
+
+    def _vector_rank(
+        self, q_emb: np.ndarray, subset_idx: list[int],
+    ) -> list[tuple[int, float]]:
+        """Rank a subset of sessions by cosine similarity against query.
+
+        Returns list of (corpus_index, score) sorted descending.
+        Uses numpy on the subset directly — FAISS can't filter by index list
+        without rebuilding, and numpy is fast enough for subsets.
+        """
+        if not subset_idx or self._embeddings is None:
+            return []
+        subset_emb = self._embeddings[subset_idx]  # type: ignore[index]
+        sims = np.dot(subset_emb, q_emb.T).flatten()
+        order = np.argsort(sims)[::-1]
+        return [(subset_idx[int(j)], float(sims[int(j)])) for j in order]
 
     def save(self, path: Path) -> None:
         """Persist index to disk (embeddings + metadata)."""

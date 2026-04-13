@@ -62,6 +62,7 @@ class Settings(BaseSettings):
 
     # Embedding RAG (requires [rag] extras: sentence-transformers + faiss-cpu)
     use_semantic_retrieval: bool = True  # use embedding similarity; False = label filter
+    rag_pre_filter_strategy: bool = True  # strategy hard-constraint before vector rank
     embedding_model: str = "all-MiniLM-L6-v2"
     embedding_index_path: str = ""  # pre-built index dir; empty = build on-the-fly
 

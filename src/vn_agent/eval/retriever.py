@@ -39,16 +39,24 @@ def retrieve_examples_semantic(
     query: str,
     strategy: str = "",
     k: int = 2,
+    pre_filter_strategy: bool = True,
 ) -> list[AnnotatedSession]:
     """Retrieve examples using embedding similarity search.
 
     Args:
         index: An EmbeddingIndex instance
         query: scene description or other text to match against
-        strategy: optional strategy label to prefer
+        strategy: optional strategy label to constrain retrieval
         k: number of examples to return
+        pre_filter_strategy: when True (default), strategy acts as a hard
+            constraint — only matched sessions are vector-ranked, with soft
+            backfill from others only when the matched subset is too small.
+            When False, uses legacy post-filter reranking.
     """
-    return index.search(query=query, k=k, strategy=strategy or None)  # type: ignore[attr-defined]
+    return index.search(  # type: ignore[attr-defined]
+        query=query, k=k, strategy=strategy or None,
+        pre_filter_strategy=pre_filter_strategy,
+    )
 
 
 def format_examples(examples: list[AnnotatedSession]) -> str:
