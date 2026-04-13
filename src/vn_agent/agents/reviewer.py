@@ -203,11 +203,28 @@ If average < 3.5, respond FAIL on the first line followed by actionable issues."
     stripped = content.strip()
     first_line = stripped.split("\n", 1)[0].strip().upper()
 
-    # Parse numeric scores if present (format: coherence=X voice=X arc=X branches=X pacing=X avg=X.X)
+    # Parse numeric scores (format: coherence=X voice=X arc=X branches=X pacing=X avg=X.X)
     scores = _parse_scores(stripped)
 
+    # Threshold-first decision: if the rubric parsed successfully and we have
+    # an average, that number is authoritative. This protects against the
+    # LLM writing PASS/FAIL inconsistent with its own scores (coherence=2
+    # voice=2 arc=2 but declaring PASS, and vice versa). The LLM-emitted
+    # verdict becomes the fallback when scores can't be parsed.
+    threshold = settings.reviewer_pass_threshold
     has_issues = "\n-" in stripped or "\n*" in stripped or "\n1." in stripped
-    is_pass = first_line.startswith("PASS") and not has_issues
+    llm_said_pass = first_line.startswith("PASS") and not has_issues
+
+    if scores and "avg" in scores:
+        is_pass = scores["avg"] >= threshold
+        if is_pass != llm_said_pass:
+            logger.info(
+                f"Reviewer disagreement: LLM said {'PASS' if llm_said_pass else 'FAIL'} "
+                f"but avg={scores['avg']} (threshold={threshold}); "
+                f"using score-based verdict."
+            )
+    else:
+        is_pass = llm_said_pass
 
     if is_pass:
         return ReviewResult(passed=True, feedback="Quality check passed", issues=[], scores=scores)

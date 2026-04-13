@@ -4,6 +4,7 @@ from vn_agent.agents.reviewer import (
     _check_branch_divergence,
     _find_reachable_scenes,
     _jaccard,
+    _parse_scores,
     _structural_check,
     _tokenize_for_jaccard,
     check_strategy_consistency,
@@ -125,6 +126,55 @@ class TestReviewerPassJudgement:
     def test_reviewer_pass_numbered_issues(self):
         content = "PASS\n1. Scene transitions are abrupt"
         assert self._judge(content) is False
+
+
+class TestThresholdBasedVerdict:
+    """Parsed rubric scores + configurable threshold override the LLM's stated verdict."""
+
+    @staticmethod
+    def _decide(content: str, threshold: float = 3.5) -> bool:
+        """Replicate _quality_check's score-authoritative decision."""
+        stripped = content.strip()
+        first_line = stripped.split("\n", 1)[0].strip().upper()
+        scores = _parse_scores(stripped)
+        has_issues = "\n-" in stripped or "\n*" in stripped or "\n1." in stripped
+        llm_said_pass = first_line.startswith("PASS") and not has_issues
+        if scores and "avg" in scores:
+            return scores["avg"] >= threshold
+        return llm_said_pass
+
+    def test_scores_override_incorrect_llm_pass(self):
+        # LLM says PASS but rubric average is 2.4 → FAIL
+        content = "PASS\nScores: coherence=2 voice=3 arc=2 branches=3 pacing=2"
+        assert self._decide(content) is False
+
+    def test_scores_override_incorrect_llm_fail(self):
+        # LLM says FAIL but rubric average is 4.2 → PASS
+        content = "FAIL\nScores: coherence=4 voice=5 arc=4 branches=4 pacing=4"
+        assert self._decide(content) is True
+
+    def test_scores_missing_falls_back_to_llm_string(self):
+        # No numeric scores parseable → trust the LLM's string verdict
+        assert self._decide("PASS") is True
+        assert self._decide("FAIL\n- issue 1") is False
+
+    def test_exactly_at_threshold_passes(self):
+        content = "PASS\ncoherence=4 voice=3 arc=4 branches=3 pacing=3.5"
+        scores = _parse_scores(content)
+        assert scores is not None and scores["avg"] == 3.5
+        assert self._decide(content, threshold=3.5) is True
+
+    def test_just_below_threshold_fails(self):
+        content = "PASS\ncoherence=3 voice=3 arc=3 branches=4 pacing=4"
+        scores = _parse_scores(content)
+        assert scores is not None and scores["avg"] == 3.4
+        assert self._decide(content, threshold=3.5) is False
+
+    def test_threshold_is_configurable(self):
+        # avg=3.4 — fails at 3.5, passes at 3.0
+        content = "PASS\ncoherence=3 voice=3 arc=3 branches=4 pacing=4"
+        assert self._decide(content, threshold=3.5) is False
+        assert self._decide(content, threshold=3.0) is True
 
 
 class TestMergeDropsInvalidBranches:

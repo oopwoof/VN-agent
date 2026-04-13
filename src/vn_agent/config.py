@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     min_dialogue_lines: int = 5
     max_dialogue_lines: int = 20
     reviewer_skip_llm: bool = False
+    # Rubric average (1-5 scale) below which the Reviewer fails the script
+    # and triggers a Writer revision round. Matches the prompt's stated bar.
+    reviewer_pass_threshold: float = 3.5
 
     # Eval / few-shot
     corpus_path: str = ""  # path to final_annotations.csv (empty = disabled)
