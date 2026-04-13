@@ -41,9 +41,10 @@ async def run_writer(state: AgentState) -> dict:
     embedding_index = None
     if settings.corpus_path:
         try:
-            from vn_agent.eval.corpus import load_corpus
+            from vn_agent.eval.corpus_loader import load_merged_corpus
 
-            corpus = load_corpus(Path(settings.corpus_path))
+            sessions_dir = Path(settings.sessions_dir) if settings.sessions_dir else None
+            corpus = load_merged_corpus(Path(settings.corpus_path), sessions_dir)
 
             # Try semantic retrieval (requires [rag] extras)
             if settings.use_semantic_retrieval:

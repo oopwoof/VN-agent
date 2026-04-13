@@ -42,6 +42,30 @@
 
 ## 开发记录
 
+### 2026-04-13 | 实现 - 2026-04-13 08:12
+
+**变更文件** (4 个):
+**源码变更** (3 文件):
+  - `src/vn_agent/agents/writer.py`
+  - `src/vn_agent/config.py`
+  - `src/vn_agent/eval/corpus_loader.py`
+
+**测试变更** (1 文件):
+  - `tests/test_eval/test_corpus_loader.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/writer.py         |   5 +-
+ src/vn_agent/config.py                |   1 +
+ src/vn_agent/eval/corpus_loader.py    | 146 ++++++++++++++++++++++++++++++++++
+ tests/test_eval/test_corpus_loader.py | 126 +++++++++++++++++++++++++++++
+ 4 files changed, 276 insertions(+), 2 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-13 | 实现 - 2026-04-13 00:40
 
 **变更文件** (5 个):

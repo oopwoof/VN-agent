@@ -58,6 +58,7 @@ class Settings(BaseSettings):
 
     # Eval / few-shot
     corpus_path: str = ""  # path to final_annotations.csv (empty = disabled)
+    sessions_dir: str = ""  # optional dir of *.jsonl unannotated sessions to merge in
     few_shot_k: int = 2  # number of examples to inject into Writer prompt
 
     # Embedding RAG (requires [rag] extras: sentence-transformers + faiss-cpu)
