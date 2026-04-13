@@ -81,7 +81,10 @@ DIRECTOR_STEP2 = """{
         {"text": "Secure the structure first", "next_scene_id": "ch1_signal"}
       ],
       "music_mood": "mysterious",
-      "music_description": "low strings, distant thunder"
+      "music_description": "low strings, distant thunder",
+      "emotional_arc": "duty -> foreboding",
+      "entry_context": "",
+      "exit_hook": "A mysterious voice on the radio warns about the beam."
     },
     {
       "id": "ch1_signal",
@@ -91,21 +94,30 @@ DIRECTOR_STEP2 = """{
         {"text": "Save yourself — the storm is too dangerous", "next_scene_id": "ch1_retreat"}
       ],
       "music_mood": "tense",
-      "music_description": "rising strings, urgent rhythm"
+      "music_description": "rising strings, urgent rhythm",
+      "emotional_arc": "foreboding -> dread",
+      "entry_context": "The voice has primed the keeper; the storm is intensifying.",
+      "exit_hook": "A distress signal forces a life-or-death choice."
     },
     {
       "id": "ch1_sacrifice",
       "next_scene_id": null,
       "branches": [],
       "music_mood": "epic",
-      "music_description": "swelling orchestra, bittersweet resolution"
+      "music_description": "swelling orchestra, bittersweet resolution",
+      "emotional_arc": "resolve -> bittersweet triumph",
+      "entry_context": "The keeper chose to risk everything for the ship.",
+      "exit_hook": ""
     },
     {
       "id": "ch1_retreat",
       "next_scene_id": null,
       "branches": [],
       "music_mood": "melancholic",
-      "music_description": "sparse piano, wind ambience"
+      "music_description": "sparse piano, wind ambience",
+      "emotional_arc": "guilt -> hollow survival",
+      "entry_context": "The keeper abandoned the post to save themselves.",
+      "exit_hook": ""
     }
   ]
 }"""
@@ -215,21 +227,30 @@ DIRECTOR_STEP2_CN = """{
         {"text": "默默离开", "next_scene_id": "ch1_promise"}
       ],
       "music_mood": "peaceful",
-      "music_description": "轻柔的钢琴曲"
+      "music_description": "轻柔的钢琴曲",
+      "emotional_arc": "好奇 -> 心动",
+      "entry_context": "",
+      "exit_hook": "在樱花树下初次相遇，是否开口决定接下来的故事。"
     },
     {
       "id": "ch1_talk",
       "next_scene_id": "ch1_promise",
       "branches": [],
       "music_mood": "joyful",
-      "music_description": "明快的弦乐"
+      "music_description": "明快的弦乐",
+      "emotional_arc": "陌生 -> 亲近",
+      "entry_context": "主角选择了主动搭话，两人开始交谈。",
+      "exit_hook": "对话为放学后的约定埋下伏笔。"
     },
     {
       "id": "ch1_promise",
       "next_scene_id": null,
       "branches": [],
       "music_mood": "romantic",
-      "music_description": "温暖的吉他旋律"
+      "music_description": "温暖的吉他旋律",
+      "emotional_arc": "期待 -> 承诺",
+      "entry_context": "两人走到樱花树下，一天即将结束。",
+      "exit_hook": ""
     }
   ]
 }"""

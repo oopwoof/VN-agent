@@ -28,6 +28,19 @@ class Scene(BaseModel):
     next_scene_id: str | None = Field(default=None, description="Auto-advance to scene, None if branches exist")
     narrative_strategy: str | None = Field(default=None, description="Narrative strategy used in this scene")
     background_prompt: str | None = Field(default=None, description="Image generation prompt for background")
+    # Transition cards for cross-scene coherence (Sprint 6-1)
+    entry_context: str | None = Field(
+        default=None,
+        description="What the player just experienced before this scene — given to Writer for continuity",
+    )
+    exit_hook: str | None = Field(
+        default=None,
+        description="How this scene should end to set up the next one — given to Writer",
+    )
+    emotional_arc: str | None = Field(
+        default=None,
+        description="Emotional arc of this scene, e.g. 'warmth → anticipation'",
+    )
 
 
 class VNScript(BaseModel):

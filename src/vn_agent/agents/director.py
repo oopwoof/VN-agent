@@ -198,15 +198,17 @@ async def _step2_details(outline: dict, output_dir: str, settings) -> dict:
 
     if small:
         system = _SYSTEM_DETAILS_SIMPLE
+        # Small model: require only emotional_arc (lightweight transition signal)
         example = (
             '{{"scenes":[{{"id":"scene_id","next_scene_id":"next_or_null",'
-            '"branches":[],"music_mood":"peaceful","music_description":"soft piano"}}]}}'
+            '"branches":[],"music_mood":"peaceful","music_description":"soft piano",'
+            '"emotional_arc":"calm -> tense"}}]}}'
         )
         user_prompt = f"""Scenes: {json.dumps(scene_ids)}
 Start: {outline.get("start_scene_id", "")}
 
-For each scene add next_scene_id and music_mood. Last scene has next_scene_id=null.
-Add branches (choices) to at least 1 scene.
+For each scene add next_scene_id, music_mood, and emotional_arc (e.g. "warmth -> anticipation").
+Last scene has next_scene_id=null. Add branches (choices) to at least 1 scene.
 
 Return JSON: {example}
 
@@ -219,7 +221,7 @@ Output ONLY JSON."""
 All valid scene IDs: {json.dumps(scene_ids)}
 Start scene: {outline.get("start_scene_id", "")}
 
-For EACH scene, specify navigation and music. Return this JSON:
+For EACH scene, specify navigation, music, AND transition cards. Return this JSON:
 {{
   "scenes": [
     {{
@@ -227,7 +229,10 @@ For EACH scene, specify navigation and music. Return this JSON:
       "next_scene_id": "ch1_next_or_null",
       "branches": [{{"text": "Choice text", "next_scene_id": "valid_scene_id"}}],
       "music_mood": "peaceful",
-      "music_description": "soft piano"
+      "music_description": "soft piano",
+      "emotional_arc": "curiosity -> unease",
+      "entry_context": "What the player just experienced (for non-start scenes)",
+      "exit_hook": "How this scene should end to set up the next"
     }}
   ]
 }}
@@ -236,7 +241,11 @@ Rules:
 - Use ONLY scene IDs from the list above
 - A scene with branches should have next_scene_id=null
 - Terminal scenes: next_scene_id=null, branches=[]
-- Include at least 2 scenes with meaningful branches"""
+- Include at least 2 scenes with meaningful branches
+- **Transition cards**: entry_context describes the prior scene's ending mood/event \
+(leave empty "" for the start scene). exit_hook describes what this scene sets up \
+(leave empty "" for terminal scenes with no successor). emotional_arc is short, \
+like "warmth -> anticipation" or "hope -> despair"."""
 
     response = await ainvoke_llm(
         system, user_prompt, model=settings.llm_director_model, caller="director/step2",
@@ -263,6 +272,10 @@ def _merge_outline_details(outline: dict, details: dict) -> dict:
         merged["branches"] = d.get("branches") or []
         merged["music_mood"] = d.get("music_mood", "neutral")
         merged["music_description"] = d.get("music_description", "")
+        # Transition cards (Sprint 6-1)
+        merged["emotional_arc"] = d.get("emotional_arc") or None
+        merged["entry_context"] = d.get("entry_context") or None
+        merged["exit_hook"] = d.get("exit_hook") or None
         merged_scenes.append(merged)
     # Filter out invalid branch/next_scene_id references from step2
     valid_ids = {s["id"] for s in merged_scenes}
@@ -491,6 +504,10 @@ def _build_from_plan(plan: dict, theme: str) -> tuple[VNScript, dict[str, Charac
             branches=branches,
             next_scene_id=s.get("next_scene_id"),
             narrative_strategy=s.get("narrative_strategy"),
+            # Transition cards (Sprint 6-1)
+            entry_context=s.get("entry_context") or None,
+            exit_hook=s.get("exit_hook") or None,
+            emotional_arc=s.get("emotional_arc") or None,
         )
         scenes.append(scene)
 

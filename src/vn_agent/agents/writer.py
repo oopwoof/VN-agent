@@ -119,13 +119,25 @@ async def _write_scene(
     if revision_feedback:
         feedback_note = f"\nIMPORTANT - Revision feedback to address:\n{revision_feedback}\n"
 
+    # Transition cards for cross-scene coherence (Sprint 6-1)
+    transition_lines: list[str] = []
+    if scene.entry_context:
+        transition_lines.append(f"Entry context (what came before): {scene.entry_context}")
+    if scene.emotional_arc:
+        transition_lines.append(f"Emotional arc of this scene: {scene.emotional_arc}")
+    if scene.exit_hook:
+        transition_lines.append(f"Exit hook (set up the next scene with): {scene.exit_hook}")
+    transition_block = "\n".join(transition_lines)
+    if transition_block:
+        transition_block = f"\n--- Transition Guidance ---\n{transition_block}\n"
+
     user_prompt = f"""Write dialogue for this scene:
 
 Scene ID: {scene.id}
 Title: {scene.title}
 Description: {scene.description}
 {strategy_guidance}
-{feedback_note}
+{feedback_note}{transition_block}
 Characters present: {', '.join(scene.characters_present)}
 Music mood: {scene.music.mood.value if scene.music else 'none'}
 
