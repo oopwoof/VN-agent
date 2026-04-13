@@ -333,75 +333,74 @@ def dry_run(
     max_scenes: int = typer.Option(10, "--max-scenes"),
     num_characters: int = typer.Option(3, "--characters"),
     text_only: bool = typer.Option(False, "--text-only"),
+    ping: bool = typer.Option(False, "--ping", help="Send a tiny probe call to verify API keys work"),
+    output: Path = typer.Option(Path("./vn_output"), "--output", "-o"),
 ) -> None:
-    """Preview what would be generated without calling any APIs."""
-    import os
+    """Preview what would be generated. Checks keys + estimates cost.
+
+    With --ping, actually sends ≤$0.001 probe calls to verify credentials.
+    Without --ping, purely offline: no API calls, no charges.
+    """
+    import asyncio
 
     from rich.table import Table
 
     from vn_agent.config import get_settings
+    from vn_agent.services.preflight import check_readiness
 
     settings = get_settings()
+    report = asyncio.run(check_readiness(
+        settings,
+        max_scenes=max_scenes,
+        num_characters=num_characters,
+        text_only=text_only,
+        output_dir=output,
+        ping=ping,
+    ))
 
-    # Check API key availability
-    provider = settings.llm_provider
-    if provider == "anthropic":
-        api_key_present = bool(
-            settings.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY", "")
-        )
-        api_key_label = "ANTHROPIC_API_KEY"
-    else:
-        api_key_present = bool(
-            settings.openai_api_key or os.environ.get("OPENAI_API_KEY", "")
-        )
-        api_key_label = "OPENAI_API_KEY"
-
-    # Estimated API calls: director + writer*scenes + reviewer + (char_designer + scene_artist if not text_only)
-    estimated_llm_calls = 1 + max_scenes + 1  # director, writer per scene, reviewer
-    if not text_only:
-        estimated_llm_calls += num_characters  # character designer
-        estimated_llm_calls += max_scenes  # scene artist
-
+    # Main config table
     table = Table(title="VN-Agent Dry Run Preview", show_header=True, header_style="bold magenta")
     table.add_column("Setting", style="cyan", no_wrap=True)
     table.add_column("Value", style="white")
-
     table.add_row("Theme", theme[:60] + ("..." if len(theme) > 60 else ""))
-    table.add_row("Provider", f"{provider}")
-    table.add_row("Model", settings.llm_model)
+    table.add_row("LLM Provider", settings.llm_provider)
+    table.add_row("Director model", settings.llm_director_model)
+    table.add_row("Writer model", settings.llm_writer_model)
+    table.add_row("Reviewer model", settings.llm_reviewer_model)
     table.add_row("Max Scenes", str(max_scenes))
     table.add_row("Characters", str(num_characters))
-    table.add_row("Music Strategy", settings.music_strategy)
     table.add_row("Text-Only Mode", "Yes" if text_only else "No")
-    table.add_row("Image Generation", "Disabled" if text_only else "Enabled")
-    table.add_row("Estimated LLM Calls", str(estimated_llm_calls))
-    table.add_row(
-        api_key_label,
-        "[green]set[/green]" if api_key_present else "[red]NOT SET[/red]",
-    )
-
+    if not text_only:
+        table.add_row("Image Provider", settings.image_provider)
+        table.add_row("Image Model", settings.image_model)
+    table.add_row("Output Dir", str(output))
+    table.add_row("Estimated LLM Calls", str(report.estimated_llm_calls))
+    if report.estimated_images:
+        table.add_row("Estimated Images", str(report.estimated_images))
     console.print()
     console.print(table)
 
-    console.print("\n[bold]What would happen:[/bold]")
-    console.print(
-        f"  [cyan]1.[/cyan] Director plans a story with up to {max_scenes} scenes and {num_characters} characters"
-    )
-    console.print("  [cyan]2.[/cyan] Writer generates dialogue for each scene")
-    console.print("  [cyan]3.[/cyan] Reviewer validates the script")
-    if not text_only:
-        console.print(
-            f"  [cyan]4.[/cyan] Character Designer creates visual profiles for {num_characters} characters (parallel)"
-        )
-        console.print("  [cyan]5.[/cyan] Scene Artist generates backgrounds for unique scenes (parallel)")
-        console.print("  [cyan]6.[/cyan] Music Director assigns BGM tracks")
-    else:
-        console.print("  [cyan]4.[/cyan] Music Director assigns BGM tracks")
-        console.print("  [dim](Image generation skipped — text-only mode)[/dim]")
-    console.print("  [cyan]→[/cyan] Ren'Py project compiled to output directory\n")
+    # Cost breakdown table
+    cost_table = Table(title="Cost Estimate (USD)", show_header=True, header_style="bold yellow")
+    cost_table.add_column("Category", style="cyan")
+    cost_table.add_column("Amount", style="white", justify="right")
+    for label, amount in report.cost_breakdown.items():
+        cost_table.add_row(label, f"${amount:.3f}")
+    cost_table.add_row("[bold]Total[/bold]", f"[bold]${report.cost_estimate_usd:.3f}[/bold]")
+    console.print()
+    console.print(cost_table)
 
-    if not api_key_present:
-        console.print(f"[yellow]Warning: {api_key_label} is not set. Generation will fail without it.[/yellow]")
+    # Status
+    console.print()
+    if report.passed:
+        console.print("[green]✓ Pre-flight: all checks passed[/green]")
+    else:
+        console.print("[red]✗ Pre-flight: NOT READY[/red]")
+    for err in report.errors:
+        console.print(f"  [red]• {err}[/red]")
+    for warn in report.warnings:
+        console.print(f"  [yellow]• {warn}[/yellow]")
+    console.print()
 
 
 @app.command()

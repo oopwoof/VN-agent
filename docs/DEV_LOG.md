@@ -42,6 +42,28 @@
 
 ## 开发记录
 
+### 2026-04-13 | 实现 - 2026-04-13 10:40
+
+**变更文件** (3 个):
+**源码变更** (2 文件):
+  - `src/vn_agent/cli.py`
+  - `src/vn_agent/services/preflight.py`
+
+**测试变更** (1 文件):
+  - `tests/test_services/test_preflight.py`
+
+**变更统计**:
+```
+src/vn_agent/cli.py                   |  99 ++++++------
+ src/vn_agent/services/preflight.py    | 277 ++++++++++++++++++++++++++++++++++
+ tests/test_services/test_preflight.py | 143 ++++++++++++++++++
+ 3 files changed, 469 insertions(+), 50 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-13 | 实现 - 2026-04-13 10:31
 
 **变更文件** (2 个):
