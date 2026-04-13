@@ -206,7 +206,7 @@ async def _generate_async(
         pass
 
     # Summary
-    console.print("\n[green]✓ Generation complete![/green]")
+    console.print("\n[green][OK] Generation complete![/green]")
     console.print(f"  Title: [bold]{script.title}[/bold]")
     console.print(f"  Scenes: {len(script.scenes)}")
     console.print(f"  Characters: {len(characters)}")
@@ -246,7 +246,7 @@ async def _resume_async(
     if text_only:
         output.mkdir(parents=True, exist_ok=True)
         build_project(script, characters, output)
-        console.print("\n[green]✓ Resume complete (text-only)![/green]")
+        console.print("\n[green][OK] Resume complete (text-only)![/green]")
         console.print(f"  Title: [bold]{script.title}[/bold]")
         console.print(f"  Scenes: {len(script.scenes)}")
         console.print(f"  Characters: {len(characters)}")
@@ -297,7 +297,7 @@ async def _resume_async(
     output.mkdir(parents=True, exist_ok=True)
     build_project(final_script, final_characters, output)
 
-    console.print("\n[green]✓ Resume complete![/green]")
+    console.print("\n[green][OK] Resume complete![/green]")
     console.print(f"  Title: [bold]{final_script.title}[/bold]")
     console.print(f"  Scenes: {len(final_script.scenes)}")
     console.print(f"  Characters: {len(final_characters)}")
@@ -317,9 +317,9 @@ def validate(
         script = VNScript.model_validate_json(script_path.read_text(encoding="utf-8"))
         result = _structural_check(script)
         if result.passed:
-            console.print("[green]✓ Script is valid[/green]")
+            console.print("[green][OK] Script is valid[/green]")
         else:
-            console.print("[red]✗ Validation failed:[/red]")
+            console.print("[red][X] Validation failed:[/red]")
             console.print(result.feedback)
             raise typer.Exit(1)
     except Exception as e:
@@ -390,16 +390,16 @@ def dry_run(
     console.print()
     console.print(cost_table)
 
-    # Status
+    # Status — ASCII only so legacy Windows GBK terminals don't crash
     console.print()
     if report.passed:
-        console.print("[green]✓ Pre-flight: all checks passed[/green]")
+        console.print("[green][OK] Pre-flight: all checks passed[/green]")
     else:
-        console.print("[red]✗ Pre-flight: NOT READY[/red]")
+        console.print("[red][X] Pre-flight: NOT READY[/red]")
     for err in report.errors:
-        console.print(f"  [red]• {err}[/red]")
+        console.print(f"  [red]- {err}[/red]")
     for warn in report.warnings:
-        console.print(f"  [yellow]• {warn}[/yellow]")
+        console.print(f"  [yellow]- {warn}[/yellow]")
     console.print()
 
 
@@ -431,7 +431,7 @@ def compile(
 
     output.mkdir(parents=True, exist_ok=True)
     build_project(script, characters, output)
-    console.print(f"[green]✓ Compiled to {output.resolve()}[/green]")
+    console.print(f"[green][OK] Compiled to {output.resolve()}[/green]")
 
 
 eval_app = typer.Typer(help="Evaluation commands")

@@ -70,7 +70,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _print_cost_table(report, title: str = "Estimated cost") -> None:
-    print(f"\n── {title} ──")
+    print(f"\n== {title} ==")
     for label, amount in report.cost_breakdown.items():
         print(f"  {label:<10} ${amount:.4f}")
     print(f"  {'Total':<10} ${report.cost_estimate_usd:.4f}")
@@ -107,7 +107,7 @@ async def _run_pipeline(
         async for update in pipeline.astream(state, stream_mode="updates"):
             for node_name, chunk in update.items():
                 if node_name != "__end__":
-                    logger.info(f"→ {node_name}")
+                    logger.info(f"-> {node_name}")
                 if isinstance(chunk, dict):
                     final_state.update(chunk)
         # Save trace alongside output
@@ -156,7 +156,7 @@ def _write_run_meta(
     }
     meta_path = output / "run_meta.json"
     meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"\nRun metadata → {meta_path}")
+    print(f"\nRun metadata -> {meta_path}")
 
 
 async def _main_async(args: argparse.Namespace) -> int:
@@ -165,8 +165,8 @@ async def _main_async(args: argparse.Namespace) -> int:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output = args.output_root / f"vn_{timestamp}"
 
-    # ── 1. Preflight ────────────────────────────────────────────────────────
-    print(f"── Preflight: {args.theme!r} → {output}")
+    # -- 1. Preflight --
+    print(f"== Preflight: {args.theme!r} -> {output}")
     report = await check_readiness(
         settings,
         max_scenes=args.max_scenes,
@@ -177,20 +177,20 @@ async def _main_async(args: argparse.Namespace) -> int:
     )
     _print_cost_table(report)
     if not report.passed:
-        print("\n✗ Preflight FAILED — fix these before re-running:")
+        print("\n[X] Preflight FAILED - fix these before re-running:")
         for err in report.errors:
-            print(f"  • {err}")
+            print(f"  - {err}")
         return 2
     for warn in report.warnings:
-        print(f"  ⚠ {warn}")
+        print(f"  ! {warn}")
 
-    # ── 2. Confirm ──────────────────────────────────────────────────────────
+    # -- 2. Confirm --
     if not _confirm_spend(report, skip_prompt=args.confirm):
         print("Aborted by user (no API calls made).")
         return 0
 
-    # ── 3. Run ──────────────────────────────────────────────────────────────
-    print(f"\n── Running pipeline (models: dir={settings.llm_director_model}, "
+    # -- 3. Run --
+    print(f"\n== Running pipeline (models: dir={settings.llm_director_model}, "
           f"writer={settings.llm_writer_model}, reviewer={settings.llm_reviewer_model}, "
           f"image={settings.image_provider}/{settings.image_model})")
     t0 = time.perf_counter()
@@ -200,7 +200,7 @@ async def _main_async(args: argparse.Namespace) -> int:
         )
     except Exception as e:
         wall = time.perf_counter() - t0
-        print(f"\n✗ Pipeline failed after {wall:.1f}s: {e}")
+        print(f"\n[X] Pipeline failed after {wall:.1f}s: {e}")
         logger.exception("Pipeline error")
         return 1
     wall = time.perf_counter() - t0
@@ -208,18 +208,18 @@ async def _main_async(args: argparse.Namespace) -> int:
     script = final_state.get("vn_script")
     characters = final_state.get("characters", {})
     if not script:
-        print("\n✗ No script produced — inspect logs above.")
+        print("\n[X] No script produced - inspect logs above.")
         _write_run_meta(output, args, report, tracker, wall, final_state)
         return 1
 
-    # ── 4. Build Ren'Py project ─────────────────────────────────────────────
+    # -- 4. Build Ren'Py project --
     output.mkdir(parents=True, exist_ok=True)
     build_project(script, characters, output)
 
-    # ── 5. Summary + meta dump ──────────────────────────────────────────────
+    # -- 5. Summary + meta dump --
     actual_cost = tracker.estimated_cost()
     delta = actual_cost - report.cost_estimate_usd
-    print(f"\n✓ Done in {wall:.1f}s")
+    print(f"\n[OK] Done in {wall:.1f}s")
     print(f"  Title:        {script.title}")
     print(f"  Scenes:       {len(script.scenes)}")
     print(f"  Characters:   {len(characters)}")
