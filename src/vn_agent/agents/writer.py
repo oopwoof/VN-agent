@@ -68,9 +68,18 @@ async def run_writer(state: AgentState) -> dict:
 
 
 def _build_char_descriptions(characters: dict[str, CharacterProfile]) -> str:
+    """Writer needs personality + backstory to give characters distinct voice.
+
+    Background is the big lever: without it Writer can't reference the
+    lighthouse keeper's drowned father, the soldier's posting, etc. Cost is
+    ~80 input tokens per character — trivial compared to the dialogue output.
+    """
     lines = ["Characters:\n"]
     for char_id, char in characters.items():
-        lines.append(f"- {char_id} ({char.name}): {char.role}. {char.personality}")
+        lines.append(f"- {char_id} ({char.name}): {char.role}")
+        lines.append(f"    Personality: {char.personality}")
+        if char.background:
+            lines.append(f"    Background: {char.background}")
     return "\n".join(lines)
 
 

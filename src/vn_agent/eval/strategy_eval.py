@@ -10,17 +10,19 @@ from vn_agent.eval.corpus import AnnotatedSession
 
 logger = logging.getLogger(__name__)
 
-# VN-Agent strategies that have COLX_523 mappings
-VALID_STRATEGIES = ["accumulate", "erode", "rupture", "reveal", "contrast", "weave"]
+# Dataset-aligned strategies — the six labels that exist in both the code
+# taxonomy and the COLX_523 annotated corpus. Eval restricts itself to
+# these since generation-only labels (escalate, resolve) have no gold labels.
+VALID_STRATEGIES = ["accumulate", "erode", "rupture", "uncover", "contest", "drift"]
 
 # Simple keyword baseline for --mock mode
 _KEYWORD_RULES: dict[str, list[str]] = {
-    "accumulate": ["gradually", "slowly build", "layer", "accumulate", "growing"],
-    "erode": ["erode", "wear down", "doubt", "crumble", "decay"],
-    "rupture": ["sudden", "shock", "rupture", "break", "snap", "explosion"],
-    "reveal": ["secret", "hidden", "reveal", "uncover", "discover", "truth"],
-    "contrast": ["contrast", "juxtapose", "oppose", "versus", "light and dark"],
-    "weave": ["weave", "interleave", "thread", "drift", "wander", "parallel"],
+    "accumulate": ["gradually", "slowly build", "layer", "accumulate", "growing", "mount"],
+    "erode": ["erode", "wear down", "doubt", "crumble", "decay", "fade"],
+    "rupture": ["sudden", "shock", "rupture", "break", "snap", "slam", "cut to"],
+    "uncover": ["secret", "hidden", "reveal", "uncover", "discover", "truth", "admit"],
+    "contest": ["argue", "refuse", "confront", "push back", "resist", "demand"],
+    "drift": ["wander", "meander", "drift", "banter", "idle", "casually", "quiet"],
 }
 
 

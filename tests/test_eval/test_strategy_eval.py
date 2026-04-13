@@ -21,9 +21,9 @@ MOCK_CORPUS = [
     _make_session("1", "The tension gradually builds layer by layer", "accumulate"),
     _make_session("2", "Doubt begins to erode her confidence", "erode"),
     _make_session("3", "A sudden shock ruptures the calm", "rupture"),
-    _make_session("4", "They slowly uncover the hidden secret truth", "reveal"),
-    _make_session("5", "Light and dark contrast sharply", "contrast"),
-    _make_session("6", "Threads weave and interleave through time", "weave"),
+    _make_session("4", "They suddenly uncover the hidden secret truth", "uncover"),
+    _make_session("5", "The two characters argue and refuse to yield", "contest"),
+    _make_session("6", "Casual banter drifts through a quiet afternoon", "drift"),
 ]
 
 
@@ -34,8 +34,8 @@ class TestKeywordClassifier:
     def test_rupture_keywords(self):
         assert keyword_classifier("A sudden shock breaks everything") == "rupture"
 
-    def test_reveal_keywords(self):
-        assert keyword_classifier("The hidden truth is finally revealed") == "reveal"
+    def test_uncover_keywords(self):
+        assert keyword_classifier("The hidden truth is finally revealed") == "uncover"
 
     def test_no_match_returns_valid_strategy(self):
         result = keyword_classifier("Just a normal conversation about weather")

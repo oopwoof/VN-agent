@@ -30,7 +30,7 @@ def _make_sessions() -> list[AnnotatedSession]:
         AnnotatedSession(
             id="s4", title="Hidden Truth",
             text="She discovered the secret letter hidden beneath the floorboards.",
-            strategy="reveal", pivot_line_idx=5, pacing="medium",
+            strategy="uncover", pivot_line_idx=5, pacing="medium",
         ),
         AnnotatedSession(
             id="s5", title="Crumbling Faith",
@@ -130,8 +130,8 @@ class TestEmbeddingIndex:
         index = EmbeddingIndex()
         index.build(corpus)
         # Both modes should return something for a valid query
-        pre = index.search("test", k=2, strategy="reveal", pre_filter_strategy=True)
-        post = index.search("test", k=2, strategy="reveal", pre_filter_strategy=False)
+        pre = index.search("test", k=2, strategy="uncover", pre_filter_strategy=True)
+        post = index.search("test", k=2, strategy="uncover", pre_filter_strategy=False)
         assert len(pre) == 2
         assert len(post) == 2
 

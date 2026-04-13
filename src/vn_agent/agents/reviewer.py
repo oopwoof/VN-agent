@@ -151,9 +151,14 @@ def _find_reachable_scenes(script: VNScript) -> set[str]:
 
 
 async def _quality_check(script: VNScript) -> ReviewResult:
-    """LLM-based quality check for narrative coherence."""
-    # Build script summary for review
-    scene_summary = []
+    """LLM-based quality check for narrative coherence.
+
+    Feeds the Reviewer the *full* dialogue of every scene rather than a
+    3-line preview. Character Voice and Emotional Arc rubric dimensions
+    are essentially unscorable from a preview — the LLM would be guessing
+    — and the extra Haiku input tokens cost well under a cent per run.
+    """
+    scene_blocks: list[str] = []
     for scene in script.scenes:
         exits = []
         if scene.next_scene_id:
@@ -161,32 +166,34 @@ async def _quality_check(script: VNScript) -> ReviewResult:
         for b in scene.branches:
             exits.append(f"[{b.text}] → {b.next_scene_id}")
 
-        dialogue_preview = " | ".join(
-            f"{d.character_id or 'NARR'}: {d.text[:40]}"
-            for d in scene.dialogue[:3]
+        dialogue_lines = [
+            f"  {d.character_id or 'NARR'} ({d.emotion}): {d.text}"
+            for d in scene.dialogue
+        ]
+        dialogue_block = "\n".join(dialogue_lines) if dialogue_lines else "  (no dialogue written)"
+
+        strategy = scene.narrative_strategy or "unspecified"
+        scene_blocks.append(
+            f"## {scene.id} — {scene.title}\n"
+            f"Description: {scene.description}\n"
+            f"Strategy: {strategy} | Exits: {', '.join(exits) or 'TERMINAL'}\n"
+            f"Dialogue:\n{dialogue_block}"
         )
 
-        scene_summary.append(
-            f"{scene.id} ({scene.title}): {scene.description[:60]} | "
-            f"Dialogue: {dialogue_preview} | Exits: {', '.join(exits)}"
-        )
-
-    user_prompt = f"""Review this visual novel script:
+    user_prompt = f"""Review this visual novel script in full:
 
 Title: {script.title}
 Theme: {script.theme}
 Scenes: {len(script.scenes)}
 
-{chr(10).join(scene_summary)}
+{chr(10).join(scene_blocks)}
 
-Check for:
-1. Narrative coherence (does the story make sense?)
-2. Character consistency (do characters behave consistently?)
-3. Pacing (is the story well-paced?)
-4. Branch meaningfulness (do choices matter?)
+Score each rubric dimension (coherence / voice / arc / branches / pacing)
+based on the actual dialogue above — not just scene descriptions. If any
+character sounds generic or flat, call it out in the voice score.
 
-If all good, respond ONLY with: PASS
-If issues found, list them clearly."""
+If the average ≥ 3.5 respond with PASS on its own line.
+If average < 3.5, respond FAIL on the first line followed by actionable issues."""
 
     settings = get_settings()
     response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_reviewer_model, caller="reviewer")
@@ -240,12 +247,12 @@ def _parse_scores(text: str) -> dict[str, float] | None:
 # ── Strategy consistency check (non-blocking warnings) ─────────────────────
 
 _STRATEGY_KEYWORDS: dict[str, list[str]] = {
-    "accumulate": ["build", "layer", "gradual", "slowly", "growing", "deepen"],
-    "erode": ["doubt", "wear", "crumble", "fade", "lose", "weaken"],
-    "rupture": ["sudden", "shock", "break", "snap", "explosion", "shatter"],
-    "reveal": ["secret", "hidden", "discover", "truth", "uncover", "realize"],
-    "contrast": ["contrast", "opposite", "juxtapose", "versus", "conflict", "clash"],
-    "weave": ["thread", "parallel", "interleave", "drift", "wander", "connect"],
+    "accumulate": ["build", "layer", "gradual", "growing", "deepen", "mount"],
+    "erode": ["doubt", "wear", "crumble", "fade", "lose", "weaken", "dissolve"],
+    "rupture": ["sudden", "shock", "break", "snap", "slam", "shatter", "cut"],
+    "uncover": ["secret", "hidden", "discover", "truth", "realize", "admit", "reveal"],
+    "contest": ["refuse", "argue", "push back", "disagree", "resist", "confront"],
+    "drift": ["quiet", "casual", "wander", "meander", "idle", "banter", "chat"],
     "escalate": ["escalate", "intensify", "raise", "stakes", "pressure", "urgent"],
     "resolve": ["resolve", "closure", "peace", "reconcile", "settle", "end"],
 }

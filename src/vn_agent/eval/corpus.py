@@ -10,14 +10,20 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-# Map COLX_523 strategy labels to VN-Agent strategy names
+# Map COLX_523 annotation labels → VN-Agent StrategyType values.
+#
+# The taxonomy is aligned: dataset and code use the same six names
+# (case-normalized). Previously three labels were semantically wrong
+# (Uncover→reveal, Contest→contrast, Drift→weave) — those made RAG
+# retrieval fetch examples that taught Writer the opposite style.
+# See strategies/narrative.py for the physics-framework definitions.
 STRATEGY_MAP: dict[str, str | None] = {
     "Accumulate": "accumulate",
     "Erode": "erode",
     "Rupture": "rupture",
-    "Uncover": "reveal",
-    "Contest": "contrast",
-    "Drift": "weave",
+    "Uncover": "uncover",
+    "Contest": "contest",
+    "Drift": "drift",
     "Other": None,
 }
 

@@ -15,7 +15,7 @@ CORPUS = [
     _make("3", "accumulate", "Third accumulate example"),
     _make("4", "erode", "Doubt creeps in"),
     _make("5", "rupture", "Sudden break"),
-    _make("6", "reveal", "Hidden truth emerges"),
+    _make("6", "uncover", "Hidden truth emerges"),
 ]
 
 

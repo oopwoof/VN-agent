@@ -42,6 +42,40 @@
 
 ## 开发记录
 
+### 2026-04-13 | 实现 - 2026-04-13 12:09
+
+**变更文件** (9 个):
+**源码变更** (5 文件):
+  - `src/vn_agent/agents/reviewer.py`
+  - `src/vn_agent/agents/writer.py`
+  - `src/vn_agent/eval/corpus.py`
+  - `src/vn_agent/eval/strategy_eval.py`
+  - `src/vn_agent/strategies/narrative.py`
+
+**测试变更** (4 文件):
+  - `tests/test_eval/test_corpus.py`
+  - `tests/test_eval/test_embedder.py`
+  - `tests/test_eval/test_retriever.py`
+  - `tests/test_eval/test_strategy_eval.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/reviewer.py       |  59 ++++++------
+ src/vn_agent/agents/writer.py         |  11 ++-
+ src/vn_agent/eval/corpus.py           |  14 ++-
+ src/vn_agent/eval/strategy_eval.py    |  18 ++--
+ src/vn_agent/strategies/narrative.py  | 163 +++++++++++++++++++++++-----------
+ tests/test_eval/test_corpus.py        |   6 +-
+ tests/test_eval/test_embedder.py      |   6 +-
+ tests/test_eval/test_retriever.py     |   2 +-
+ tests/test_eval/test_strategy_eval.py |  10 +--
+ 9 files changed, 188 insertions(+), 101 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-13 | 杂项 - 2026-04-13 11:12
 
 **变更文件** (1 个):

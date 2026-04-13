@@ -48,8 +48,8 @@ class TestLoadCorpus:
 
         assert sessions[0].strategy == "accumulate"  # Accumulate -> accumulate
         assert sessions[1].strategy == "rupture"  # Rupture -> rupture
-        assert sessions[2].strategy == "reveal"  # Uncover -> reveal (with whitespace)
-        assert sessions[3].strategy == "contrast"  # Contest -> contrast
+        assert sessions[2].strategy == "uncover"  # Uncover -> uncover (with whitespace)
+        assert sessions[3].strategy == "contest"  # Contest -> contest
         assert sessions[4].strategy is None  # Other -> None
 
     def test_trailing_space_cleaning(self, tmp_path):
@@ -110,6 +110,6 @@ class TestStrategyMap:
         assert set(STRATEGY_MAP.keys()) == expected_colx
 
     def test_maps_to_valid_vn_agent_strategies(self):
-        vn_strategies = {"accumulate", "erode", "rupture", "reveal", "contrast", "weave"}
+        vn_strategies = {"accumulate", "erode", "rupture", "uncover", "contest", "drift"}
         mapped = {v for v in STRATEGY_MAP.values() if v is not None}
         assert mapped == vn_strategies
