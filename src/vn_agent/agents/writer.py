@@ -215,18 +215,84 @@ After dialogue, if branches exist, the player will choose:
             validated.append(d)
     dialogue = validated
 
-    # Enforce dialogue line count bounds
+    # Enforce dialogue line count bounds with smart regeneration fallback
+    # (Sprint 6-8): when output is truncated, retry once with the successfully
+    # parsed tail as context instead of inserting a placeholder that breaks
+    # immersion.
     if len(dialogue) < settings.min_dialogue_lines:
-        dialogue.append(DialogueLine(character_id=None, text=f"[{scene.title}]", emotion="neutral"))
-        logger.warning(
-            f"Scene {scene.id}: padded to {len(dialogue)} lines"
-            f" (min={settings.min_dialogue_lines})"
+        missing = settings.min_dialogue_lines - len(dialogue)
+        regenerated = await _regenerate_short_dialogue(
+            scene, dialogue, missing, settings, output_dir,
         )
+        if regenerated:
+            dialogue.extend(regenerated)
+            logger.info(
+                f"Scene {scene.id}: regenerated {len(regenerated)} continuation lines "
+                f"(now {len(dialogue)}, min={settings.min_dialogue_lines})"
+            )
+        # If still short after retry, fall back to placeholder so pipeline proceeds
+        if len(dialogue) < settings.min_dialogue_lines:
+            dialogue.append(
+                DialogueLine(character_id=None, text=f"[{scene.title}]", emotion="neutral")
+            )
+            logger.warning(
+                f"Scene {scene.id}: padded to {len(dialogue)} lines "
+                f"(min={settings.min_dialogue_lines}, regeneration incomplete)"
+            )
     if len(dialogue) > settings.max_dialogue_lines:
         dialogue = dialogue[:settings.max_dialogue_lines]
         logger.warning(f"Scene {scene.id}: truncated to {settings.max_dialogue_lines} lines")
 
     return scene.model_copy(update={"dialogue": dialogue})
+
+
+async def _regenerate_short_dialogue(
+    scene: Scene,
+    existing: list[DialogueLine],
+    missing: int,
+    settings,
+    output_dir: str,
+) -> list[DialogueLine]:
+    """Continue a truncated dialogue by calling the LLM once more with the
+    already-parsed tail as context.
+
+    Returns the parsed continuation lines (possibly empty). Safe on any
+    failure: returns [] so caller can fall back to the placeholder path.
+    Does NOT retry beyond this one extra call to avoid infinite loops.
+    """
+    if not existing:
+        # Nothing parsed at all — no context to continue from; caller falls back
+        return []
+
+    tail_ctx = "\n".join(
+        f"  {d.character_id or 'NARR'}: {d.text}" for d in existing[-2:]
+    )
+    emotion_vocab = "neutral, happy, sad, angry, surprised, scared, thoughtful, loving, determined"
+    user_prompt = (
+        f"Scene '{scene.title}' dialogue was cut short. Continue with exactly "
+        f"{missing} more line(s), matching the tone and character voices of "
+        f"what already exists.\n\n"
+        f"Last lines of the scene so far:\n{tail_ctx}\n\n"
+        f"Characters allowed: {', '.join(scene.characters_present) or 'any declared'}\n"
+        f"Emotions: {emotion_vocab}\n\n"
+        f"Return JSON array only:\n"
+        f'[{{"character_id": "id_or_null", "text": "...", "emotion": "neutral"}}]'
+    )
+    try:
+        response = await ainvoke_llm(
+            SYSTEM_PROMPT, user_prompt,
+            model=settings.llm_writer_model,
+            caller=f"writer/{scene.id}/continuation",
+        )
+        content = response.content if hasattr(response, "content") else str(response)
+        _save_debug_raw(output_dir, f"writer_{scene.id}_continuation.txt", content)
+        content = strip_thinking(content)
+        parsed = _parse_dialogue(content, scene)
+        # Guard: if continuation itself is empty, just return []; caller handles it
+        return parsed[:missing]
+    except Exception as e:
+        logger.debug(f"Scene {scene.id}: continuation call failed ({e}), falling back")
+        return []
 
 
 def _parse_dialogue(content: str, scene: Scene) -> list[DialogueLine]:
