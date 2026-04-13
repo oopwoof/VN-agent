@@ -154,41 +154,110 @@ async def _generate_sprites(
     visual: VisualProfile,
     output_dir: str,
 ) -> tuple[list[EmotionSprite], list[str]]:
-    """Generate sprite images for key emotions.
+    """Generate sprite images using neutral-first consistency strategy.
 
-    Returns a tuple of (sprites, errors).
+    Sprint 6-9b: to avoid the identity drift that plagues text-to-image
+    generators when producing the same character in different emotions,
+    we generate ONE neutral sprite from a detailed text prompt, then use
+    that image as a reference for happy/sad via image-to-image editing
+    (if the provider supports it). Providers without reference support
+    fall through to the legacy text-only path but with the same base
+    descriptor for all 3 emotions so the prompt itself stays maximally
+    consistent.
+
+    On any failure, we fall back to neutral as the image for the missing
+    emotion — Ren'Py references never go dangling, even if some variants
+    weren't produced.
     """
-    key_emotions = ["neutral", "happy", "sad"]
-    sprites = []
+    from vn_agent.services.image_gen import (
+        generate_image_with_reference,
+        provider_supports_reference,
+    )
+
+    sprites: list[EmotionSprite] = []
     errors: list[str] = []
 
-    for emotion in key_emotions:
-        image_id = f"{char.id}_{emotion}"
-        file_path = f"images/characters/{char.id}/{emotion}.png"
-        abs_path = Path(output_dir) / "game" / file_path
+    # Base visual descriptor shared by all emotions — LLM only describes
+    # appearance once, we just append the emotion modifier per variant.
+    base_descriptor = (
+        f"{visual.art_style}, {visual.appearance}, {visual.default_outfit}"
+    )
 
-        prompt = (
-            f"{visual.art_style}, {visual.appearance}, "
-            f"{visual.default_outfit}, "
-            f"{emotion} expression, full body, white background, "
-            f"visual novel character sprite"
-        )
+    def _sprite_path(emotion: str) -> tuple[str, Path]:
+        rel = f"images/characters/{char.id}/{emotion}.png"
+        return rel, Path(output_dir) / "game" / rel
 
-        sprite = EmotionSprite(
-            emotion=emotion,
-            image_id=image_id,
-            file_path=file_path,
-            generation_prompt=prompt,
-        )
+    # ── Step 1: neutral (anchor) ────────────────────────────────────────────
+    neutral_rel, neutral_abs = _sprite_path("neutral")
+    neutral_prompt = (
+        f"{base_descriptor}, neutral expression, full body, white background, "
+        f"visual novel character sprite"
+    )
+    neutral_ok = False
+    try:
+        await generate_image(neutral_prompt, neutral_abs)
+        logger.info(f"Generated neutral sprite: {char.id}")
+        neutral_ok = True
+    except Exception as e:
+        logger.warning(f"Could not generate neutral sprite for {char.id}: {e}")
+        errors.append(f"CharacterDesigner: sprite {char.id}_neutral: {e}")
 
-        # Try to generate image; if fails, log and collect error
+    sprites.append(EmotionSprite(
+        emotion="neutral",
+        image_id=f"{char.id}_neutral",
+        file_path=neutral_rel,
+        generation_prompt=neutral_prompt,
+    ))
+
+    # ── Step 2: happy + sad, anchored on neutral if available ───────────────
+    use_reference = neutral_ok and provider_supports_reference()
+    emotion_hints = {
+        "happy": "smiling warmly, eyes bright, relaxed posture",
+        "sad": "downcast eyes, slight frown, slumped posture",
+    }
+
+    for emotion, hint in emotion_hints.items():
+        rel, abs_path = _sprite_path(emotion)
+        if use_reference:
+            # Provider supports image-to-image: use neutral as the anchor
+            prompt = (
+                f"Same character as reference image. {hint}. "
+                f"Keep face, hair, and outfit identical. "
+                f"Full body, white background, visual novel character sprite."
+            )
+        else:
+            # Text-only path: repeat the full base descriptor verbatim so
+            # at least the prompt is consistent across emotions
+            prompt = (
+                f"{base_descriptor}, {hint}, {emotion} expression, full body, "
+                f"white background, visual novel character sprite"
+            )
+
         try:
-            await generate_image(prompt, abs_path)
-            logger.info(f"Generated sprite: {image_id}")
+            if use_reference:
+                await generate_image_with_reference(prompt, neutral_abs, abs_path)
+            else:
+                await generate_image(prompt, abs_path)
+            logger.info(f"Generated {emotion} sprite: {char.id}")
         except Exception as e:
-            logger.warning(f"Could not generate sprite {image_id}: {e}")
-            errors.append(f"CharacterDesigner: sprite {image_id}: {e}")
+            logger.warning(f"Could not generate {emotion} sprite for {char.id}: {e}")
+            errors.append(f"CharacterDesigner: sprite {char.id}_{emotion}: {e}")
+            # Fallback: copy neutral bytes so Ren'Py doesn't load a blank
+            if neutral_ok:
+                try:
+                    abs_path.parent.mkdir(parents=True, exist_ok=True)
+                    abs_path.write_bytes(neutral_abs.read_bytes())
+                    logger.info(
+                        f"Fallback: {emotion} sprite for {char.id} = copy of neutral"
+                    )
+                except Exception as copy_err:
+                    logger.warning(f"Neutral-copy fallback failed: {copy_err}")
 
-        sprites.append(sprite)
+        sprites.append(EmotionSprite(
+            emotion=emotion,
+            image_id=f"{char.id}_{emotion}",
+            file_path=rel,
+            generation_prompt=prompt,
+        ))
 
     return sprites, errors
