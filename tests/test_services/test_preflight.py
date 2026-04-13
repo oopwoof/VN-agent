@@ -66,6 +66,12 @@ class TestEstimateCost:
 
 
 class TestCheckReadiness:
+    @pytest.fixture(autouse=True)
+    def _clear_api_env(self, monkeypatch):
+        """CI may set these in the environment; tests assume they're absent."""
+        for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "STABILITY_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+
     @pytest.mark.asyncio
     async def test_fails_when_anthropic_key_missing(self):
         s = _FakeSettings()
