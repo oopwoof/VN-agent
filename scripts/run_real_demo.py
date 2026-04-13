@@ -82,8 +82,19 @@ def _confirm_spend(report, skip_prompt: bool) -> bool:
     if skip_prompt:
         print("[--confirm passed, skipping interactive prompt]")
         return True
+    # Some environments (Claude Code bash tool, CI, < /dev/null) present
+    # a stdin that looks TTY-like but raises EOFError on input(). Catch it
+    # and give a useful hint instead of the raw trace.
     print("\nThis run will call real APIs and incur real charges.")
-    resp = input(f"Proceed with estimated ~${report.cost_estimate_usd:.3f}? [y/N] ").strip().lower()
+    try:
+        resp = input(f"Proceed with estimated ~${report.cost_estimate_usd:.3f}? [y/N] ").strip().lower()
+    except EOFError:
+        print(
+            "\n[Stdin closed - cannot prompt interactively]\n"
+            "Re-run with --confirm to skip the prompt and acknowledge the\n"
+            f"estimated spend (~${report.cost_estimate_usd:.3f}) explicitly."
+        )
+        return False
     return resp == "y"
 
 
