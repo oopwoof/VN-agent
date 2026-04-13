@@ -1,8 +1,11 @@
 """Tests for the Reviewer agent structural checks and Director merge logic."""
 from vn_agent.agents.director import _merge_outline_details
 from vn_agent.agents.reviewer import (
+    _check_branch_divergence,
     _find_reachable_scenes,
+    _jaccard,
     _structural_check,
+    _tokenize_for_jaccard,
     check_strategy_consistency,
 )
 from vn_agent.schema.script import BranchOption, DialogueLine, Scene, VNScript
@@ -256,3 +259,128 @@ class TestReachability:
         reachable = _find_reachable_scenes(script)
         assert "orphan" not in reachable
         assert "scene_1" in reachable
+
+
+# ── Sprint 6-7: Branch Divergence Tests ─────────────────────────────────────
+
+def _dl(text: str, emotion: str = "neutral", character_id: str | None = None) -> DialogueLine:
+    return DialogueLine(character_id=character_id, text=text, emotion=emotion)
+
+
+def _divergence_script(scenes: list[Scene]) -> VNScript:
+    return VNScript(
+        title="T", description="", theme="test",
+        start_scene_id=scenes[0].id if scenes else "",
+        scenes=scenes, characters=[],
+    )
+
+
+class TestJaccardHelpers:
+    def test_tokenize_drops_punctuation(self):
+        assert _tokenize_for_jaccard("Hello, world!") == {"hello", "world"}
+
+    def test_tokenize_drops_short_words(self):
+        # words <= 2 chars dropped (reduces noise from "a", "of", "to")
+        tokens = _tokenize_for_jaccard("a big cat is on the mat")
+        assert "big" in tokens
+        assert "cat" in tokens
+        assert "a" not in tokens
+        assert "is" not in tokens
+
+    def test_jaccard_identical(self):
+        s = {"a", "b", "c"}
+        assert _jaccard(s, s) == 1.0
+
+    def test_jaccard_disjoint(self):
+        assert _jaccard({"a", "b"}, {"c", "d"}) == 0.0
+
+    def test_jaccard_empty_both(self):
+        assert _jaccard(set(), set()) == 1.0
+
+    def test_jaccard_one_empty(self):
+        assert _jaccard({"a"}, set()) == 0.0
+
+
+class TestBranchDivergence:
+    def test_no_branches_no_warnings(self):
+        script = _divergence_script([
+            Scene(id="a", title="A", description="", background_id="bg",
+                  dialogue=[_dl("Hello there"), _dl("Goodbye friend")], next_scene_id="b"),
+            Scene(id="b", title="B", description="", background_id="bg"),
+        ])
+        assert _check_branch_divergence(script) == []
+
+    def test_divergent_branches_pass(self):
+        # Branches lead to genuinely different content — no warning
+        script = _divergence_script([
+            Scene(id="a", title="A", description="", background_id="bg",
+                  dialogue=[_dl("Start")],
+                  branches=[
+                      BranchOption(text="path1", next_scene_id="b"),
+                      BranchOption(text="path2", next_scene_id="c"),
+                  ]),
+            Scene(id="b", title="B", description="", background_id="bg",
+                  dialogue=[_dl("Walking through sunny meadows with flowers blooming"),
+                            _dl("The birds sang loudly above")],
+                  characters_present=["alice"]),
+            Scene(id="c", title="C", description="", background_id="bg",
+                  dialogue=[_dl("Creeping through dark caverns in utter silence"),
+                            _dl("Something moved in the shadows ahead")],
+                  characters_present=["bob"]),
+        ])
+        warnings = _check_branch_divergence(script)
+        assert warnings == []
+
+    def test_cosmetic_branches_flagged(self):
+        # Both branches lead to scenes with IDENTICAL dialogue, characters, emotions
+        same_dialogue = [_dl("The exact same words"), _dl("Repeated verbatim")]
+        script = _divergence_script([
+            Scene(id="a", title="A", description="", background_id="bg",
+                  branches=[
+                      BranchOption(text="accept", next_scene_id="b"),
+                      BranchOption(text="decline", next_scene_id="c"),
+                  ]),
+            Scene(id="b", title="B", description="", background_id="bg",
+                  dialogue=same_dialogue, characters_present=["alice"]),
+            Scene(id="c", title="C", description="", background_id="bg",
+                  dialogue=same_dialogue, characters_present=["alice"]),
+        ])
+        warnings = _check_branch_divergence(script)
+        assert len(warnings) == 1
+        assert "cosmetic" in warnings[0]
+        assert "'a'" in warnings[0]
+
+    def test_partial_overlap_passes(self):
+        # Branches share some tokens but have different enough content
+        script = _divergence_script([
+            Scene(id="a", title="A", description="", background_id="bg",
+                  branches=[
+                      BranchOption(text="x", next_scene_id="b"),
+                      BranchOption(text="y", next_scene_id="c"),
+                  ]),
+            Scene(id="b", title="B", description="", background_id="bg",
+                  dialogue=[_dl("happy celebration party everyone laughing music dancing")]),
+            Scene(id="c", title="C", description="", background_id="bg",
+                  dialogue=[_dl("quiet funeral mourning everyone silent tears falling")]),
+        ])
+        # Only "everyone" overlaps; Jaccard well below threshold
+        warnings = _check_branch_divergence(script)
+        assert warnings == []
+
+    def test_same_content_different_characters_passes(self):
+        # Jaccard high BUT characters differ → not flagged
+        script = _divergence_script([
+            Scene(id="a", title="A", description="", background_id="bg",
+                  branches=[
+                      BranchOption(text="x", next_scene_id="b"),
+                      BranchOption(text="y", next_scene_id="c"),
+                  ]),
+            Scene(id="b", title="B", description="", background_id="bg",
+                  dialogue=[_dl("Generic dialogue with common words")],
+                  characters_present=["alice"]),
+            Scene(id="c", title="C", description="", background_id="bg",
+                  dialogue=[_dl("Generic dialogue with common words")],
+                  characters_present=["bob"]),  # different character
+        ])
+        warnings = _check_branch_divergence(script)
+        assert warnings == []  # character difference saves it

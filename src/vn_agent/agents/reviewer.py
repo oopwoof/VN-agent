@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from vn_agent.agents.state import AgentState
 from vn_agent.config import get_settings
 from vn_agent.prompts.templates import REVIEWER_SYSTEM, strip_thinking
-from vn_agent.schema.script import VNScript
+from vn_agent.schema.script import Scene, VNScript
 from vn_agent.services.llm import ainvoke_llm
 
 logger = logging.getLogger(__name__)
@@ -58,9 +58,19 @@ async def run_reviewer(state: AgentState) -> dict:
         for w in strategy_warnings:
             logger.warning(f"Strategy consistency: {w}")
 
+    # Branch divergence check — semantic validation that branches actually
+    # produce different experiences (Sprint 6-7). Complements Director's
+    # structural check with post-hoc content-level validation.
+    divergence_warnings = _check_branch_divergence(script)
+    if divergence_warnings:
+        for w in divergence_warnings:
+            logger.warning(f"Branch divergence: {w}")
+
     feedback = result.feedback
     if strategy_warnings:
         feedback += "\n\nStrategy consistency warnings:\n" + "\n".join(f"- {w}" for w in strategy_warnings)
+    if divergence_warnings:
+        feedback += "\n\nBranch divergence warnings:\n" + "\n".join(f"- {w}" for w in divergence_warnings)
 
     if result.scores:
         logger.info(f"Reviewer scores: {result.scores}")
@@ -261,5 +271,105 @@ def check_strategy_consistency(script: VNScript) -> list[str]:
                 f"Scene '{scene.id}': strategy '{strategy}' assigned but no matching "
                 f"keywords found in dialogue ({len(scene.dialogue)} lines)"
             )
+
+    return warnings
+
+
+# ── Branch divergence check (Sprint 6-7) ───────────────────────────────────
+
+_DIVERGENCE_THRESHOLD = 0.8  # Jaccard similarity above this = cosmetic branches
+
+
+def _tokenize_for_jaccard(text: str) -> set[str]:
+    """Lowercase word tokens for similarity comparison. Drops punctuation."""
+    import re
+
+    return {t for t in re.sub(r"[^\w]+", " ", text.lower()).split() if len(t) > 2}
+
+
+def _collect_path_signature(
+    scene_map: dict[str, Scene], start_id: str, max_depth: int = 3,
+) -> tuple[set[str], set[str], dict[str, int]]:
+    """Walk a branch path and collect signature features for comparison.
+
+    Returns (dialogue_tokens, characters_present, emotion_counts) summed over
+    all reachable scenes within max_depth hops from start_id.
+    """
+    reached: set[str] = set()
+    frontier: list[tuple[str, int]] = [(start_id, 0)]
+    dialogue_tokens: set[str] = set()
+    characters: set[str] = set()
+    emotion_counts: dict[str, int] = {}
+
+    while frontier:
+        sid, depth = frontier.pop(0)
+        if sid in reached or depth > max_depth:
+            continue
+        reached.add(sid)
+        scene = scene_map.get(sid)
+        if not scene:
+            continue
+        characters.update(scene.characters_present)
+        for line in scene.dialogue:
+            dialogue_tokens |= _tokenize_for_jaccard(line.text)
+            emotion_counts[line.emotion] = emotion_counts.get(line.emotion, 0) + 1
+        next_ids: list[str] = []
+        if scene.next_scene_id:
+            next_ids.append(scene.next_scene_id)
+        next_ids.extend(b.next_scene_id for b in scene.branches if b.next_scene_id)
+        for nid in next_ids:
+            if nid not in reached:
+                frontier.append((nid, depth + 1))
+
+    return dialogue_tokens, characters, emotion_counts
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    if not a and not b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _check_branch_divergence(script: VNScript) -> list[str]:
+    """Post-hoc semantic check: do branch paths actually produce different content?
+
+    For each scene with 2+ branches, collect each path's dialogue tokens,
+    characters, and emotion distribution, then compare pairwise. If Jaccard
+    similarity on dialogue > threshold AND character sets match AND emotion
+    mix is identical, the branches are cosmetic.
+
+    Returns warning strings. Non-blocking — feedback only.
+    """
+    warnings: list[str] = []
+    scene_map = {s.id: s for s in script.scenes}
+
+    for scene in script.scenes:
+        if len(scene.branches) < 2:
+            continue
+
+        signatures = []
+        for b in scene.branches:
+            if b.next_scene_id in scene_map:
+                signatures.append(
+                    (b, _collect_path_signature(scene_map, b.next_scene_id, max_depth=3))
+                )
+
+        for i in range(len(signatures)):
+            for j in range(i + 1, len(signatures)):
+                (b_i, (tok_i, char_i, emo_i)) = signatures[i]
+                (b_j, (tok_j, char_j, emo_j)) = signatures[j]
+                if not tok_i or not tok_j:
+                    continue
+                dialogue_sim = _jaccard(tok_i, tok_j)
+                same_chars = char_i == char_j
+                same_emotions = emo_i == emo_j
+                if dialogue_sim >= _DIVERGENCE_THRESHOLD and same_chars and same_emotions:
+                    warnings.append(
+                        f"Scene '{scene.id}': branches "
+                        f"'{b_i.text[:30]}' and '{b_j.text[:30]}' produce near-identical "
+                        f"content (Jaccard={dialogue_sim:.2f}) — cosmetic choice."
+                    )
 
     return warnings
