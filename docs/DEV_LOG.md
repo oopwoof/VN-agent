@@ -42,6 +42,32 @@
 
 ## 开发记录
 
+### 2026-04-13 | 实现 - 2026-04-13 09:13
+
+**变更文件** (5 个):
+**源码变更** (4 文件):
+  - `src/vn_agent/services/llm.py`
+  - `src/vn_agent/services/streaming.py`
+  - `src/vn_agent/services/token_tracker.py`
+  - `src/vn_agent/web/app.py`
+
+**测试变更** (1 文件):
+  - `tests/test_services/test_token_tracker.py`
+
+**变更统计**:
+```
+src/vn_agent/services/llm.py              |  4 +-
+ src/vn_agent/services/streaming.py        |  4 +-
+ src/vn_agent/services/token_tracker.py    | 54 +++++++++++++++++--
+ src/vn_agent/web/app.py                   | 88 ++++++++++++++++++++++++++++---
+ tests/test_services/test_token_tracker.py | 65 ++++++++++++++++++++++-
+ 5 files changed, 201 insertions(+), 14 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-13 | 实现 - 2026-04-13 08:23
 
 **变更文件** (5 个):

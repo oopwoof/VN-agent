@@ -1,7 +1,24 @@
-"""Token usage accumulator and cost estimator."""
+"""Token usage accumulator and cost estimator.
+
+Per-job isolation via ContextVar: each pipeline run sets its own tracker in
+the current async context so concurrent jobs do not pollute each other. The
+module-level `tracker` remains as a fallback for CLI one-shot usage and
+backwards compatibility with existing callers that never set a context.
+
+Usage inside pipeline:
+    from vn_agent.services.token_tracker import TokenTracker, current_tracker
+    job_tracker = TokenTracker()
+    token = current_tracker.set(job_tracker)
+    try:
+        await run_pipeline(...)
+        usage = job_tracker.summary_dict()
+    finally:
+        current_tracker.reset(token)
+"""
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -71,6 +88,37 @@ class TokenTracker:
 
         return "\n".join(lines)
 
+    def summary_dict(self) -> dict:
+        """JSON-serializable usage summary (suitable for blackboard storage)."""
+        by_model: dict[str, dict[str, int]] = {}
+        for c in self.calls:
+            m = by_model.setdefault(c.model, {"in": 0, "out": 0, "calls": 0})
+            m["in"] += c.input_tokens
+            m["out"] += c.output_tokens
+            m["calls"] += 1
+        return {
+            "total_input": self.total_input(),
+            "total_output": self.total_output(),
+            "estimated_cost_usd": round(self.estimated_cost(), 4),
+            "calls": len(self.calls),
+            "by_model": by_model,
+        }
 
-# Module-level singleton
+    def reset(self) -> None:
+        """Clear all recorded calls (useful for reusing a tracker instance)."""
+        self.calls.clear()
+
+
+# Module-level singleton — fallback for CLI one-shot usage and backwards
+# compatibility. In server/pipeline contexts, prefer the per-job tracker
+# via `current_tracker`.
 tracker = TokenTracker()
+
+# Per-job tracker injected via ContextVar. Async-safe and isolated
+# across concurrent pipeline runs in the same process.
+current_tracker: ContextVar[TokenTracker] = ContextVar("current_tracker", default=tracker)
+
+
+def get_active_tracker() -> TokenTracker:
+    """Return the active tracker for this async context (falls back to global)."""
+    return current_tracker.get()

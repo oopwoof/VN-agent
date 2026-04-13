@@ -108,7 +108,7 @@ def get_structured_llm(schema: type[T], model: str | None = None) -> Any:
 
 def _log_stop_reason(result: Any, caller: str) -> None:
     """Log stop_reason and token usage from response metadata."""
-    from vn_agent.services.token_tracker import tracker
+    from vn_agent.services.token_tracker import get_active_tracker
 
     meta = getattr(result, "response_metadata", None) or {}
     stop_reason = meta.get("stop_reason") or meta.get("finish_reason", "unknown")
@@ -122,7 +122,7 @@ def _log_stop_reason(result: Any, caller: str) -> None:
     )
 
     if isinstance(input_tokens, int) and isinstance(output_tokens, int):
-        tracker.add(caller, model, input_tokens, output_tokens)
+        get_active_tracker().add(caller, model, input_tokens, output_tokens)
 
     if stop_reason == "max_tokens":
         settings = get_settings()

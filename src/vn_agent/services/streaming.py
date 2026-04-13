@@ -11,7 +11,7 @@ from collections.abc import AsyncGenerator, Callable
 
 from vn_agent.config import get_settings
 from vn_agent.services.llm import get_llm
-from vn_agent.services.token_tracker import tracker
+from vn_agent.services.token_tracker import get_active_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ async def astream_llm(
 
     resolved_model = model or get_settings().llm_model
     if total_input or total_output:
-        tracker.add(caller, resolved_model, total_input, total_output)
+        get_active_tracker().add(caller, resolved_model, total_input, total_output)
     logger.info(
         f"[{caller}] streamed {len(chunks)} chunks, "
         f"{len(full_text)} chars, tokens: in={total_input} out={total_output}"

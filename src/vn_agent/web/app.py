@@ -261,6 +261,11 @@ async def generate_setting(job_id: str):
 
     store.update_status(job_id, "running", progress="Director planning story structure")
 
+    # Per-job token tracker for the setting-generation phase
+    from vn_agent.services.token_tracker import TokenTracker, current_tracker
+
+    job_tracker = TokenTracker()
+    tracker_token = current_tracker.set(job_tracker)
     try:
         from vn_agent.agents.director import _merge_outline_details, _step1_outline, _step2_details
         from vn_agent.config import get_settings
@@ -296,6 +301,7 @@ async def generate_setting(job_id: str):
                 "start_scene_id": plan.get("start_scene_id", ""),
             },
             "raw_plan": plan,
+            "token_usage": job_tracker.summary_dict(),
         }
 
         store.update_blackboard(job_id, blackboard)
@@ -306,6 +312,8 @@ async def generate_setting(job_id: str):
         logger.exception(f"generate-setting failed for {job_id}")
         store.update_status(job_id, "failed", errors=[str(e)])
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        current_tracker.reset(tracker_token)
 
 
 @app.get("/api/projects/{job_id}/blackboard")
@@ -570,14 +578,24 @@ async def upload_asset(
 
 @app.get("/api/projects/{job_id}/token-usage")
 async def get_token_usage(job_id: str):
-    """Return token usage and estimated cost for this project."""
-    from vn_agent.services.token_tracker import tracker
+    """Return token usage and estimated cost for this specific job.
 
+    Reads from the job's blackboard where per-job token_usage is persisted
+    at the end of each pipeline phase. This is isolated per job — concurrent
+    jobs do not cross-contaminate costs.
+    """
+    store = _get_store()
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    usage = (job.get("blackboard") or {}).get("token_usage") or {}
     return {
-        "total_input": tracker.total_input(),
-        "total_output": tracker.total_output(),
-        "estimated_cost_usd": round(tracker.estimated_cost(), 4),
-        "calls": len(tracker.calls),
+        "total_input": usage.get("total_input", 0),
+        "total_output": usage.get("total_output", 0),
+        "estimated_cost_usd": usage.get("estimated_cost_usd", 0.0),
+        "calls": usage.get("calls", 0),
+        "by_model": usage.get("by_model", {}),
     }
 
 
@@ -619,6 +637,14 @@ async def compile_project(job_id: str):
 async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
     """Background task: run Writer + Reviewer pipeline from plan data."""
     store = _get_store()
+    from vn_agent.services.token_tracker import TokenTracker, current_tracker
+
+    # Continue accumulating into the same per-job tracker if already active
+    # (covers the case where generate-setting ran first), otherwise create fresh.
+    existing_bb = store.get_blackboard(job_id)
+    existing_usage = existing_bb.get("token_usage") or {}
+    job_tracker = TokenTracker()
+    tracker_token = current_tracker.set(job_tracker)
     try:
         from vn_agent.agents.director import _build_from_plan
         from vn_agent.agents.graph import build_graph
@@ -705,6 +731,42 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
     except Exception as e:
         logger.exception(f"Script generation failed for {job_id}")
         store.update_status(job_id, "failed", errors=[str(e)])
+    finally:
+        # Merge this phase's tracker into any existing usage from generate-setting
+        try:
+            bb = store.get_blackboard(job_id)
+            phase_usage = job_tracker.summary_dict()
+            # Accumulate totals: previous setting phase + current script phase
+            merged = _merge_token_usage(existing_usage, phase_usage)
+            bb["token_usage"] = merged
+            store.update_blackboard(job_id, bb)
+        except Exception as e:
+            logger.debug(f"Could not persist token usage for {job_id}: {e}")
+        current_tracker.reset(tracker_token)
+
+
+def _merge_token_usage(prev: dict, new: dict) -> dict:
+    """Sum two token_usage summary_dicts into a combined total."""
+    if not prev:
+        return new
+    if not new:
+        return prev
+    merged_by_model: dict[str, dict[str, int]] = {}
+    for src in (prev.get("by_model") or {}, new.get("by_model") or {}):
+        for model, stats in src.items():
+            m = merged_by_model.setdefault(model, {"in": 0, "out": 0, "calls": 0})
+            m["in"] += stats.get("in", 0)
+            m["out"] += stats.get("out", 0)
+            m["calls"] += stats.get("calls", 0)
+    return {
+        "total_input": prev.get("total_input", 0) + new.get("total_input", 0),
+        "total_output": prev.get("total_output", 0) + new.get("total_output", 0),
+        "estimated_cost_usd": round(
+            prev.get("estimated_cost_usd", 0.0) + new.get("estimated_cost_usd", 0.0), 4,
+        ),
+        "calls": prev.get("calls", 0) + new.get("calls", 0),
+        "by_model": merged_by_model,
+    }
 
 
 # ── Background runner ────────────────────────────────────────────────────────
@@ -723,6 +785,11 @@ async def _run_job(job_id: str, req: GenerateRequest, output_dir: Path) -> None:
 
     async with sem:
         store.update_status(job_id, "running", progress="starting pipeline")
+        # Per-job token tracker: isolate cost accounting across concurrent jobs
+        from vn_agent.services.token_tracker import TokenTracker, current_tracker
+
+        job_tracker = TokenTracker()
+        tracker_token = current_tracker.set(job_tracker)
         try:
             from vn_agent.agents.graph import build_graph
             from vn_agent.agents.state import initial_state
@@ -767,6 +834,15 @@ async def _run_job(job_id: str, req: GenerateRequest, output_dir: Path) -> None:
         except Exception as e:
             logger.exception(f"Job {job_id} failed")
             store.update_status(job_id, "failed", errors=[str(e)])
+        finally:
+            # Persist token usage to blackboard and reset context
+            try:
+                bb = store.get_blackboard(job_id)
+                bb["token_usage"] = job_tracker.summary_dict()
+                store.update_blackboard(job_id, bb)
+            except Exception as e:
+                logger.debug(f"Could not persist token usage for {job_id}: {e}")
+            current_tracker.reset(tracker_token)
 
 
 # ── Static frontend (must be AFTER all API route definitions) ───────────────
