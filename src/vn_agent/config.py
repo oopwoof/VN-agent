@@ -95,6 +95,11 @@ class Settings(BaseSettings):
     # Decoupled from llm_reviewer_model so eval can use Sonnet even when the
     # pipeline Reviewer is on Haiku.
     llm_judge_model: str = "claude-sonnet-4-6"
+    # Sprint 8-1: cross-model judge — an independent non-Anthropic model scores
+    # the same scenes so we can check inter-rater agreement and defuse the
+    # "Sonnet grading Sonnet's own output" echo-chamber critique. Empty string
+    # or missing OpenAI key → secondary judge skipped (Sonnet-only mode).
+    llm_judge_model_secondary: str = "gpt-4o"
 
     # Embedding RAG (requires [rag] extras: sentence-transformers + faiss-cpu)
     use_semantic_retrieval: bool = True  # use embedding similarity; False = label filter

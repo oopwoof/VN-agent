@@ -42,6 +42,26 @@
 
 ## 开发记录
 
+### 2026-04-13 | 实现 - 2026-04-13 23:21
+
+**变更文件** (2 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/config.py`
+
+**其他变更** (1 文件):
+  - `scripts/eval_strategy_adherence.py`
+
+**变更统计**:
+```
+scripts/eval_strategy_adherence.py | 143 +++++++++++++++++++++++++++++++------
+ src/vn_agent/config.py             |   5 ++
+ 2 files changed, 126 insertions(+), 22 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-13 | 实现 - 2026-04-13 22:45
 
 **变更文件** (5 个):
