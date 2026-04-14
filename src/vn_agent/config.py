@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     # narrative constraint text for Writer. Translation work, not
     # narrative judgment → Haiku per the project model-selection rule.
     llm_state_orchestrator_model: str = "claude-haiku-4-5-20251001"
+    # Sprint 11-1: per-scene summarizer (Haiku, ≤100 words each).
+    # Translation work, not creative. Gated by enable_scene_summarization.
+    llm_summarizer_model: str = "claude-haiku-4-5-20251001"
     llm_character_designer_model: str = "claude-haiku-4-5-20251001"
     llm_scene_artist_model: str = "claude-haiku-4-5-20251001"
     llm_music_director_model: str = "claude-haiku-4-5-20251001"
@@ -127,6 +130,13 @@ class Settings(BaseSettings):
     # and orthogonal to dialogue RAG. Turn off to compare.
     use_lore_retrieval: bool = True
     lore_k: int = 4  # top-k lore entities to inject per scene
+
+    # Sprint 11-1: per-scene Haiku summarization for long-form memory.
+    # Default OFF — adds 1 Haiku call per scene (~$0.002 × N_scenes).
+    # Turn on for runs with 15+ scenes where writer_context_window
+    # alone doesn't carry enough prior context.
+    enable_scene_summarization: bool = False
+    summarization_min_scenes: int = 15  # below this, summarization is pointless
     embedding_model: str = "all-MiniLM-L6-v2"
     embedding_index_path: str = ""  # pre-built index dir; empty = build on-the-fly
 

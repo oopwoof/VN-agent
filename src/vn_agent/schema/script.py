@@ -91,6 +91,17 @@ class Scene(BaseModel):
         description="World-state updates this scene makes when it completes. "
                     "Ren'Py compiler emits `$ var_name = value` lines.",
     )
+    # Sprint 11-1: ≤100-word Haiku-generated summary of this scene's events,
+    # emotional pivot, and state changes. Populated after the scene is
+    # written + reviewed. Used by downstream scenes (15+) to carry long-form
+    # context without sending full dialogue (drift-bounded recursive
+    # summarization). None when summarization is disabled.
+    summary: str | None = Field(
+        default=None,
+        description="Post-hoc Haiku summary (~100 words). None until populated "
+                    "by the summarizer. Used for long-form memory in scripts "
+                    "beyond the writer_context_window.",
+    )
 
 
 class VNScript(BaseModel):

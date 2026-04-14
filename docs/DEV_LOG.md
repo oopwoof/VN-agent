@@ -42,6 +42,32 @@
 
 ## 开发记录
 
+### 2026-04-14 | 实现 - 2026-04-14 02:21
+
+**变更文件** (6 个):
+**源码变更** (6 文件):
+  - `src/vn_agent/agents/summarizer.py`
+  - `src/vn_agent/agents/writer.py`
+  - `src/vn_agent/cli.py`
+  - `src/vn_agent/config.py`
+  - `src/vn_agent/schema/script.py`
+  - `src/vn_agent/services/mock_llm.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/summarizer.py | 96 +++++++++++++++++++++++++++++++++++++++
+ src/vn_agent/agents/writer.py     | 52 ++++++++++++++++++++-
+ src/vn_agent/cli.py               |  1 +
+ src/vn_agent/config.py            | 10 ++++
+ src/vn_agent/schema/script.py     | 11 +++++
+ src/vn_agent/services/mock_llm.py | 11 +++++
+ 6 files changed, 180 insertions(+), 1 deletion(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-14 | 实现 - 2026-04-14 02:17
 
 **变更文件** (6 个):

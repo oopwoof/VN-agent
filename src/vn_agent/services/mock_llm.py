@@ -167,6 +167,12 @@ _STATE_ORCHESTRATOR_RESPONSE = """Scene ch1:
   - Characters begin on first-name terms (affinity 3/10)
   - Nothing disclosed yet — all world flags default"""
 
+_SUMMARIZER_RESPONSE = (
+    "The scene opens with the characters present, follows the assigned "
+    "narrative strategy, and ends with an emotional pivot. No new named "
+    "entities are introduced; state remains as declared."
+)
+
 _CHARACTER_DESIGNER_RESPONSE = """{
   "art_style": "painterly anime style, atmospheric lighting, high quality",
   "appearance": "tall, weathered face, dark circles under storm-grey eyes, salt-and-pepper hair cut short",
@@ -333,6 +339,11 @@ def _dispatch(sys_lower: str, user_prompt: str, caller: str) -> str:
     # Director step1
     if "director" in sys_lower:
         return DIRECTOR_STEP1_CN if is_chinese else DIRECTOR_STEP1
+
+    # Summarizer (per-scene ≤100 words). Check before other reviewer
+    # matches since the system prompt says "summarizer" and "concise".
+    if "summarizer" in caller or "scene summarizer" in sys_lower:
+        return _SUMMARIZER_RESPONSE
 
     # State orchestrator (check before other "reviewer" / "director" matches
     # because the system prompt mentions "compile" / "state" keywords)

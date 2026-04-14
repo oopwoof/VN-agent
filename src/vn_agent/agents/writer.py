@@ -89,6 +89,17 @@ async def run_writer(state: AgentState) -> dict:
         prior_scenes = (
             updated_scenes[max(0, idx - window) : idx] if window > 0 else []
         )
+        # Sprint 11-1: long-form memory — scenes BEFORE the window get
+        # compressed to their per-scene summaries (from 11-1 post-scene
+        # Haiku). No summary → not passed. In short runs this list is
+        # always empty.
+        older_summaries: list[tuple[str, str]] = []
+        if window > 0:
+            older_summaries = [
+                (s.id, s.summary)
+                for s in updated_scenes[: max(0, idx - window)]
+                if s.summary
+            ]
         updated_scene = await _write_scene(
             scene, script, char_desc, revision_feedback, output_dir,
             corpus=corpus, embedding_index=embedding_index,
@@ -97,6 +108,7 @@ async def run_writer(state: AgentState) -> dict:
             world_state=world_state,
             state_constraints=state_constraints,
             lore_index=lore_index,
+            older_summaries=older_summaries,
         )
         updated_scenes.append(updated_scene)
 
@@ -114,6 +126,28 @@ async def run_writer(state: AgentState) -> dict:
                 f"Writer[{updated_scene.id}] applied state_writes: "
                 f"{list(updated_scene.state_writes.keys())}"
             )
+
+        # Sprint 11-1: fire per-scene summarization (Haiku) for long-form runs.
+        # Gated by both config toggle and total-scene-count threshold so
+        # short demos don't pay the extra Haiku cost.
+        if (
+            settings.enable_scene_summarization
+            and len(script.scenes) >= settings.summarization_min_scenes
+        ):
+            try:
+                from vn_agent.agents.summarizer import summarize_scene
+                summary = await summarize_scene(updated_scene)
+                if summary:
+                    updated_scene = updated_scene.model_copy(
+                        update={"summary": summary},
+                    )
+                    # Overwrite the scene we just appended so the summary sticks
+                    updated_scenes[-1] = updated_scene
+                    logger.debug(
+                        f"Writer[{updated_scene.id}] summary: {summary[:60]}..."
+                    )
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"Summarization skipped for {updated_scene.id}: {e}")
 
     updated_script = script.model_copy(update={"scenes": updated_scenes})
     logger.info(f"Writer completed: dialogue written for {len(updated_scenes)} scenes")
@@ -219,6 +253,7 @@ async def _write_scene(
     world_state: dict | None = None,
     state_constraints: str = "",
     lore_index=None,
+    older_summaries: list[tuple[str, str]] | None = None,
 ) -> Scene:
     """Write dialogue for a single scene."""
     settings = get_settings()
@@ -249,6 +284,21 @@ async def _write_scene(
                 + "\n".join(f"  - {i}" for i in relevant)
                 + "\n"
             )
+
+    # Sprint 11-1: older-scene summaries block — scenes too far back for
+    # the raw-dialogue window (Sprint 7-2) appear here as compressed
+    # ≤100-word summaries. Empty when not in long-form mode.
+    older_summaries_block = ""
+    if older_summaries:
+        summary_lines = [
+            f"  [{sid}] {summary[:150]}"
+            for sid, summary in older_summaries
+        ]
+        older_summaries_block = (
+            "\n\n--- Earlier scenes (summaries, chronological) ---\n"
+            + "\n".join(summary_lines)
+            + "\n--- End earlier scenes ---\n"
+        )
 
     # Sprint 7-2: long-context — inject prior scenes' actual dialogue so
     # Writer can keep character voice coherent across scene boundaries. Only
@@ -363,7 +413,7 @@ Music mood: {scene.music.mood.value if scene.music else 'none'}
 {char_descriptions}
 
 Story context: {script.description}
-{prior_context_block}
+{older_summaries_block}{prior_context_block}
 
 Write {settings.min_dialogue_lines}-{settings.max_dialogue_lines} dialogue/narration lines.
 Return JSON array:
