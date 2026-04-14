@@ -239,7 +239,7 @@ def _write_scene_snapshot(
     is supplementary.
     """
     import json
-    from datetime import datetime
+    from datetime import datetime, timezone
     from pathlib import Path
 
     try:
@@ -248,7 +248,7 @@ def _write_scene_snapshot(
         record = {
             "scene_id": scene.id,
             "title": scene.title,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "dialogue": [
                 {"character_id": d.character_id, "text": d.text, "emotion": d.emotion}
                 for d in scene.dialogue
