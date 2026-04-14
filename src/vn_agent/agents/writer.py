@@ -229,12 +229,9 @@ After dialogue, if branches exist, the player will choose:
                 )
             few_shot_block = format_examples(examples)
             if few_shot_block:
-                user_prompt += (
-                    f"\n\nReference examples of '{strategy_label}' strategy:\n"
-                    f"{few_shot_block}"
-                )
-                # Persist per-run retrieval record so RAG quality can be
-                # audited after the fact — not just during live logs.
+                # Persist retrieval record regardless of injection — RAG is
+                # always auditable even when Writer won't actually see the
+                # examples (literary mode).
                 _append_rag_record(
                     output_dir,
                     scene_id=scene.id,
@@ -243,10 +240,29 @@ After dialogue, if branches exist, the player will choose:
                     examples=examples,
                 )
                 ex_strats = [getattr(e, "strategy", "?") for e in examples]
-                logger.info(
-                    f"Writer[{scene.id}]: few-shot injected for '{strategy_label}' — "
-                    f"{len(examples)} examples, strategies={ex_strats}"
-                )
+
+                # Sprint 7-1: only inject raw text-shot in action mode.
+                # Literary mode relies on the physics-framework system prompt
+                # and avoids style contamination from the VN corpus (which
+                # skews action-heavy JRPG / galgame). Retrieval still runs so
+                # audits + future reranker experiments have data.
+                if settings.writer_mode == "action":
+                    user_prompt += (
+                        f"\n\nReference examples of '{strategy_label}' strategy:\n"
+                        f"{few_shot_block}"
+                    )
+                    logger.info(
+                        f"Writer[{scene.id}]: few-shot INJECTED (action mode) "
+                        f"for '{strategy_label}' — {len(examples)} examples, "
+                        f"strategies={ex_strats}"
+                    )
+                else:  # "literary"
+                    logger.info(
+                        f"Writer[{scene.id}]: few-shot retrieved but "
+                        f"NOT INJECTED (literary mode) for '{strategy_label}' "
+                        f"— {len(examples)} examples recorded to "
+                        f"rag_retrievals.jsonl, strategies={ex_strats}"
+                    )
         except Exception as e:
             logger.debug(f"Few-shot injection skipped: {e}")
 

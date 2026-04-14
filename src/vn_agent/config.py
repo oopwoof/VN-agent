@@ -1,6 +1,7 @@
 """Configuration loading with pydantic-settings."""
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import Field
@@ -63,6 +64,28 @@ class Settings(BaseSettings):
     corpus_path: str = ""  # path to final_annotations.csv (empty = disabled)
     sessions_dir: str = ""  # optional dir of *.jsonl unannotated sessions to merge in
     few_shot_k: int = 2  # number of examples to inject into Writer prompt
+
+    # Writer generation mode (Sprint 7-1):
+    #   "literary" — zero-shot with physics-framework system prompt, no raw
+    #                text few-shot injected (RAG retrieval still runs for audit).
+    #                Better for psychological / literary VN output.
+    #   "action"   — inject raw text-shot into Writer prompt (current behavior).
+    #                Better for galgame / action-anime VN where format fidelity
+    #                and stage-direction-heavy dialogue matter more than
+    #                subtextual depth.
+    # Default kept as "action" for backward compatibility until Sprint 7-4
+    # sweep data confirms which should win by default.
+    writer_mode: Literal["literary", "action"] = "action"
+
+    # How many prior scenes' full dialogue to inject into Writer prompt (Sprint 7-2).
+    # 0 = no prior context (rely on scene.entry_context card only).
+    # 1 = previous scene, keeps character voice coherent across boundaries.
+    writer_context_window: int = 0  # safe default; raise in literary configs
+
+    # LLM-as-judge model for scripts/eval_strategy_adherence.py (Sprint 7-3).
+    # Decoupled from llm_reviewer_model so eval can use Sonnet even when the
+    # pipeline Reviewer is on Haiku.
+    llm_judge_model: str = "claude-sonnet-4-6"
 
     # Embedding RAG (requires [rag] extras: sentence-transformers + faiss-cpu)
     use_semantic_retrieval: bool = True  # use embedding similarity; False = label filter
