@@ -382,8 +382,26 @@ async def _img2img_stability(
 #
 # Endpoint: POST to the v1beta API. Auth via ?key= query string.
 
-_GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image-preview"
+# Available Gemini image models (2025-11 v1beta list, in quality order):
+#   nano-banana-pro-preview          (branded Pro, top tier)
+#   gemini-3.1-flash-image-preview   (latest preview)
+#   gemini-3-pro-image-preview       (Pro preview)
+#   gemini-2.5-flash-image           (stable default)
+_GEMINI_IMAGE_DEFAULT = "gemini-2.5-flash-image"
 _GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+
+
+def _gemini_image_model() -> str:
+    """Resolve which Gemini image model to use. Respects settings.image_model
+    when it's a Gemini-family name; otherwise falls back to the stable
+    gemini-2.5-flash-image. Lets users opt into nano-banana-pro-preview
+    or a future 3.x variant via config without code change.
+    """
+    settings = get_settings()
+    m = (settings.image_model or "").strip()
+    if m and ("gemini" in m.lower() or "nano-banana" in m.lower()):
+        return m
+    return _GEMINI_IMAGE_DEFAULT
 
 
 async def _generate_gemini_image(prompt: str, output_path: Path) -> Path:
@@ -392,7 +410,7 @@ async def _generate_gemini_image(prompt: str, output_path: Path) -> Path:
     if not settings.google_api_key:
         raise ImageGenerationError("GOOGLE_API_KEY not set")
 
-    url = f"{_GEMINI_BASE}/{_GEMINI_IMAGE_MODEL}:generateContent?key={settings.google_api_key}"
+    url = f"{_GEMINI_BASE}/{_gemini_image_model()}:generateContent?key={settings.google_api_key}"
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"responseModalities": ["IMAGE"]},
@@ -424,7 +442,7 @@ async def _edit_gemini_with_reference(
         ref_bytes = f.read()
     ref_b64 = base64.b64encode(ref_bytes).decode("ascii")
 
-    url = f"{_GEMINI_BASE}/{_GEMINI_IMAGE_MODEL}:generateContent?key={settings.google_api_key}"
+    url = f"{_GEMINI_BASE}/{_gemini_image_model()}:generateContent?key={settings.google_api_key}"
     payload = {
         "contents": [
             {

@@ -42,6 +42,30 @@
 
 ## 开发记录
 
+### 2026-04-14 | 实现 - 2026-04-14 06:09
+
+**变更文件** (3 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/services/image_gen.py`
+
+**配置变更** (1 文件):
+  - `config/settings.yaml`
+
+**其他变更** (1 文件):
+  - `scripts/check_gemini_access.py`
+
+**变更统计**:
+```
+config/settings.yaml               | 16 +++++++++++-----
+ scripts/check_gemini_access.py     |  6 ++++--
+ src/vn_agent/services/image_gen.py | 24 +++++++++++++++++++++---
+ 3 files changed, 36 insertions(+), 10 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-14 | 实现 - 2026-04-14 06:00
 
 **变更文件** (1 个):

@@ -28,8 +28,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from vn_agent.config import get_settings  # noqa: E402
 
 
-TEXT_MODEL = "gemini-1.5-flash"
-IMAGE_MODEL = "gemini-2.5-flash-image-preview"
+# gemini-1.5-flash is deprecated on v1beta (2025-11). Use the current
+# flash-lite for the cheap probe — any billing-enabled project can call it.
+TEXT_MODEL = "gemini-2.5-flash-lite"
+IMAGE_MODEL = "gemini-2.5-flash-image"
 BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 

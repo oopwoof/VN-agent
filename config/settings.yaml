@@ -42,11 +42,17 @@ llm:
   music_director_model: claude-haiku-4-5-20251001     # mood classification — haiku
   judge_model: claude-sonnet-4-6             # eval_strategy_adherence per-scene judge — sonnet (Sprint 7-3)
 
-image_gen:
-  provider: openai  # openai | stability
-  model: dall-e-3
-  size: "1024x1024"
-  quality: standard
+# Yaml flattening: section.key → section_key. Config.py has `image_provider`
+# and `image_model`, so this section MUST be named `image:` (not `image_gen:`)
+# for the override to take effect. Prior config had `image_gen:` which
+# silently degraded to defaults.
+image:
+  # Sprint 10-1: google_gemini (Nano Banana) is the new default — multi-image
+  # reference support + same price as gpt-image-1 + faster inference.
+  # Chain automatically falls back to openai_gpt_image / openai / stability
+  # on infrastructure failures (429/5xx), not on content/auth errors.
+  provider: google_gemini  # google_gemini | openai | openai_gpt_image | stability
+  model: gemini-2.5-flash-image
 
 music:
   strategy: library  # library | suno | hybrid
