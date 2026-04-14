@@ -50,10 +50,12 @@ class TestTemplateContent:
         assert "emotion" in WRITER_SYSTEM.lower()
 
     def test_reviewer_has_rubric(self):
-        assert "<rubric>" in REVIEWER_SYSTEM
-        assert "Narrative Coherence" in REVIEWER_SYSTEM
+        # Sprint 7-5b: rubric scoped to CRAFT dimensions only; structural
+        # dimensions moved to StructureReviewer. Updated dimension names:
+        # voice / subtext / arc / pacing / strategy_execution.
         assert "Character Voice" in REVIEWER_SYSTEM
+        assert "Subtext" in REVIEWER_SYSTEM
         assert "Emotional Arc" in REVIEWER_SYSTEM
-        assert "Branch Quality" in REVIEWER_SYSTEM
         assert "Pacing" in REVIEWER_SYSTEM
+        assert "Strategy execution" in REVIEWER_SYSTEM
         assert "3.5" in REVIEWER_SYSTEM
