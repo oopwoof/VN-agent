@@ -51,6 +51,11 @@ async def run_writer(state: AgentState) -> dict:
 
     # Build character descriptions for context
     char_desc = _build_char_descriptions(characters)
+    # Sprint 11-2: per-run system prompt = WRITER_SYSTEM + Character Bible.
+    # Identical across all scenes → Sprint 8-4 prompt caching caches the
+    # whole thing (> 1500 chars) for a 5-min TTL. Amortizes across the
+    # 6-18 Writer calls in a run (incl. revision loops).
+    run_system_prompt = SYSTEM_PROMPT + _build_character_bible(characters)
 
     # Load corpus + optional embedding index for few-shot injection
     corpus = None
@@ -109,6 +114,7 @@ async def run_writer(state: AgentState) -> dict:
             state_constraints=state_constraints,
             lore_index=lore_index,
             older_summaries=older_summaries,
+            system_prompt=run_system_prompt,
         )
         updated_scenes.append(updated_scene)
 
@@ -171,6 +177,40 @@ def _build_char_descriptions(characters: dict[str, CharacterProfile]) -> str:
         lines.append(f"    Personality: {char.personality}")
         if char.background:
             lines.append(f"    Background: {char.background}")
+    return "\n".join(lines)
+
+
+def _build_character_bible(characters: dict[str, CharacterProfile]) -> str:
+    """Sprint 11-2: Character Bible — static per-run structured character
+    reference block that's IDENTICAL across every scene within a run.
+
+    Goes into the system prompt (not user prompt) so Anthropic prompt
+    caching (Sprint 8-4, cache_control=ephemeral) amortizes the cost
+    across all 6-18 Writer calls within a run. First call pays 1.25× on
+    the Bible tokens; scenes 2+ pay 0.1×. Break-even at 1.2 calls; huge
+    win at 6+ scenes with revision loops.
+
+    Includes immutability_score so Writer knows which character
+    attributes are locked (Director-canonical) vs free to evolve.
+
+    Empty characters dict → "" so system prompt stays unchanged.
+    """
+    if not characters:
+        return ""
+    lines = ["\n\n## Character Bible (Sprint 11-2, stable within this run)\n"]
+    for cid, char in characters.items():
+        lines.append(f"### {char.name} (id: {cid})")
+        lines.append(f"Role: {char.role}")
+        if char.personality:
+            lines.append(f"Personality: {char.personality}")
+        if char.background:
+            lines.append(f"Background: {char.background}")
+        # Surface locked attributes so Writer doesn't accidentally contradict
+        locks = getattr(char, "immutability_score", {}) or {}
+        locked = [k for k, v in locks.items() if v >= 8]
+        if locked:
+            lines.append(f"Locked attributes (must not contradict): {sorted(locked)}")
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -254,6 +294,7 @@ async def _write_scene(
     state_constraints: str = "",
     lore_index=None,
     older_summaries: list[tuple[str, str]] | None = None,
+    system_prompt: str | None = None,
 ) -> Scene:
     """Write dialogue for a single scene."""
     settings = get_settings()
@@ -493,8 +534,13 @@ After dialogue, if branches exist, the player will choose:
             " Keep character_id as English identifiers."
         )
 
+    # Sprint 11-2: prefer the caller-built system prompt (WRITER_SYSTEM +
+    # Character Bible) so prompt caching amortizes the Bible cost across
+    # all scenes in a run. Fall back to the static SYSTEM_PROMPT when
+    # called outside the run_writer entry (legacy tests).
+    effective_system = system_prompt if system_prompt else SYSTEM_PROMPT
     response = await ainvoke_llm(
-        SYSTEM_PROMPT, user_prompt,
+        effective_system, user_prompt,
         model=settings.llm_writer_model,
         caller=f"writer/{scene.id}",
     )
