@@ -42,6 +42,60 @@
 
 ## 开发记录
 
+### 2026-04-14 | Phase 13: 长篇记忆 + Nano Banana + Gemini-review fixes + 首次 sweep 数据
+
+用户睡觉我自动推了一轮。核心产出：
+
+**Gemini 3 Pro 二审意见（核心工程改善）** — commit `b40de7e`
+- [BLOCKER] `state_orchestrator` time-travel: 修为**按场景时间线模拟** state，每个 reading scene 收到它开始时刻的有效状态（不再是全局 initial 快照）
+- [BLOCKER] Writer revision loop state corruption: 每次 `run_writer` 入口**从 `script.world_variables.initial_value` 重新 seed**，revision 不继承上次 end-of-story state
+- [MAJOR] `enum_values=[]` silent-accept: 现在 enum 变量必须有非空 `enum_values`
+- [MAJOR] 图像 fallback 区分 retryable：400/401/403/404 直接 raise（同 prompt 在其他 provider 也会失败，烧钱），429/5xx/timeout 才降链
+- [MAJOR] 图像 byte validation：PNG/JPEG/GIF/WebP magic 检测，写盘前 `_write_validated` 校验，防 0-byte 文件上 Ren'Py
+- [MAJOR] Director step1 prompt 示例补齐 `enum_values`，避免 LLM 漏发导致下游空 enum
+- 8 类错误-分类 + 6 类 byte-validation 测试（13 新）
+
+**Sprint 10-1 Nano Banana 图像 provider** — commit `b8d80be`
+- `google_gemini` image_provider 分支：REST 调用 `gemini-2.5-flash-image-preview` `:generateContent`
+- Fallback chain: `google_gemini → openai_gpt_image → openai → stability`（text）/ `google_gemini → openai_gpt_image → stability`（ref）
+- `scripts/check_gemini_access.py`：免费文本探活 + 付费图像探活，告诉用户是 key 问题还是 billing 问题
+- 10 新 tests 覆盖 provider capabilities + dispatcher + Gemini response shape（camelCase/snake_case）
+
+**Sprint 10-2 RAG lore pivot** — commit `5593bf1`
+- 外部批评"literary 模式 RAG 是花架子"的响应：同套 FAISS + BM25 基础设施，从**检索对话 few-shot**转为**检索世界观实体**（character backgrounds, unique locations, world_variables, premise）
+- 两种 writer_mode 都注入 lore（事实不污染风格）
+- 15 新 tests。每 run +~250 input tokens（~$0.008，噪声级）
+
+**Sprint 11 长篇记忆四件套** — commits `d6facbd`, `992bd49`, `9cb9477`, `40c5f0e`
+- **11-1 Recursive summarization**（Haiku ≤100 词/场景，gated ≥15 场景）
+- **11-2 Character Bible**：per-run 结构化角色参考，放 system prompt → Sprint 8-4 prompt caching 自动 amortize（~70% cache win on Bible tokens at 6 scenes）
+- **11-3 Persona fingerprint audit**（纯 Python）：Director 声明 `speech_fingerprint`，Reviewer 长文本跑 token-freq 匹配，flag voice drift 非阻塞警告。13 新 tests
+- **11-4 Per-scene snapshots**：`{scene_id, dialogue, world_state_after, summary}` 写到 `snapshots/<id>.json`，Sprint 12-4 local regen 基础
+
+**GPT-4o cross-judge 自动路由** — commit `2bc02d7`
+- 8-5 sweep 数据暴露：secondary judge 其实全部 404（`model="gpt-4o"` 被路由到 Anthropic API）
+- `get_llm` 加 `_infer_provider_from_model`：`claude-*` → anthropic，`gpt-*/o1-*/o3-*` → openai，auto override pipeline default
+- **意味着本次 sweep 的 "cross-model" 数据实际是 Sonnet-self-judged**，下次 sweep 才会有真正的 Pearson r
+
+**Sprint 8-5 实际 sweep 数据** — `demo_output/sweep/sweep_results.md`
+- 8 cells × 2 themes = $5.33 actual（预估 ~$2.80，多轮 revision loop 在 literary_lighthouse 吃了 $1.78）
+- **Aggregate mean**:
+  - literary: **4.17** (n=12)
+  - action: 3.92 (n=12)
+  - baseline_self_refine: 3.45 (n=11)
+  - baseline_single: 3.25 (n=12)
+- **Multi-agent 证明值钱**：literary vs baseline_single +28%
+- literary **两个主题都赢**（dragon 4.5, lighthouse 3.83）— 物理 prompt 胜过动作 RAG 即使在动作主题
+
+**Tests 303 → 329**（13 新 Gemini fixes + 10 Gemini provider + 15 lore + 13 persona audit + 其他测试更新）
+
+**遗留给早上的**：
+- 可以考虑把 `writer_mode` 默认切到 `literary`（sweep 数据支持），但这是默认行为变更，保留给用户决策
+- Sprint 12（流式 + 双模式）和 Sprint 13（多用户并发）是下一批大改动
+- GPT-4o cross-judge 实际数据还没有 — 下次 sweep 会填补
+
+---
+
 ### 2026-04-14 | 实现 - 2026-04-14 05:41
 
 **变更文件** (1 个):

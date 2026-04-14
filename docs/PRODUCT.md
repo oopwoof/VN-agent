@@ -23,7 +23,7 @@
 
 ## 产品状态
 
-**当前阶段**: Phase 12 Symbolic World State 完成（Sprint 7/8/9）— 287 tests pass。Sprint 8-5 sweep 触发后进 Sprint 10 (Nano Banana) → 12 (流式+双模式) → 13 (多用户)
+**当前阶段**: Phase 13 长篇记忆 + 图像 provider 转向 + 评估硬核化完成（Sprint 10/11 + Gemini code review fixes）。329 tests pass。Sprint 8-5 sweep 数据出：literary 4.17 > action 3.92 > baselines 3.25/3.45，multi-agent 证明有效。GPT-4o cross-judge 需下次 sweep 重新验证（bug 已修）。下一步 Sprint 12（流式+双模式）/ 13（多用户）
 
 | 功能模块 | 计划 | 状态 |
 |---------|------|------|
@@ -106,7 +106,14 @@
 | 基线模式（baseline_single + baseline_self_refine）+ 8-cell sweep | Phase 11 Sprint 8-3 | ✅ 完成 |
 | Anthropic prompt caching（≥1500 chars system prompts） | Phase 11 Sprint 8-4 | ✅ 完成 |
 | 8-cell sweep 实际运行 | Phase 11 Sprint 8-5 | 🔜 待用户 --confirm 触发 |
-| Nano Banana (Gemini) 图像 provider 集成 | Phase 11 Sprint 10 | 🔜 下一步 |
+| Nano Banana (Gemini) 图像 provider + fallback chain + byte validation + retry classification | Phase 13 Sprint 10-1 | ✅ 完成 |
+| RAG lore pivot — entity retrieval (characters + locations + world_vars + premise) | Phase 13 Sprint 10-2 | ✅ 完成 |
+| Recursive scene summarization (Haiku, ≤100 words, gated ≥15 scenes) | Phase 13 Sprint 11-1 | ✅ 完成 |
+| Character Bible 作为 prompt-cached system suffix | Phase 13 Sprint 11-2 | ✅ 完成 |
+| Persona 指纹 voice-drift audit (pure Python) | Phase 13 Sprint 11-3 | ✅ 完成 |
+| 每场景 snapshot → Sprint 12-4 local regen 基础 | Phase 13 Sprint 11-4 | ✅ 完成 |
+| Gemini code review fixes (state timeline + revision loop + type validation + image chain) | Phase 13 Sprint 9/10-fix | ✅ 完成 |
+| GPT-4o cross-judge auto-routing by model name | Phase 13 Sprint 8-1-fix | ✅ 完成 |
 | World state 符号化追踪（WorldVariable schema + Scene state I/O + BranchOption requires） | Phase 12 Sprint 9-1 | ✅ 完成 |
 | Director 发出 world_variables + 每场景 state_reads/writes | Phase 12 Sprint 9-2 | ✅ 完成 |
 | Writer 读 world_state 遵循 Director 写入 | Phase 12 Sprint 9-3 | ✅ 完成 |
