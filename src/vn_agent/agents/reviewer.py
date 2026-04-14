@@ -84,11 +84,21 @@ async def run_reviewer(state: AgentState) -> dict:
         for w in divergence_warnings:
             logger.warning(f"Branch divergence: {w}")
 
+    # Sprint 11-3: persona audit — voice-drift warnings for long-form.
+    # Zero-LLM; only fires on scripts >=10 scenes with fingerprinted chars.
+    from vn_agent.agents.persona_audit import audit_personas
+    persona_warnings = audit_personas(script, characters or {})
+    if persona_warnings:
+        for w in persona_warnings:
+            logger.warning(w)
+
     feedback = result.feedback
     if strategy_warnings:
         feedback += "\n\nStrategy consistency warnings:\n" + "\n".join(f"- {w}" for w in strategy_warnings)
     if divergence_warnings:
         feedback += "\n\nBranch divergence warnings:\n" + "\n".join(f"- {w}" for w in divergence_warnings)
+    if persona_warnings:
+        feedback += "\n\nPersona drift warnings:\n" + "\n".join(f"- {w}" for w in persona_warnings)
 
     if result.scores:
         logger.info(f"Reviewer scores: {result.scores}")

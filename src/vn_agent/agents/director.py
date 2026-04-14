@@ -201,7 +201,12 @@ Return ONLY this JSON (no branches, no music yet):
       "color": "#ff9966",
       "personality": "Brief personality",
       "background": "Brief backstory",
-      "role": "protagonist"
+      "role": "protagonist",
+      "speech_fingerprint": [
+        "speaks in short declarative sentences",
+        "uses 'perhaps' instead of 'maybe'",
+        "never uses contractions under stress"
+      ]
     }}
   ],
   "world_variables": [

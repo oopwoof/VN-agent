@@ -36,3 +36,14 @@ class CharacterProfile(BaseModel):
         description="{attribute_name: lock_score 0-10}. 10 = Reviewer FAIL on "
                     "contradiction. 0 = free for Writer to evolve.",
     )
+    # Sprint 11-3: 3-5 signature linguistic traits Director declares so
+    # Reviewer can audit voice drift across scenes. Examples:
+    # "uses ellipses often", "starts sentences with 'Well,'", "never
+    # contracts words", "says 'bloody hell' when frustrated". Pure
+    # Python substring / keyword matching — no LLM cost.
+    speech_fingerprint: list[str] = Field(
+        default_factory=list,
+        description="3-5 short signature speech traits for voice-drift auditing. "
+                    "Examples: 'uses ellipses', 'speaks in short fragments', "
+                    "'prefers formal address', 'swears under pressure'.",
+    )
