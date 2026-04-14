@@ -81,6 +81,88 @@ Creator-edited dialogue 引入 cast 外 character_id 时，reviewer 在 `unknown
 
 ---
 
+## 未来架构路线 (2026-04-14 收官草案)
+
+这一节不是已实施的工作，而是下一阶段要进入规划的两大方向，记录在此留给下次接手时参考。两者彼此正交：(1) 把 RAG 从"单一文本检索"升级为四通道工业系统；(2) 把 Agent 从"写完就忘"升级为"自我纠错"。
+
+### 路线一：四通道 RAG 架构 — 解耦代码与文学
+
+当前 RAG 只做对话风格示例注入（literary 模式跳过，action 模式注入 k=2-4）。下一步按业务职能拆成 4 个独立通道，每通道只喂给需要它的 Agent。
+
+**核心思想**：Writer 需要的是"节奏骨架"而非字面句子，SceneArtist 需要的是 ATL transform 代码，Orchestrator 需要的是 `if/menu` 语法；混在一起喂全模型会触发"Lost in the Middle"。解法是 RAG Router：每次生成前做意图分类，按需分发。
+
+#### ETL & Chunking（进入向量库之前的结构化清洗）
+
+1. **代码清洗 + 边界提取** — 剥离引擎初始化，以 `label` / 核心 `menu` 为物理边界切"场景块"，不按 token 硬切
+2. **上下文语义切片** — 按对话轮次（20-30 行）切片，头部强制注入 AI 生成的 Context Header，防止碎片化
+3. **元数据打标** — 轻量模型（Haiku）给每个切片打 `characters_involved` / `has_choices` / `narrative_tension` 标签，支撑高频精准 metadata filtering
+
+#### 四个通道
+
+| 通道 | 目标 | 数据源 | 处理策略 |
+|---|---|---|---|
+| A. 叙事风格 | 顶级台词张力、铺垫参考 | 核心对话文本 + 情感高潮 | **防对齐诅咒**：提取"节奏骨架"而非原句喂 Writer |
+| B. 逻辑工程 | 复杂分支 + 变量控制语法参考 | `if/elif/menu` 代码段 | 作为硬约束，指导正确 Ren'Py 语法 |
+| C. 视觉演出 | 大作级镜头语言 + 特效动画 | `screens.rpy` + ATL `transform` | 给资产/排版 Agent 提供 `vpunch` 等动态演出代码 |
+| D. 编译架构 | 内存安全 + 打包无 bug | `options.rpy` + `gui.rpy` + Python 类 | Pipeline 起点提供全局配置模板 + 宏函数规范 |
+
+#### RAG Router 编排
+
+- 前置意图分类器（极低成本模型），每次生成请求做 dispatch
+- Writer 只收通道 A，SceneArtist 只收通道 C，Orchestrator 只关注 B + D
+- 每个 Agent 的 Context Window 保持绝对纯净，互不干扰
+
+#### 落地顺序（ROI 阶梯）
+
+1. **骨架（ETL + 通道 B）** — 跑通数据清洗脚本 + 逻辑代码检索，确保引擎不报编译语法错
+2. **血肉（通道 A）** — 引入脱水"叙事节奏骨架"，提升对话文学质量
+3. **皮相 + 底座（通道 C + D）** — 系统稳定后引入高级 ATL 镜头 + 全局架构参考，完成"全栈游戏生成引擎"进化
+
+### 路线二：自我进化 Agent — 经验沉淀与反向传播
+
+当前系统"写完就忘"：失败场景被 Reviewer 打回，修改记录丢失。下一步建三层架构，按 ROI 递增：
+
+#### 第一层：经验库 RAG（Dynamic Few-Shot）— 见招拆招
+
+- **信号捕获**：
+  - 负样本 — Reviewer 打分 < 3 且被打回；创作者手改对白；逻辑崩溃生成
+  - 正样本 — 一次性通过且未改；玩家高频点赞场景
+- **向量化入库** — 专用 `faiss_experience_db`，schema：`{intent, bad_generation, good_generation, reason}`
+- **RAG 动态注入** — Writer 下次写"愤怒"场景时系统 Prompt 追加："注意过往错误：[Bad]，学习范例：[Good]"
+
+#### 第二层：元规则反思（Meta-Reflection）— 举一反三
+
+引入 **Reflection Agent**（不参与日常生成，后台异步跑批）：
+1. 提取最近 100 次 Reviewer 打回日志
+2. 找共性错误 — 例如"Writer 写傲娇角色总像刻薄反派"
+3. 输出规则建议 — "处理傲娇属性时，每 3 句带刺话后必加掩饰性肢体动作（别过脸/低头）"
+4. 写入 `dynamic_guidelines.json`，Director/Writer 启动时自动拼接到 System Prompt
+
+#### 第三层：自动化 Prompt 优化 + 模型蒸馏 — 基因重组
+
+- **DSPy 式自动优化** — 给 50 个满分场景作 Target，强优化器（GPT-4o/Sonnet）反复改 `physics_diagram` Prompt 逼近 Target，优胜替换旧 Prompt
+- **SFT/DPO 微调** — 积累 10K 个极高质量 [Context → Dialogue] 对后，用 DPO（Chosen = 好信号，Rejected = 坏信号）微调 Llama 3 8B / Haiku，廉价模型内生免疫常见错误
+
+#### 周末快速原型（先做 L1 的极简版）
+
+1. 创作者 UI 加 👍 / 👎 按钮
+2. 👎 时要求填一句原因（"废话太多"）
+3. 脚本存 `[前置上下文, 失败生成, 评语]` 为 JSONL
+4. Writer 下次调用前 BM25 扫此 JSONL，相似上下文就把评语强塞 Prompt：**"绝对禁止：废话太多"**
+
+打补丁式进化，小规模能让创作者觉得 AI **"教得会"**。
+
+### 其他未收的尾巴（之前的 roadmap）
+
+- **Sprint 12-1 流式 pipeline**（player mode JIT delivery）— 重写 `graph.astream` 为 segmented streaming，`pipeline_lookahead=2`，首场景 TTFS 从 5 min 降到 ~60s
+- **Sprint 13-1 API key pool** — 多 Anthropic key 轮询 + 429 自动切换，为 100 并发用户打基础
+- **Sprint 13-2/3/4** — job queue + cost caps + fleet dashboard（多用户 ops）
+- **真实 BGM 文件** — freesound.org CC0 素材替换占位 OGG
+- **CharacterDesigner 额外 emotion**（thoughtful/angry 等独立 PNG）— 已 filesystem-aware，只要生成就自动生效
+- **Suno API 音乐生成** — 待 API 公开
+
+---
+
 ## 开发记录
 
 ### 2026-04-14 | 实现 - 2026-04-14 16:05

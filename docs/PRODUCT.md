@@ -431,4 +431,20 @@ Phase 11 就是对这批批评的系统化响应（Sprint 9/10 deferred 处理 s
 - [ ] Trace 分析工具（从 trace.json 提取瓶颈、优化建议）
 - [ ] Sprint 13-2/3/4: job queue + cost caps + fleet dashboard (multi-user ops)
 
+### 长期架构（2026-04-14 收官草案，详见 DEV_LOG.md 未来架构路线）
+
+**P2 - 四通道 RAG 架构**（解耦代码与文学）
+- [ ] ETL + chunking：以 `label`/`menu` 为物理边界的场景切片 + AI 生成的 Context Header + Haiku 元数据打标
+- [ ] 通道 B（逻辑工程）：`if/elif/menu` 代码段 → 硬约束 Writer 的 Ren'Py 语法（优先跑通，确保引擎不报编译语法错）
+- [ ] 通道 A（叙事风格）：提取"节奏骨架"而非字面句，提升文学质量
+- [ ] 通道 C（视觉演出）：`screens.rpy` + ATL transform → 给 SceneArtist 提供 `vpunch` 等动态演出
+- [ ] 通道 D（编译架构）：`options.rpy` + `gui.rpy` 全局配置模板
+- [ ] RAG Router：意图分类器 dispatch，Writer 只收 A，SceneArtist 只收 C，Orchestrator 只看 B+D
+
+**P2 - 自我进化 Agent**（经验沉淀 + 反向传播）
+- [ ] L1 经验库 RAG：失败/成功生成向量化入 `faiss_experience_db`，Writer 下次调用前动态 few-shot 注入 System Prompt
+- [ ] 周末快速原型：创作者 UI 加 👍/👎 按钮 + 原因字段 → JSONL → BM25 扫入 Writer prompt（"**绝对禁止：废话太多**"）
+- [ ] L2 Reflection Agent：异步跑批提炼元规则 → `dynamic_guidelines.json` → 启动时拼接 System Prompt
+- [ ] L3 DSPy 式自动 Prompt 优化 + DPO 微调廉价模型（Llama 3 8B / Haiku）
+
 _最后更新: 2026-04-14_
