@@ -13,6 +13,7 @@ from vn_agent.agents.music_director import run_music_director
 from vn_agent.agents.reviewer import run_reviewer
 from vn_agent.agents.scene_artist import run_scene_artist
 from vn_agent.agents.state import AgentState
+from vn_agent.agents.structure_reviewer import run_structure_reviewer
 from vn_agent.agents.writer import run_writer
 from vn_agent.config import get_settings
 from vn_agent.observability.tracing import get_trace
@@ -123,10 +124,16 @@ def _after_review(state: AgentState) -> str:
 def build_graph():  # type: ignore[return]
     """Build the full VN generation pipeline.
 
-    Topology:
-        director → writer → reviewer ─┬─ (PASS) → asset_generation → END
-                              ↑        ├─ (FAIL) → writer  (revision loop)
-                              └────────┘  (end)  → END     (text_only mode)
+    Topology (Sprint 7-5 two-tier review):
+        director → structure_reviewer → writer → reviewer ─┬─ PASS → assets → END
+                                          ↑                 ├─ FAIL → writer  (revision loop)
+                                          └─────────────────┘  end  → END     (text_only)
+
+    - structure_reviewer (Sonnet): audits outline BEFORE writer — branch
+      intent alignment, strategy distribution, narrative shape. Non-blocking
+      by default; feedback lands in state for writer context and errors.
+    - reviewer (Haiku, Sprint 7-5 revert): audits dialogue AFTER writer —
+      mechanical format + keyword + rubric checks.
 
     asset_generation runs character_designer, scene_artist, and music_director
     concurrently via asyncio.gather with per-agent fault isolation.
@@ -135,15 +142,20 @@ def build_graph():  # type: ignore[return]
 
     # Core pipeline nodes (traced individually)
     graph.add_node("director", _make_traced_node("director", run_director))  # type: ignore[call-overload]
+    graph.add_node(  # type: ignore[call-overload]
+        "structure_reviewer",
+        _make_traced_node("structure_reviewer", run_structure_reviewer),
+    )
     graph.add_node("writer", _make_traced_node("writer", run_writer))  # type: ignore[call-overload]
     graph.add_node("reviewer", _make_traced_node("reviewer", run_reviewer))  # type: ignore[call-overload]
 
     # Parallel asset generation (3 sub-agents run concurrently inside one node)
     graph.add_node("asset_generation", _run_assets_parallel)  # type: ignore[call-overload]
 
-    # Linear flow: director → writer → reviewer
+    # Linear flow: director → structure_reviewer → writer → reviewer
     graph.set_entry_point("director")
-    graph.add_edge("director", "writer")
+    graph.add_edge("director", "structure_reviewer")
+    graph.add_edge("structure_reviewer", "writer")
     graph.add_edge("writer", "reviewer")
 
     # Conditional: reviewer either approves (with text_only check), or sends back to writer

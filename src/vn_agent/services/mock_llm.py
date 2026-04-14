@@ -155,6 +155,14 @@ _WRITER_SCENE_MAP = {
 
 _REVIEWER_RESPONSE = "PASS"
 
+_STRUCTURE_REVIEWER_RESPONSE = """{
+  "verdict": "PASS",
+  "branch_alignment_score": 1.0,
+  "aligned_branches": [],
+  "narrative_issues": [],
+  "summary": "mock: outline passes structure audit"
+}"""
+
 _CHARACTER_DESIGNER_RESPONSE = """{
   "art_style": "painterly anime style, atmospheric lighting, high quality",
   "appearance": "tall, weathered face, dark circles under storm-grey eyes, salt-and-pepper hair cut short",
@@ -321,6 +329,11 @@ def _dispatch(sys_lower: str, user_prompt: str, caller: str) -> str:
     # Director step1
     if "director" in sys_lower:
         return DIRECTOR_STEP1_CN if is_chinese else DIRECTOR_STEP1
+
+    # Structure reviewer (check caller first since sys_lower also contains
+    # "architect" / narrative keywords that might confuse later matchers)
+    if "structure_reviewer" in caller or "narrative architect" in sys_lower:
+        return _STRUCTURE_REVIEWER_RESPONSE
 
     # Reviewer
     if "reviewer" in sys_lower:

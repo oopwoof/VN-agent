@@ -39,7 +39,12 @@ class Settings(BaseSettings):
     # Per-agent model overrides
     llm_director_model: str = "claude-sonnet-4-6"
     llm_writer_model: str = "claude-sonnet-4-6"
+    # Sprint 7-5: DialogueReviewer is back to Haiku — it checks mechanical
+    # execution (line counts, character IDs, emotion tags, keyword presence).
+    # Narrative/structural judgment moved upstream to structure_reviewer which
+    # runs BEFORE Writer and catches bad plans cheaply.
     llm_reviewer_model: str = "claude-haiku-4-5-20251001"
+    llm_structure_reviewer_model: str = "claude-sonnet-4-6"  # narrative audit
     llm_character_designer_model: str = "claude-haiku-4-5-20251001"
     llm_scene_artist_model: str = "claude-haiku-4-5-20251001"
     llm_music_director_model: str = "claude-haiku-4-5-20251001"

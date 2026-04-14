@@ -21,7 +21,14 @@ llm:
   # simple polishing, single-item batch processing.
   director_model: claude-sonnet-4-6          # narrative structure — sonnet
   writer_model: claude-sonnet-4-6            # dialogue craft — sonnet
-  reviewer_model: claude-sonnet-4-6          # full-script rubric + diagnosis — sonnet (was haiku; Sprint 7-3)
+  # Two-tier review (Sprint 7-5):
+  #   structure_reviewer runs BEFORE Writer, on outline — sonnet needed for
+  #     narrative judgment (branch intent alignment, arc shape).
+  #   reviewer (dialogue) runs AFTER Writer, on produced text — haiku
+  #     sufficient for format / ID / keyword / rubric checks, and cheaper
+  #     to run on potentially-many revision rounds.
+  structure_reviewer_model: claude-sonnet-4-6
+  reviewer_model: claude-haiku-4-5-20251001  # dialogue-level checks — haiku (was sonnet; reverted Sprint 7-5)
   character_designer_model: claude-haiku-4-5-20251001  # 1-shot visual profile JSON — haiku
   scene_artist_model: claude-haiku-4-5-20251001       # single prompt formatting — haiku
   music_director_model: claude-haiku-4-5-20251001     # mood classification — haiku

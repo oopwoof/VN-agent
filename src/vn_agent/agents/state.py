@@ -37,6 +37,11 @@ class AgentState(dict):
     review_passed: bool
     review_feedback: str
     review_scores: dict | None
+    # Sprint 7-5: structure-reviewer (pre-Writer audit) results. Informational
+    # for Writer context, non-blocking by default.
+    structure_review_passed: bool
+    structure_review_feedback: str
+    structure_review_issues: list[str]
     assets_generated: bool
     output_dir: str
     messages: Annotated[list[BaseMessage], add_messages]
@@ -62,6 +67,9 @@ def initial_state(
         "revision_count": 0,
         "review_passed": False,
         "review_feedback": "",
+        "structure_review_passed": False,
+        "structure_review_feedback": "",
+        "structure_review_issues": [],
         "assets_generated": False,
         "output_dir": output_dir,
         "messages": [],

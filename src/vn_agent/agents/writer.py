@@ -25,6 +25,10 @@ async def run_writer(state: AgentState) -> dict:
     script = state["vn_script"]
     characters = state["characters"]
     revision_feedback = state.get("review_feedback", "")
+    # Sprint 7-5: StructureReviewer feedback (outline-level issues, especially
+    # branch intent misalignment) surfaced so Writer can be more careful when
+    # setting up choice points.
+    structure_issues = state.get("structure_review_issues", []) or []
     output_dir = state.get("output_dir", ".")
 
     if not script:
@@ -65,6 +69,7 @@ async def run_writer(state: AgentState) -> dict:
             scene, script, char_desc, revision_feedback, output_dir,
             corpus=corpus, embedding_index=embedding_index,
             prior_scenes=prior_scenes,
+            structure_issues=structure_issues,
         )
         updated_scenes.append(updated_scene)
 
@@ -165,6 +170,7 @@ async def _write_scene(
     corpus=None,
     embedding_index=None,
     prior_scenes: list[Scene] | None = None,
+    structure_issues: list[str] | None = None,
 ) -> Scene:
     """Write dialogue for a single scene."""
     settings = get_settings()
@@ -177,6 +183,24 @@ async def _write_scene(
     feedback_note = ""
     if revision_feedback:
         feedback_note = f"\nIMPORTANT - Revision feedback to address:\n{revision_feedback}\n"
+
+    # Sprint 7-5: pass StructureReviewer issues to Writer as context. Most
+    # relevant for scenes with branches where intent-alignment failures were
+    # flagged upstream; Writer can then write the choice-point setup more
+    # deliberately so the option text matches what happens next.
+    structure_note = ""
+    if structure_issues:
+        # Scope to issues mentioning this scene's id, plus one or two general
+        # structural warnings so the prompt stays focused.
+        mine = [i for i in structure_issues if scene.id in i]
+        general = [i for i in structure_issues if scene.id not in i][:2]
+        relevant = mine + general
+        if relevant:
+            structure_note = (
+                "\n--- Structure review notes (from outline auditor) ---\n"
+                + "\n".join(f"  - {i}" for i in relevant)
+                + "\n"
+            )
 
     # Sprint 7-2: long-context — inject prior scenes' actual dialogue so
     # Writer can keep character voice coherent across scene boundaries. Only
@@ -219,7 +243,7 @@ Scene ID: {scene.id}
 Title: {scene.title}
 Description: {scene.description}
 {strategy_guidance}
-{feedback_note}{transition_block}
+{feedback_note}{structure_note}{transition_block}
 Characters present: {', '.join(scene.characters_present)}
 Music mood: {scene.music.mood.value if scene.music else 'none'}
 

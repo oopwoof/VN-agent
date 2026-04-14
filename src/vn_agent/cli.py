@@ -28,6 +28,7 @@ def _patch_mock_llm() -> None:
         "vn_agent.agents.director.ainvoke_llm",
         "vn_agent.agents.writer.ainvoke_llm",
         "vn_agent.agents.reviewer.ainvoke_llm",
+        "vn_agent.agents.structure_reviewer.ainvoke_llm",
         "vn_agent.agents.character_designer.ainvoke_llm",
         "vn_agent.agents.scene_artist.ainvoke_llm",
     ]
