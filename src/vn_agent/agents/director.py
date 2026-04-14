@@ -89,34 +89,22 @@ async def run_director(state: AgentState) -> dict:
     # ── Branch structural validation (Sprint 6-6) ─────────────────────────────
     # Defense-in-depth: fail fast on structurally-meaningless branches before
     # Writer wastes tokens generating dialogue for a cosmetic choice tree.
+    #
+    # Sprint 7-4 fix: we used to call LLM repair here, but a free-text repair
+    # prompt gives the model too much latitude — real observed failures
+    # included it inventing a "branch" strategy label and dropping the
+    # `characters` field entirely. Structural branch defects have a cheap
+    # surgical fix (_degrade_invalid_branches: strip the bad branches,
+    # promote the first target to next_scene_id), so use it directly.
+    # LLM repair is reserved for JSON shape / Pydantic build failures
+    # where a more creative fix is genuinely needed.
     branch_issues = _validate_branch_structure(script)
     if branch_issues:
         logger.warning(
             f"Director branch structure issues: {len(branch_issues)} — "
-            f"attempting repair. First: {branch_issues[0]}"
+            f"degrading invalid branches. First: {branch_issues[0]}"
         )
-        repaired = await _attempt_repair(
-            plan_data,
-            "Branch structure invalid: " + "; ".join(branch_issues[:3]),
-            output_dir,
-            settings,
-        )
-        if repaired:
-            try:
-                script, characters = _build_from_plan(repaired, theme)
-                plan_data = repaired
-                # Re-validate after repair
-                branch_issues = _validate_branch_structure(script)
-            except Exception as e:
-                logger.warning(f"Repaired plan failed to build: {e}")
-
-        if branch_issues:
-            # Graceful degradation: drop bad branches rather than block pipeline
-            logger.warning(
-                f"Branches still invalid after repair — degrading to linear flow "
-                f"for {len(branch_issues)} scene(s). Reviewer will flag as warning."
-            )
-            _degrade_invalid_branches(script, branch_issues)
+        _degrade_invalid_branches(script, branch_issues)
 
     logger.info(f"Director created: '{script.title}' with {len(script.scenes)} scenes, {len(characters)} characters")
 
