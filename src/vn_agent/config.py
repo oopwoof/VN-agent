@@ -148,6 +148,15 @@ class Settings(BaseSettings):
     # Tool calling (LLM function calling instead of free-text JSON)
     use_tool_calling: bool = True  # bind_tools for scene_artist/character_designer
 
+    # Sprint 12-3b: sprite post-processing — run rembg (u2net_human_seg)
+    # over each generated character sprite to strip the solid background.
+    # Ren'Py composites sprites over scene backgrounds; without alpha,
+    # the character appears inside a visible rectangle. Requires the
+    # [cutout] extra (`uv sync --extra cutout`). Gracefully no-ops with
+    # a warning if rembg isn't installed.
+    sprite_cutout: bool = True
+    sprite_cutout_model: str = "u2net_human_seg"  # u2net | u2net_human_seg | isnet-general-use
+
 
 def _load_yaml_settings() -> dict:
     config_path = ROOT / "config" / "settings.yaml"

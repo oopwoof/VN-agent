@@ -32,6 +32,11 @@ dependencies = [
 [project.optional-dependencies]
 web = ["fastapi>=0.110", "uvicorn[standard]>=0.30"]
 rag = ["sentence-transformers>=2.0", "faiss-cpu>=1.7", "numpy>=1.24"]
+# Sprint 12-3b: transparent-background sprite cutout (u2net via rembg).
+# Local ONNX inference, ~1-3s/sprite, no external API. Optional so the
+# base install stays slim — pipeline degrades to colored-bg sprites when
+# missing (with a startup warning).
+cutout = ["rembg>=2.0", "onnxruntime>=1.17"]
 
 [project.scripts]
 vn-agent = "vn_agent.cli:app"

@@ -169,11 +169,14 @@ async def _generate_sprites(
     emotion — Ren'Py references never go dangling, even if some variants
     weren't produced.
     """
+    from vn_agent.config import get_settings
+    from vn_agent.services.bg_remove import cutout_png
     from vn_agent.services.image_gen import (
         generate_image_with_reference,
         provider_supports_reference,
     )
 
+    settings = get_settings()
     sprites: list[EmotionSprite] = []
     errors: list[str] = []
 
@@ -183,6 +186,23 @@ async def _generate_sprites(
         f"{visual.art_style}, {visual.appearance}, {visual.default_outfit}"
     )
 
+    # Sprint 12-3b: sprites composite over scene backgrounds in Ren'Py,
+    # so they need transparent PNGs. Two layers of defense:
+    # (1) prompt asks the model for a clean silhouette on a flat,
+    #     high-contrast background so the downstream matte step has a
+    #     crisp edge to follow — pure white bleeds into light hair/skin
+    #     and creates halos, so we use flat medium gray (#808080).
+    # (2) rembg post-process runs u2net_human_seg on the saved PNG and
+    #     replaces the background with alpha. Deterministic, local, ~1s.
+    # Keyword "clean silhouette" + "sharp edges" + "no shadow on the floor"
+    # are the phrases Nano Banana responds to most reliably for cutout
+    # work — the model tends to draw floor shadows otherwise which rembg
+    # treats as part of the subject.
+    bg_clause = (
+        "flat medium gray background, clean silhouette, sharp crisp edges, "
+        "no shadow on the floor, no environment, no props, isolated character"
+    )
+
     def _sprite_path(emotion: str) -> tuple[str, Path]:
         rel = f"images/characters/{char.id}/{emotion}.png"
         return rel, Path(output_dir) / "game" / rel
@@ -190,13 +210,22 @@ async def _generate_sprites(
     # ── Step 1: neutral (anchor) ────────────────────────────────────────────
     neutral_rel, neutral_abs = _sprite_path("neutral")
     neutral_prompt = (
-        f"{base_descriptor}, neutral expression, full body, white background, "
-        f"visual novel character sprite"
+        f"{base_descriptor}, neutral expression, full body, "
+        f"{bg_clause}, visual novel character sprite"
     )
+    # Cutout is deferred until all sprites are generated: when provider
+    # supports image-to-image, the neutral PNG is passed as a *reference*
+    # for happy/sad. A transparent reference would confuse Nano Banana's
+    # identity extraction (it reads the alpha as a checkerboard artifact
+    # or a black shape), so we keep the reference opaque through the
+    # whole reference-editing loop and strip backgrounds at the end.
+    cutout_targets: list[tuple[Path, str]] = []
+
     neutral_ok = False
     try:
         await generate_image(neutral_prompt, neutral_abs)
         logger.info(f"Generated neutral sprite: {char.id}")
+        cutout_targets.append((neutral_abs, f"{char.id}_neutral"))
         neutral_ok = True
     except Exception as e:
         logger.warning(f"Could not generate neutral sprite for {char.id}: {e}")
@@ -223,14 +252,14 @@ async def _generate_sprites(
             prompt = (
                 f"Same character as reference image. {hint}. "
                 f"Keep face, hair, and outfit identical. "
-                f"Full body, white background, visual novel character sprite."
+                f"Full body, {bg_clause}, visual novel character sprite."
             )
         else:
             # Text-only path: repeat the full base descriptor verbatim so
             # at least the prompt is consistent across emotions
             prompt = (
                 f"{base_descriptor}, {hint}, {emotion} expression, full body, "
-                f"white background, visual novel character sprite"
+                f"{bg_clause}, visual novel character sprite"
             )
 
         try:
@@ -239,6 +268,7 @@ async def _generate_sprites(
             else:
                 await generate_image(prompt, abs_path)
             logger.info(f"Generated {emotion} sprite: {char.id}")
+            cutout_targets.append((abs_path, f"{char.id}_{emotion}"))
         except Exception as e:
             logger.warning(f"Could not generate {emotion} sprite for {char.id}: {e}")
             errors.append(f"CharacterDesigner: sprite {char.id}_{emotion}: {e}")
@@ -259,5 +289,23 @@ async def _generate_sprites(
             file_path=rel,
             generation_prompt=prompt,
         ))
+
+    # ── Step 3: batch cutout all successful sprites ─────────────────────────
+    # Deferred so reference-based generation sees opaque neutral. Failures
+    # don't abort — the original opaque PNG stays on disk; creator sees a
+    # rectangle but the VN still runs. Logged so eval scripts can flag it.
+    if settings.sprite_cutout and cutout_targets:
+        import time
+        t0 = time.perf_counter()
+        cut_ok = 0
+        for path, label in cutout_targets:
+            if cutout_png(path, model_name=settings.sprite_cutout_model):
+                cut_ok += 1
+            else:
+                errors.append(f"CharacterDesigner: cutout {label} failed (kept opaque)")
+        logger.info(
+            f"Cutout batch for {char.id}: {cut_ok}/{len(cutout_targets)} alpha-stripped "
+            f"in {time.perf_counter() - t0:.1f}s"
+        )
 
     return sprites, errors

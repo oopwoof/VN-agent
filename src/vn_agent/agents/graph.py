@@ -184,3 +184,34 @@ def build_graph():  # type: ignore[return]
 def create_pipeline():
     """Create and return the compiled pipeline."""
     return build_graph()
+
+
+def build_writer_graph():  # type: ignore[return]
+    """Sprint 12-3: resume-from-outline graph — skips Director/structure/state.
+
+    Entry at `writer`. Assumes vn_script, characters, world_state, and
+    state_constraints are pre-populated in state by the caller (loaded
+    from disk after a creator pauses-for-outline run). Same writer →
+    reviewer → (revise|assets|end) topology as the full graph so
+    revision loops and text_only still work identically.
+    """
+    graph = StateGraph(AgentState)  # type: ignore[type-var]
+
+    graph.add_node("writer", _make_traced_node("writer", run_writer))  # type: ignore[call-overload]
+    graph.add_node("reviewer", _make_traced_node("reviewer", run_reviewer))  # type: ignore[call-overload]
+    graph.add_node("asset_generation", _run_assets_parallel)  # type: ignore[call-overload]
+
+    graph.set_entry_point("writer")
+    graph.add_edge("writer", "reviewer")
+    graph.add_conditional_edges(
+        "reviewer",
+        _after_review,
+        {
+            "proceed": "asset_generation",
+            "revise": "writer",
+            "end": END,
+        },
+    )
+    graph.add_edge("asset_generation", END)
+
+    return graph.compile()
