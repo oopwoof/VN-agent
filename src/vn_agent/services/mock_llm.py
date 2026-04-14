@@ -163,6 +163,10 @@ _STRUCTURE_REVIEWER_RESPONSE = """{
   "summary": "mock: outline passes structure audit"
 }"""
 
+_STATE_ORCHESTRATOR_RESPONSE = """Scene ch1:
+  - Characters begin on first-name terms (affinity 3/10)
+  - Nothing disclosed yet — all world flags default"""
+
 _CHARACTER_DESIGNER_RESPONSE = """{
   "art_style": "painterly anime style, atmospheric lighting, high quality",
   "appearance": "tall, weathered face, dark circles under storm-grey eyes, salt-and-pepper hair cut short",
@@ -329,6 +333,11 @@ def _dispatch(sys_lower: str, user_prompt: str, caller: str) -> str:
     # Director step1
     if "director" in sys_lower:
         return DIRECTOR_STEP1_CN if is_chinese else DIRECTOR_STEP1
+
+    # State orchestrator (check before other "reviewer" / "director" matches
+    # because the system prompt mentions "compile" / "state" keywords)
+    if "state_orchestrator" in caller or "compile symbolic world state" in sys_lower:
+        return _STATE_ORCHESTRATOR_RESPONSE
 
     # Structure reviewer (check caller first since sys_lower also contains
     # "architect" / narrative keywords that might confuse later matchers)

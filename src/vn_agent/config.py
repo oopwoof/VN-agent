@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     # scoping Reviewer's prompt to craft dimensions only.
     llm_reviewer_model: str = "claude-sonnet-4-6"
     llm_structure_reviewer_model: str = "claude-sonnet-4-6"  # narrative audit
+    # Sprint 9-6: State Orchestrator — translates world_state dict to
+    # narrative constraint text for Writer. Translation work, not
+    # narrative judgment → Haiku per the project model-selection rule.
+    llm_state_orchestrator_model: str = "claude-haiku-4-5-20251001"
     llm_character_designer_model: str = "claude-haiku-4-5-20251001"
     llm_scene_artist_model: str = "claude-haiku-4-5-20251001"
     llm_music_director_model: str = "claude-haiku-4-5-20251001"

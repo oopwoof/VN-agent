@@ -42,6 +42,30 @@
 
 ## 开发记录
 
+### 2026-04-14 | 实现 - 2026-04-14 00:17
+
+**变更文件** (5 个):
+**源码变更** (5 文件):
+  - `src/vn_agent/agents/graph.py`
+  - `src/vn_agent/agents/state_orchestrator.py`
+  - `src/vn_agent/cli.py`
+  - `src/vn_agent/config.py`
+  - `src/vn_agent/services/mock_llm.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/graph.py              |  16 ++--
+ src/vn_agent/agents/state_orchestrator.py | 130 ++++++++++++++++++++++++++++++
+ src/vn_agent/cli.py                       |   1 +
+ src/vn_agent/config.py                    |   4 +
+ src/vn_agent/services/mock_llm.py         |   9 +++
+ 5 files changed, 155 insertions(+), 5 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-14 | 实现 - 2026-04-14 00:11
 
 **变更文件** (1 个):

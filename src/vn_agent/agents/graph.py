@@ -13,6 +13,7 @@ from vn_agent.agents.music_director import run_music_director
 from vn_agent.agents.reviewer import run_reviewer
 from vn_agent.agents.scene_artist import run_scene_artist
 from vn_agent.agents.state import AgentState
+from vn_agent.agents.state_orchestrator import run_state_orchestrator
 from vn_agent.agents.structure_reviewer import run_structure_reviewer
 from vn_agent.agents.writer import run_writer
 from vn_agent.config import get_settings
@@ -124,10 +125,10 @@ def _after_review(state: AgentState) -> str:
 def build_graph():  # type: ignore[return]
     """Build the full VN generation pipeline.
 
-    Topology (Sprint 7-5 two-tier review):
-        director → structure_reviewer → writer → reviewer ─┬─ PASS → assets → END
-                                          ↑                 ├─ FAIL → writer  (revision loop)
-                                          └─────────────────┘  end  → END     (text_only)
+    Topology (Sprint 9-6 state-aware):
+        director → structure_reviewer → state_orchestrator → writer → reviewer ─┬─ PASS → assets → END
+                                                               ↑                 ├─ FAIL → writer  (revision loop)
+                                                               └─────────────────┘  end  → END     (text_only)
 
     - structure_reviewer (Sonnet): audits outline BEFORE writer — branch
       intent alignment, strategy distribution, narrative shape. Non-blocking
@@ -146,6 +147,10 @@ def build_graph():  # type: ignore[return]
         "structure_reviewer",
         _make_traced_node("structure_reviewer", run_structure_reviewer),
     )
+    graph.add_node(  # type: ignore[call-overload]
+        "state_orchestrator",
+        _make_traced_node("state_orchestrator", run_state_orchestrator),
+    )
     graph.add_node("writer", _make_traced_node("writer", run_writer))  # type: ignore[call-overload]
     graph.add_node("reviewer", _make_traced_node("reviewer", run_reviewer))  # type: ignore[call-overload]
 
@@ -155,7 +160,8 @@ def build_graph():  # type: ignore[return]
     # Linear flow: director → structure_reviewer → writer → reviewer
     graph.set_entry_point("director")
     graph.add_edge("director", "structure_reviewer")
-    graph.add_edge("structure_reviewer", "writer")
+    graph.add_edge("structure_reviewer", "state_orchestrator")
+    graph.add_edge("state_orchestrator", "writer")
     graph.add_edge("writer", "reviewer")
 
     # Conditional: reviewer either approves (with text_only check), or sends back to writer
