@@ -42,6 +42,43 @@
 
 ## 开发记录
 
+### 2026-04-13 | Phase 11: 双通道 Writer + 评估严谨性（Sprint 7 + 8）
+
+**触发点**：Phase 10 首次真实 demo 跑通后，外部架构评审（GPT/Gemini + 资深审查者）指四个硬伤：对齐诅咒 / 自审 echo chamber / 无 baseline / 无 symbolic state。Phase 11 是对前三个的系统化响应，state 推 Phase 12。
+
+**按批评拆解**：
+
+**1. 对齐诅咒 → Sprint 7-1**
+- `writer_mode: Literal["literary", "action"]`。literary 默认跳过 raw few-shot 注入，靠物理 taxonomy 描述驱动。RAG 检索仍跑（审计），仅注入被 mode 控制
+- 物理化 Writer system prompt：每种策略加 vector/threshold/energy 描述
+
+**2. 自审 echo chamber → Sprint 8-1 + 8-2**
+- 8-1：GPT-4o secondary judge，Pearson r 汇报，优雅降级
+- 8-2：零 LLM 规则化 metrics 6 个策略各自信号（rupture=最大情感 jump × position weighting，accumulate=能量 Pearson r，erode=句长下降+sentiment+省略号，uncover=专名揭示率，contest=speaker×emotion alternation，drift=decisive 信号反面）。三方裁判对齐才可信
+
+**3. 无 baseline → Sprint 8-3**
+- `baseline_single` 一次 Sonnet call 产完整 script，`baseline_self_refine` draft+self-critique+revise。sweep 4×2=8 cells 含 baseline
+- 预算 ~$2.80 + judge ~$0.10
+
+**4. 成本优化 → Sprint 8-4**
+- Anthropic prompt caching：system prompt ≥1500 chars 标 `cache_control=ephemeral`，5-min TTL。Writer 6-18 次同 prompt 共享缓存，预估 `-$0.07-0.25/run`
+
+**Sprint 7 架构演进子项**：
+- 7-2 选择性长上下文 `writer_context_window`
+- 7-3 Reviewer + judge 升 Sonnet
+- 7-5 两层 Reviewer（Sonnet structure + Haiku dialogue 初版）
+- 7-5b Dialogue 回 Sonnet + Python `_mechanical_check` 前置门 + Reviewer prompt 专注 craft + StructureReviewer audit 4→7 条（捕获 LLM 策略枚举幻觉）
+
+**真实运行里程碑**：
+- Sprint 7-4 单 cell 跑（literary × lighthouse）531s $1.17 actual vs $0.52 estimate
+  **暴露 Director LLM repair 破坏性 bug**（改 narrative_strategy, 吞 characters）
+  修为纯 Python `_degrade_invalid_branches`（`c5b76bd`）
+- Sprint 8 完成，264 → 279 tests pass（rule metrics 15 新）
+
+**下一步**：Sprint 8-5 用户 --confirm 触发 8-cell sweep 实测。数据出来后决定 Sprint 9（world state）启停优先级。
+
+---
+
 ### 2026-04-13 | 实现 - 2026-04-13 23:33
 
 **变更文件** (2 个):
@@ -2368,4 +2405,4 @@ _（每次 commit 后更新）_
 
 ---
 
-_最后更新: 2026-04-13_
+_最后更新: 2026-04-13（Phase 11 Sprint 7 + 8 完成，Sprint 8-5 sweep 待触发）_

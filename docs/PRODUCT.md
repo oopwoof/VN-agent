@@ -23,7 +23,7 @@
 
 ## 产品状态
 
-**当前阶段**: Phase 10 工业级升级（Sprint 6-1 ~ 6-9c）完成 — 端到端真实 API 跑通
+**当前阶段**: Phase 11 双通道 Writer + 评估严谨性（Sprint 7 + 8）完成 — 面对外部架构批评的系统化响应
 
 | 功能模块 | 计划 | 状态 |
 |---------|------|------|
@@ -95,10 +95,26 @@
 | Reviewer 阈值硬判（avg ≥ 3.5 覆盖 LLM） | Phase 10 Sprint 6-fix | ✅ 完成 |
 | Writer 注入角色 background + Reviewer 读完整对白 | Phase 10 Sprint 6-fix | ✅ 完成 |
 | RAG 检索 jsonl 持久化 + BOM bug 修复 + few-shot 截断 300→2000 | Phase 10 Sprint 6-fix | ✅ 完成 |
-| Intent alignment 分支意图校验（第 4 层防御） | Phase 10 Sprint 6-10 | 🔜 下一步 |
-| Nano Banana (Gemini) 图像 provider 集成 | Phase 10 Sprint 6-11 | 🔜 下一步 |
+| writer_mode 双通道（literary / action）+ 物理 taxonomy Writer prompt | Phase 11 Sprint 7-1 | ✅ 完成 |
+| 选择性长上下文（prior scenes dialogue injection） | Phase 11 Sprint 7-2 | ✅ 完成 |
+| Reviewer + eval judge 升 Sonnet | Phase 11 Sprint 7-3 | ✅ 完成 |
+| 两层 Reviewer 架构（Sonnet structure + Sonnet dialogue + Python gate） | Phase 11 Sprint 7-5 / 7-5b | ✅ 完成 |
+| 扩展 StructureReviewer audit（7 条本地检查 + LLM intent alignment） | Phase 11 Sprint 7-5b | ✅ 完成 |
+| Intent alignment 第 4 层分支防御 — 融入 StructureReviewer LLM audit | Phase 11 Sprint 7-5b | ✅ 完成 |
+| 跨模型 judge（GPT-4o）+ Pearson r / ±1 agreement 报告 | Phase 11 Sprint 8-1 | ✅ 完成 |
+| 规则化策略 metrics（零 LLM，6 策略）+ 三角交叉验证 | Phase 11 Sprint 8-2 | ✅ 完成 |
+| 基线模式（baseline_single + baseline_self_refine）+ 8-cell sweep | Phase 11 Sprint 8-3 | ✅ 完成 |
+| Anthropic prompt caching（≥1500 chars system prompts） | Phase 11 Sprint 8-4 | ✅ 完成 |
+| 8-cell sweep 实际运行 | Phase 11 Sprint 8-5 | 🔜 待用户 --confirm 触发 |
+| Nano Banana (Gemini) 图像 provider 集成 | Phase 11 Sprint 10 | 🔜 下一步 |
+| World state 符号化追踪（flags/affinity/items + Ren'Py $ vars） | Phase 11 Sprint 9 | 🔜 8-5 数据出后 |
+| State Orchestrator (Haiku) pre-Writer 约束注入 | Phase 11 Sprint 9-6 | 🔜 Sprint 9 子项 |
+| 图像 fallback UX 升级（text-first 降级，替换 neutral-bytes copy） | Phase 11 Sprint 10-1 | 🔜 |
+| RAG ROI 转向 — lore / 实体检索（而非对白风格） | Phase 11 Sprint 10-2 | 🔜 |
+| 长篇记忆三层架构（递归摘要 + Character Bible + Persona fingerprinting） | Phase 12 Sprint 11 | 🔜 20+ scene 时启用 |
 | 异质语料作为 generation-only 策略的 fallback | Phase 10 Sprint 6-12 | 🔜 Backlog |
 | Few-shot 显式标注 pivot 位置（`>>> PIVOT <<<` 内联） | Phase 10 Sprint 6-13 | 🔜 Backlog |
+| ComfyUI + LoRA + ControlNet 工业立绘流水线 | Phase 12 | 🔜 长期规划 |
 | Suno API 音乐生成 | Phase 3 | ⏳ 待 Suno API 公开 |
 
 ---
@@ -231,6 +247,32 @@ vn-agent eval summary
   - OGG 占位音频（内联 WAV 格式，无需 ffmpeg）
   - FastAPI 后端（POST /generate, GET /status, GET /download）
   - pyproject.toml `[web]` 可选依赖（fastapi + uvicorn）
+
+### Phase 11 - 双通道 Writer + 评估严谨性 ✅ 完成（Sprint 7 + 8）
+**背景**：Phase 10 跑出首次真实 demo 后，外部架构评审（GPT/Gemini + 资深审查者）指出四个核心硬伤：
+1. **对齐诅咒**：raw VN 语料 few-shot 让 Sonnet 吸收动作感偏置，压制文学潜空间
+2. **自审 echo chamber**：Sonnet 评 Sonnet 自己作品，4.17 分水分大
+3. **没 baseline**：声称 multi-agent 有用但没对比 single-shot / self-refine
+4. **缺 symbolic state**：跨场景状态靠长上下文硬记，伸缩性崩
+
+Phase 11 就是对这批批评的系统化响应（Sprint 9/10 deferred 处理 state + 图像，见 Phase 12 roadmap）。
+
+- [x] **Sprint 7-1**: writer_mode 双通道（literary / action）+ 物理 taxonomy Writer system prompt
+  - 直接回应"对齐诅咒"：literary 模式跳过 raw few-shot 注入，靠物理 taxonomy 描述驱动；action 模式保留原 RAG 行为
+  - RAG 检索 **仍然运行**（审计）仅注入被 mode 控制
+- [x] **Sprint 7-2**: 选择性长上下文（`writer_context_window`，默认 0，开启后 Writer 看前 N 场完整对白）
+- [x] **Sprint 7-3**: Reviewer + eval judge 升 Sonnet（按用户模型选型原则：叙事分析给 Sonnet）
+- [x] **Sprint 7-5 + 7-5b**: 两层 Reviewer 架构
+  - StructureReviewer (Sonnet): outline 级 narrative audit，含 Sprint 6-10 intent alignment 融合
+  - DialogueReviewer (Sonnet): 剧本级 craft rubric — voice / subtext / arc / pacing / strategy_execution 5 维
+  - Python `_mechanical_check`: 零 LLM 前置门（行数 / ID / emotion / keyword） — Sonnet 只花在叙事判断
+  - 7 条本地 structure audit：策略枚举合法性、角色效率、策略分布、弧形状、pacing 多样性
+- [x] **Sprint 8-1**: 跨模型 judge — GPT-4o 独立评估，Pearson r + ±1 agreement 输出，< 0.3 触发 WARN
+- [x] **Sprint 8-2**: 规则化策略 metrics — 6 个策略各自的纯 Python 信号（rupture=最大情感跳、accumulate=能量 Pearson r、erode=句长下降+sentiment 衰减+省略号、uncover=专名揭示率、contest=speaker×emotion alternation、drift=decisive 信号的反面）。15 新测试。
+- [x] **Sprint 8-3**: 基线模式 — `baseline_single` 一次 Sonnet 产完整 script，`baseline_self_refine` 一次 draft + 一次 self-critique + revise；8-cell sweep ({literary, action, baseline_single, baseline_self_refine} × {lighthouse, dragon})
+- [x] **Sprint 8-4**: Anthropic prompt caching — system prompt ≥1500 chars 标 `cache_control=ephemeral`，Writer 6-18 次调用共享缓存 5 分钟 TTL，预估 $0.07-0.25/run 节省
+
+**成果**：264 → 279 tests pass。架构对抗外部批评的点位化响应（plan 有明细）。**下一步 Sprint 8-5**：用户 `--confirm` 触发 8-cell sweep，实测 ~$2.80 + judge ~$0.10。数据出来后决定 Sprint 9（world state）启停。
 
 ### Phase 10 - 工业级升级 ✅ 完成（Sprint 6-1 ~ 6-9c + fix）
 **背景**：一面后对照米哈游 game-agent 的三个面经问题（角色一致性 / 跨场景连贯 / RAG 策略），把 toy demo 提到工业级信号。
@@ -365,4 +407,4 @@ vn-agent eval summary
 - [ ] 评估框架：Writer 输出自动与 gold label 对比（strategy consistency 精细化）
 - [ ] Trace 分析工具（从 trace.json 提取瓶颈、优化建议）
 
-_最后更新: 2026-04-13_
+_最后更新: 2026-04-13（Phase 11 Sprint 7 + 8 完成）_
