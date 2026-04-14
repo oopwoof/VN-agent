@@ -23,7 +23,7 @@
 
 ## 产品状态
 
-**当前阶段**: Phase 9 Web 前端交互层完成（PRD v2 Sprint 1-3）
+**当前阶段**: Phase 10 工业级升级（Sprint 6-1 ~ 6-9c）完成 — 端到端真实 API 跑通
 
 | 功能模块 | 计划 | 状态 |
 |---------|------|------|
@@ -80,6 +80,22 @@
 | 资产管理面板（上传/替换） | Phase 9 Sprint 4 | 🔜 下一步 |
 | VN 预览播放器 | Phase 9 Sprint 4 | 🔜 下一步 |
 | 双 Key Pool + Prompt Caching | Phase 9 Sprint 5 | 🔜 后续 |
+| 场景过渡卡片（entry/exit/emotional arc） | Phase 10 Sprint 6-1 | ✅ 完成 |
+| RAG 策略 pre-filter（硬约束+软降级） | Phase 10 Sprint 6-2 | ✅ 完成 |
+| 异质语料加载器（1,036 标注 + 265k 未标注） | Phase 10 Sprint 6-3 | ✅ 完成 |
+| BM25 + 加权 RRF 混合检索 | Phase 10 Sprint 6-4 | ✅ 完成 |
+| Per-job Token Tracker（ContextVar 隔离） | Phase 10 Sprint 6-5 | ✅ 完成 |
+| Director 分支结构校验（独占下游） | Phase 10 Sprint 6-6 | ✅ 完成 |
+| Reviewer 分支语义校验（Jaccard） | Phase 10 Sprint 6-7 | ✅ 完成 |
+| Writer 智能截断 fallback（重生成） | Phase 10 Sprint 6-8 | ✅ 完成 |
+| Pre-flight 检查（key/成本/输出目录/探活） | Phase 10 Sprint 6-9a | ✅ 完成 |
+| 立绘一致性（neutral-first 参考锚点） | Phase 10 Sprint 6-9b | ✅ 完成 |
+| 真实端到端 demo 脚本 + run_meta.json | Phase 10 Sprint 6-9c | ✅ 完成 |
+| 策略 taxonomy 对齐 annotation guideline | Phase 10 Sprint 6-fix | ✅ 完成 |
+| Reviewer 阈值硬判（avg ≥ 3.5 覆盖 LLM） | Phase 10 Sprint 6-fix | ✅ 完成 |
+| Writer 注入角色 background + Reviewer 读完整对白 | Phase 10 Sprint 6-fix | ✅ 完成 |
+| Intent alignment 分支意图校验（第 4 层防御） | Phase 10 Sprint 6-10 | 🔜 下一步 |
+| Nano Banana (Gemini) 图像 provider 集成 | Phase 10 Sprint 6-11 | 🔜 下一步 |
 | Suno API 音乐生成 | Phase 3 | ⏳ 待 Suno API 公开 |
 
 ---
@@ -213,6 +229,34 @@ vn-agent eval summary
   - FastAPI 后端（POST /generate, GET /status, GET /download）
   - pyproject.toml `[web]` 可选依赖（fastapi + uvicorn）
 
+### Phase 10 - 工业级升级 ✅ 完成（Sprint 6-1 ~ 6-9c + fix）
+**背景**：一面后对照米哈游 game-agent 的三个面经问题（角色一致性 / 跨场景连贯 / RAG 策略），把 toy demo 提到工业级信号。
+
+- [x] **6-1 场景过渡卡片**：Director step2 为每对相连场景输出 `entry_context/exit_hook/emotional_arc`；Writer 独立生成每场景时天然锚定前后文，token 成本每场景只 +2-3 句，比传完整前文便宜
+- [x] **6-2 RAG 策略 pre-filter**：从 post-filter 改为硬约束 pre-filter + soft degradation（标注不够时 FAISS 补足，未标注作为 backfill 只在降级时用）
+- [x] **6-3 异质语料加载器**：1,036 标注 + 265k 未标注双层融合，id/指纹去重（标注覆盖未标注），标注永远排前
+- [x] **6-4 BM25 + weighted RRF**：FAISS=0.7 + BM25=0.3 加权融合，诚实标注"在 VN 对话语料上 BM25 边际收益有限"——方法论完整就够
+- [x] **6-5 Per-job Token Tracker**：`ContextVar` 替代模块级 singleton，多 job 并发成本隔离，数据随 blackboard 持久化
+- [x] **6-6 Director 分支结构校验**：两分支 `next_scene_id` 互斥 + 3-hop 下游独占可达集；失败自动 repair，二次失败降级为线性
+- [x] **6-7 Reviewer 分支语义校验**：Jaccard 相似度 + 角色集合 + 情绪分布三维比较，> 0.8 打 cosmetic warning（纯代码零 LLM 调用）
+- [x] **6-8 Writer 智能截断**：对话行数 < `min_dialogue_lines` 时用已有对白尾部作上下文重生成一次，失败才退化为占位符
+- [x] **6-9a Pre-flight 检查**：key 校验 + 输出目录可写性 + 成本估算（LLM+图像）+ 可选 `--ping` 探活；`vn-agent dry-run` 命令
+- [x] **6-9b 立绘一致性（neutral-first）**：先生成 neutral 作为视觉锚，happy/sad 用 neutral 图作参考（openai_gpt_image / stability 支持）；不支持 ref 的 provider 用同一 base descriptor 保证 prompt 一致；任一情绪失败拷贝 neutral bytes 作 fallback
+- [x] **6-9c 真实端到端 demo**：`scripts/run_real_demo.py` 执行 preflight → 交互确认 → 跑全链路 → 输出 `run_meta.json`（预估 vs 实际成本 + wall time + 错误列表）
+- [x] **Sprint 6-fix：策略 taxonomy 对齐**（跑 demo 时发现）
+  - `STRATEGY_MAP` 原来把 `Uncover→reveal` / `Contest→contrast` / `Drift→weave` 映射错了（语义相反），Writer 学到相反的文风
+  - 改为 identity 映射 6 个对齐标签 `accumulate/erode/rupture/uncover/contest/drift`，保留 `escalate/resolve` 作为 generation-only 额外维度
+- [x] **Sprint 6-fix：Reviewer 阈值硬判**：之前 PASS/FAIL 只看 LLM 输出首行，解析出来的 rubric 分数未参与判决。改为 `settings.reviewer_pass_threshold`（默认 3.5）作为权威，LLM 字符串作为备份
+- [x] **Sprint 6-fix：Writer 注入角色 background + Reviewer 读完整对白**：之前 Writer 只拿 personality（对白扁平）、Reviewer 只看 3 行 preview（voice 评分基本靠猜），都是可修的成本权衡
+- [x] **Sprint 6-fix：Pre-flight token 估算重新校准**：首次真实 Sonnet 跑完后发现预估低估 179%（$0.18 → $0.49）。用真实 median 重新建表，再跑估算误差 < 0.1%
+
+**首次真实 API 跑通**（2026-04-13 16:38）：
+- Theme: "Dragon slays the warrior"，6 场景，3 角色，text-only
+- Reviewer avg = 5.0/5.0，0 errors，wall 531s
+- 成本：估算 $0.492 vs 实际 $0.492（修正后）
+- 产物：`The Last Ballad of Kael Ironveil` — 6 场景叙事连贯，有潜台词、情绪切换、有意义分支
+- 已知遗留：分支 intent alignment（选项文本 vs 下游场景语义）未覆盖（待 Sprint 6-10）
+
 ### Phase 7 - 工业化迭代 ✅ 完成（Sprint 7-11）
 - [x] **Sprint 7: 评估框架 + 策略分类基准**
   - COLX_523 语料导入（1,036 条标注 VN 会话，7 策略映射到 6 个 VN-Agent 策略）
@@ -318,4 +362,4 @@ vn-agent eval summary
 - [ ] 评估框架：Writer 输出自动与 gold label 对比（strategy consistency 精细化）
 - [ ] Trace 分析工具（从 trace.json 提取瓶颈、优化建议）
 
-_最后更新: 2026-04-13_
+_最后更新: 2026-04-13（Phase 10 工业级升级完成）_

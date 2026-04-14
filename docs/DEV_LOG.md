@@ -42,6 +42,50 @@
 
 ## 开发记录
 
+### 2026-04-13 | Phase 10: 工业级升级（Sprint 6-1 ~ 6-9c + fix）
+
+**背景**：一面后对照面经三问（角色一致性 / 跨场景连贯 / RAG 策略），把 toy demo 提到工业级。11 个独立 commit，264 测试全绿，端到端真实 API 首次跑通。
+
+**按问题拆解**：
+
+1. **Q1（角色一致性）**：
+   - Sprint 6-2 在 Director step1 加 `art_direction` 字段，下游所有 sprite/bg 共用风格前缀
+   - Sprint 6-9b **neutral-first 策略**：先生成 neutral 立绘作视觉锚，happy/sad 用 neutral 图作 reference（openai_gpt_image `/v1/images/edits` / stability `image-to-image`）。不支持 ref 的 provider 用同一 base descriptor，保证 prompt 一致。任一情绪失败自动拷贝 neutral bytes，Ren'Py 永不断链
+   - 遗留：Sprint 6-11 准备接入 Nano Banana（Gemini 2.5 Flash Image，多图 ref，$0.039/图）
+
+2. **Q2（跨场景连贯）**：
+   - Sprint 6-1 **场景过渡卡片**：Director step2 为每对相连场景输出 `entry_context`（前场结尾）+ `exit_hook`（本场铺垫）+ `emotional_arc`。Writer 独立生成每场景时天然锚定前后文。token 成本每场景 +2-3 句，远比传完整前文便宜。
+
+3. **Q3（RAG 策略）**：
+   - Sprint 6-2 **策略 pre-filter**：从 post-filter 改硬约束 + soft degradation（标注不够 k 个时 FAISS 补足，未标注作 backfill 只在降级时用）
+   - Sprint 6-3 **异质语料加载器**：1,036 标注 + 265k 未标注双层融合，id/指纹去重
+   - Sprint 6-4 **BM25 + weighted RRF**：FAISS=0.7 + BM25=0.3 加权，诚实标注"在 VN 对话语料上 BM25 边际收益有限"——方法论完整就够
+   - **Sprint 6-fix**：跑 demo 时发现 `STRATEGY_MAP` 把 `Uncover→reveal / Contest→contrast / Drift→weave` 映射错了（语义相反，对齐 annotation guideline 后改为 identity 映射 6 个对齐标签 `accumulate/erode/rupture/uncover/contest/drift`，保留 `escalate/resolve` 作为 generation-only 额外维度）
+
+**工程质量补丁**：
+- Sprint 6-5 **Per-job Token Tracker**：`ContextVar` 替代模块级 singleton，多 job 成本隔离不污染
+- Sprint 6-6 **Director 分支结构校验**：两分支 target 互斥 + 3-hop 下游独占
+- Sprint 6-7 **Reviewer 分支语义校验**：Jaccard + 角色集合 + 情绪分布三维比较，> 0.8 打 cosmetic warning
+- Sprint 6-8 **Writer 智能截断**：对话行数不够时用已有对白尾部作上下文重生成一次，失败才退化占位符
+- Sprint 6-9a **Pre-flight**：key + 输出目录 + 成本估算 + `--ping` 探活，避免浪费 API
+- **Sprint 6-fix Reviewer 阈值硬判**：之前只看 LLM 首行 PASS/FAIL 字符串，解析出来的 rubric 分数未参与判决。改为 `settings.reviewer_pass_threshold`（默认 3.5）权威，LLM 字符串做备份
+- **Sprint 6-fix Writer 注入 background + Reviewer 读完整对白**：之前两个都是"成本权衡"挡箭牌——实算每场景多 ~80 tokens input、Reviewer 多 ~3500 input tokens Haiku，加起来 < 1 美分
+
+**真实跑通里程碑**：
+- 2026-04-13 16:38：首次 Anthropic Sonnet 端到端，6 场景 text-only，531s，reviewer avg 5.0/5.0，0 errors
+- 产物 `The Last Ballad of Kael Ironveil` — 对白有潜台词/情绪切换/有意义分支
+- Sprint 6-9a 成本估算首次校准：预估 $0.18 → 实际 $0.49（+179% 偏差）。用真实 median 重建 preflight 表，再跑误差 < 0.1%
+- **发现 RAG 静默失效**：`config/settings.yaml` 里 `corpus_path: "data\final_annotations.csv"` 是双引号 YAML，`\f` 被解成 form feed，`load_corpus` 报 OSError 被 except 吞掉，Writer 全程无 few-shot。改为正斜杠后 1,036 条语料正常加载，重跑验证
+
+**遗留 / 下一步**：
+- Sprint 6-10 intent alignment（第 4 层防御）：选项文本 vs 下游场景的语义耦合，需 Haiku LLM 打分
+- Sprint 6-11 Nano Banana provider 集成
+- 长上下文场景时开启 265k 未标注语料做 stylistic diversity
+
+**测试基线**：从 245 → 264 pass（Sprint 6-9b 13 新，Sprint 6-fix Reviewer 阈值 6 新）
+
+---
+
 ### 2026-04-13 | 实现 - 2026-04-13 17:03
 
 **变更文件** (2 个):
@@ -2025,4 +2069,4 @@ _（每次 commit 后更新）_
 
 ---
 
-_最后更新: 2026-04-13_
+_最后更新: 2026-04-13（Phase 10 完成）_
