@@ -40,6 +40,17 @@ async def _write_png_ref(prompt: str, reference_path: Path, output_path: Path):
     return output_path
 
 
+@pytest.fixture(autouse=True)
+def _disable_sprite_cutout(monkeypatch):
+    """Sprint 12-3b: tests write fake PNG bytes, so rembg can't decode them.
+    Disable the cutout pass so tests exercise the text/reference generation
+    path only. Real-run behavior is covered by the live rembg smoke check.
+    """
+    from vn_agent.config import get_settings
+    s = get_settings()
+    monkeypatch.setattr(s, "sprite_cutout", False, raising=False)
+
+
 class TestNeutralFirstSprites:
     @pytest.mark.asyncio
     async def test_produces_three_sprites_in_order(self, tmp_path):

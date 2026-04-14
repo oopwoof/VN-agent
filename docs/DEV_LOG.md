@@ -42,6 +42,26 @@
 
 ## 开发记录
 
+### 2026-04-14 | 实现 - 2026-04-14 09:38
+
+**变更文件** (2 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/cli.py`
+
+**测试变更** (1 文件):
+  - `tests/test_agents/test_character_designer.py`
+
+**变更统计**:
+```
+src/vn_agent/cli.py                          | 220 ++++++++++++++++++++++++++-
+ tests/test_agents/test_character_designer.py |  11 ++
+ 2 files changed, 230 insertions(+), 1 deletion(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-14 | 实现 - 2026-04-14 09:27
 
 **变更文件** (1 个):

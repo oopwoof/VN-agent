@@ -95,9 +95,20 @@ def generate(
         False, "--stream",
         help="Stream LLM tokens to console in real-time.",
     ),
+    pause_after: str = typer.Option(
+        "none", "--pause-after",
+        help="Pause the pipeline after a stage for creator review. "
+        "Choices: none | outline. 'outline' stops after Director + "
+        "state_orchestrator so you can edit vn_script.json on disk, "
+        "then run `vn-agent continue-outline --output <dir>` to resume.",
+    ),
 ) -> None:
     """Generate a visual novel from a theme."""
     setup_logging(verbose)
+
+    if pause_after not in ("none", "outline"):
+        console.print(f"[red]Invalid --pause-after: {pause_after!r} (must be none|outline)[/red]")
+        raise typer.Exit(2)
 
     console.print("\n[bold blue]VN-Agent[/bold blue] - AI Visual Novel Generator")
     console.print(f"Theme: [italic]{theme}[/italic]\n")
@@ -106,6 +117,8 @@ def generate(
         console.print("[dim]Mock mode: using fixture data, no API calls.[/dim]\n")
     if stream:
         console.print("[dim]Streaming mode: LLM tokens will display in real-time.[/dim]\n")
+    if pause_after != "none":
+        console.print(f"[yellow]Creator mode: will pause after '{pause_after}'.[/yellow]\n")
 
     script_checkpoint = output / "vn_script.json"
     if resume and script_checkpoint.exists():
@@ -114,7 +127,7 @@ def generate(
         asyncio.run(
             _generate_async(
                 theme, output, text_only, max_scenes, num_characters,
-                verbose, mock=mock, stream=stream,
+                verbose, mock=mock, stream=stream, pause_after=pause_after,
             )
         )
 
@@ -128,6 +141,7 @@ async def _generate_async(
     verbose: bool = False,
     mock: bool = False,
     stream: bool = False,
+    pause_after: str = "none",
 ) -> None:
     if mock:
         _patch_mock_llm()
@@ -162,6 +176,7 @@ async def _generate_async(
 
         try:
             final_state = {}
+            paused = False
             async for update in pipeline.astream(state, stream_mode="updates"):
                 for node_name, output_chunk in update.items():
                     if node_name != "__end__":
@@ -169,6 +184,15 @@ async def _generate_async(
                         progress.update(task, description=label)
                     if isinstance(output_chunk, dict):
                         final_state.update(output_chunk)
+                    # Sprint 12-3: creator-mode pause. state_orchestrator is
+                    # the last node before writer, so after its update lands
+                    # the outline (vn_script + characters + world_state +
+                    # state_constraints) is complete and safe to edit.
+                    if pause_after == "outline" and node_name == "state_orchestrator":
+                        paused = True
+                        break
+                if paused:
+                    break
         except Exception as e:
             import traceback
             _unpatch_mock_llm()
@@ -190,6 +214,41 @@ async def _generate_async(
     if not script:
         console.print("[red]Generation failed: no script produced[/red]")
         raise typer.Exit(1)
+
+    # Sprint 12-3: if we paused after outline, persist the sidecar state
+    # (world_state + state_constraints + run config) and stop here. The
+    # creator edits vn_script.json / characters.json on disk, then runs
+    # `vn-agent continue-outline` which loads both the sidecar and the
+    # possibly-edited files to finish the pipeline.
+    if pause_after == "outline":
+        import json as _json
+        output.mkdir(parents=True, exist_ok=True)
+        sidecar = {
+            "theme": theme,
+            "max_scenes": max_scenes,
+            "num_characters": num_characters,
+            "text_only": text_only,
+            "world_state": final_state.get("world_state", {}),
+            "state_constraints": final_state.get("state_constraints", ""),
+            "art_direction": final_state.get("art_direction", ""),
+            "structure_review_feedback": final_state.get("structure_review_feedback", ""),
+            "structure_review_issues": final_state.get("structure_review_issues", []),
+        }
+        sidecar_path = output / "outline_checkpoint.json"
+        sidecar_path.write_text(
+            _json.dumps(sidecar, indent=2, ensure_ascii=False), encoding="utf-8",
+        )
+        console.print("\n[yellow]⏸  Paused after outline.[/yellow]")
+        console.print(f"  Title:       [bold]{script.title}[/bold]")
+        console.print(f"  Scenes:      {len(script.scenes)} (dialogue empty, branches drafted)")
+        console.print(f"  Characters:  {len(characters)}")
+        console.print(f"  World vars:  {len(script.world_variables)}")
+        console.print("\nEdit these files then continue:")
+        console.print(f"  [cyan]{(output / 'vn_script.json').resolve()}[/cyan]")
+        console.print(f"  [cyan]{(output / 'characters.json').resolve()}[/cyan]")
+        console.print("\nResume with:")
+        console.print(f"  [bold]vn-agent continue-outline --output {output}[/bold]\n")
+        return
 
     # Build Ren'Py project
     output.mkdir(parents=True, exist_ok=True)
@@ -483,6 +542,165 @@ def regen(
             characters = {k: _CP.model_validate(v) for k, v in raw.items()}
         build_project(script, characters, output)
         console.print(f"[dim]Ren'Py rebuilt at {output}[/dim]")
+
+
+@app.command("continue-outline")
+def continue_outline(
+    output: Path = typer.Option(..., "--output", "-o", help="Run directory with outline_checkpoint.json"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+    mock: bool = typer.Option(False, "--mock", help="Use fixture LLM (for pipeline testing)"),
+) -> None:
+    """Sprint 12-3: resume a paused creator-mode run.
+
+    Reads the edited vn_script.json + characters.json from <output> plus
+    the outline_checkpoint.json sidecar saved when the pipeline paused,
+    then runs the writer-only graph (writer → reviewer → assets) to
+    finish the run without redoing Director / structure_reviewer /
+    state_orchestrator. Edits to outline / characters / world-var
+    initials survive into the finished VN.
+    """
+    setup_logging(verbose)
+
+    sidecar_path = output / "outline_checkpoint.json"
+    script_path = output / "vn_script.json"
+
+    if not sidecar_path.exists():
+        console.print(
+            f"[red]No outline_checkpoint.json in {output} — "
+            f"was the run paused with --pause-after outline?[/red]"
+        )
+        raise typer.Exit(1)
+    if not script_path.exists():
+        console.print(f"[red]No vn_script.json in {output}[/red]")
+        raise typer.Exit(1)
+
+    asyncio.run(_continue_outline_async(output, verbose=verbose, mock=mock))
+
+
+async def _continue_outline_async(
+    output: Path,
+    verbose: bool = False,
+    mock: bool = False,
+) -> None:
+    import json as _json
+
+    from vn_agent.agents.graph import build_writer_graph
+    from vn_agent.observability.tracing import reset_trace
+    from vn_agent.schema.character import CharacterProfile
+    from vn_agent.schema.script import VNScript
+
+    if mock:
+        _patch_mock_llm()
+    trace = reset_trace()
+
+    # Load sidecar + possibly-edited script/characters
+    sidecar = _json.loads((output / "outline_checkpoint.json").read_text(encoding="utf-8"))
+    try:
+        script = VNScript.model_validate_json(
+            (output / "vn_script.json").read_text(encoding="utf-8")
+        )
+    except Exception as e:
+        console.print(f"[red]Edited vn_script.json failed schema validation: {e}[/red]")
+        raise typer.Exit(1)
+
+    characters: dict[str, CharacterProfile] = {}
+    if (output / "characters.json").exists():
+        try:
+            raw = _json.loads((output / "characters.json").read_text(encoding="utf-8"))
+            characters = {k: CharacterProfile.model_validate(v) for k, v in raw.items()}
+        except Exception as e:
+            console.print(f"[red]Edited characters.json failed schema validation: {e}[/red]")
+            raise typer.Exit(1)
+
+    # Re-seed world_state from (possibly edited) world_variables so creator
+    # edits to initial_value take effect. state_constraints stays as-was —
+    # re-running state_orchestrator on edited state is future work (12-3c).
+    world_state = {v.name: v.initial_value for v in script.world_variables}
+
+    state: dict = {
+        "theme": sidecar.get("theme", ""),
+        "vn_script": script,
+        "characters": characters,
+        "revision_count": 0,
+        "review_passed": False,
+        "review_feedback": "",
+        "structure_review_passed": True,
+        "structure_review_feedback": sidecar.get("structure_review_feedback", ""),
+        "structure_review_issues": sidecar.get("structure_review_issues", []),
+        "assets_generated": False,
+        "output_dir": str(output),
+        "messages": [],
+        "errors": [],
+        "text_only": sidecar.get("text_only", False),
+        "max_scenes": sidecar.get("max_scenes", 10),
+        "num_characters": sidecar.get("num_characters", 3),
+        "art_direction": sidecar.get("art_direction", ""),
+        "world_state": world_state,
+        "state_constraints": sidecar.get("state_constraints", ""),
+    }
+
+    pipeline = build_writer_graph()
+
+    console.print(f"Continuing from paused outline: [bold]{script.title}[/bold]")
+    console.print(f"  Scenes to write: {len(script.scenes)}")
+    console.print(f"  Characters:      {len(characters)}\n")
+
+    step_labels = {
+        "writer": "Writer: Writing dialogue...",
+        "reviewer": "Reviewer: Checking script...",
+        "asset_generation": "Assets: sprites + backgrounds + BGM...",
+    }
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Resuming...", total=None)
+        try:
+            final_state = dict(state)
+            async for update in pipeline.astream(state, stream_mode="updates"):
+                for node_name, output_chunk in update.items():
+                    if node_name != "__end__":
+                        progress.update(task, description=step_labels.get(node_name, f"[{node_name}]..."))
+                    if isinstance(output_chunk, dict):
+                        final_state.update(output_chunk)
+        except Exception as e:
+            import traceback
+            _unpatch_mock_llm()
+            console.print(f"\n[red]Error during continue-outline: {e}[/red]")
+            if verbose:
+                console.print(traceback.format_exc())
+            raise typer.Exit(1)
+
+    _unpatch_mock_llm()
+    final_script = final_state.get("vn_script", script)
+    final_characters = final_state.get("characters", characters)
+    errors = final_state.get("errors", [])
+
+    if errors:
+        console.print("\n[yellow]Warnings:[/yellow]")
+        for err in errors:
+            console.print(f"  - {err}")
+
+    output.mkdir(parents=True, exist_ok=True)
+    build_project(final_script, final_characters, output)
+
+    from vn_agent.services.token_tracker import tracker
+    if tracker.calls:
+        console.print(f"\n[dim]{tracker.summary()}[/dim]")
+    console.print(f"\n[dim]{trace.summary()}[/dim]")
+    try:
+        trace.save(output)
+    except Exception:
+        pass
+
+    console.print("\n[green][OK] Continue complete![/green]")
+    console.print(f"  Title:      [bold]{final_script.title}[/bold]")
+    console.print(f"  Scenes:     {len(final_script.scenes)}")
+    console.print(f"  Characters: {len(final_characters)}")
+    console.print(f"  Output:     {output.resolve()}")
+    console.print(f"\nRun with Ren'Py: [italic]renpy {output.resolve()}[/italic]\n")
 
 
 eval_app = typer.Typer(help="Evaluation commands")
