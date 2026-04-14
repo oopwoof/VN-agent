@@ -437,6 +437,54 @@ def compile(
     console.print(f"[green][OK] Compiled to {output.resolve()}[/green]")
 
 
+@app.command()
+def regen(
+    scene_id: str = typer.Argument(..., help="Scene id to regenerate (e.g. ch3_the_ascent)"),
+    output: Path = typer.Option(..., "--output", "-o", help="Run directory with vn_script.json"),
+    feedback: str = typer.Option("", "--feedback", "-f", help="Optional revision feedback"),
+    recompile: bool = typer.Option(True, "--recompile/--no-recompile", help="Rebuild Ren'Py project after regen"),
+) -> None:
+    """Sprint 12-4: rewrite a single scene without re-running the pipeline.
+
+    Loads vn_script.json from the run directory, walks state_writes up
+    to the target scene to rebuild world_state, runs Writer just for
+    that scene, persists the update, and (by default) recompiles the
+    Ren'Py project so the change is visible without a separate step.
+    """
+    import asyncio as _asyncio
+
+    from vn_agent.agents.local_regen import RegenError, regenerate_scene
+
+    try:
+        summary = _asyncio.run(regenerate_scene(output, scene_id, feedback))
+    except RegenError as e:
+        console.print(f"[red]Regen failed: {e}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green][OK] Regenerated scene '{scene_id}'[/green]")
+    console.print(f"  Dialogue lines: {summary['old_dialogue_count']} → {summary['new_dialogue_count']}")
+    console.print(f"  Wall time: {summary['wall_seconds']}s")
+    if summary["state_writes_changed"]:
+        console.print(
+            "  [yellow]! state_writes changed — downstream scenes may "
+            "be inconsistent. Consider regenerating them too.[/yellow]"
+        )
+
+    if recompile:
+        import json as _json
+        script_path = output / "vn_script.json"
+        chars_path = output / "characters.json"
+        from vn_agent.schema.character import CharacterProfile as _CP
+        from vn_agent.schema.script import VNScript as _VN
+        script = _VN.model_validate_json(script_path.read_text(encoding="utf-8"))
+        characters: dict = {}
+        if chars_path.exists():
+            raw = _json.loads(chars_path.read_text(encoding="utf-8"))
+            characters = {k: _CP.model_validate(v) for k, v in raw.items()}
+        build_project(script, characters, output)
+        console.print(f"[dim]Ren'Py rebuilt at {output}[/dim]")
+
+
 eval_app = typer.Typer(help="Evaluation commands")
 app.add_typer(eval_app, name="eval")
 
