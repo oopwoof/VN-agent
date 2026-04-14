@@ -14,7 +14,7 @@ from vn_agent.prompts.templates import (
 )
 from vn_agent.schema.character import CharacterProfile
 from vn_agent.schema.music import Mood, MusicCue
-from vn_agent.schema.script import BranchOption, Scene, VNScript
+from vn_agent.schema.script import BranchOption, Scene, VNScript, WorldVariable
 from vn_agent.services.llm import ainvoke_llm
 from vn_agent.strategies.narrative import format_strategies_for_prompt
 
@@ -116,10 +116,21 @@ async def run_director(state: AgentState) -> dict:
     if not art_direction:
         art_direction = "painterly anime style, consistent color palette, atmospheric lighting"
 
+    # Sprint 9-2: seed world_state from declared initial_values so
+    # StateOrchestrator (9-6) and downstream scenes see the starting
+    # symbolic state.
+    world_state: dict = {v.name: v.initial_value for v in script.world_variables}
+    if world_state:
+        logger.info(
+            f"Director declared {len(world_state)} world variables: "
+            f"{list(world_state.keys())}"
+        )
+
     return {
         "vn_script": script,
         "characters": characters,
         "art_direction": art_direction,
+        "world_state": world_state,
     }
 
 
@@ -192,8 +203,35 @@ Return ONLY this JSON (no branches, no music yet):
       "background": "Brief backstory",
       "role": "protagonist"
     }}
+  ],
+  "world_variables": [
+    {{
+      "name": "manuscript_read",
+      "type": "bool",
+      "initial_value": false,
+      "description": "Whether Mira has read the crucial manuscript"
+    }},
+    {{
+      "name": "affinity_kael_mira",
+      "type": "int",
+      "initial_value": 3,
+      "description": "Emotional closeness between Kael and Mira (0-10)"
+    }}
   ]
-}}"""
+}}
+
+## world_variables (Sprint 9-1)
+
+Declare 0-5 symbolic state variables the story will track across \
+scenes. These are NOT for every small detail — use them for:
+  - Flags that gate branches ("has_seen_the_truth")
+  - Relationship affinity / trust values (0-10 ints)
+  - Item/possession flags ("has_key", "has_letter")
+  - Mutually-exclusive enum states (e.g. "weather" with \
+enum_values ["clear","storm","fog"])
+
+Leave `world_variables: []` for simple linear stories without state \
+gating. Only declare variables the story will actually read or write."""
 
     response = await ainvoke_llm(system, user_prompt, model=settings.llm_director_model, caller="director/step1")
     content = response.content if hasattr(response, "content") else str(response)
@@ -235,24 +273,45 @@ Return JSON: {example}
 Output ONLY JSON."""
     else:
         system = _SYSTEM_DETAILS
+        # Sprint 9-2: thread world_variables through so Director can wire
+        # each scene's state_reads / state_writes / branch.requires to the
+        # variables it declared in step1.
+        world_vars = outline.get("world_variables") or []
+        world_vars_block = ""
+        if world_vars:
+            world_vars_lines = [
+                f"  - {v['name']} ({v['type']}, starts {v.get('initial_value')!r}): "
+                f"{v.get('description', '')[:80]}"
+                for v in world_vars
+            ]
+            world_vars_block = (
+                "\n\nWorld variables declared in step1 (use these in state_reads / "
+                "state_writes / branch.requires):\n" + "\n".join(world_vars_lines)
+            )
+
         user_prompt = f"""You have this scene list:
 {scene_list}
 
 All valid scene IDs: {json.dumps(scene_ids)}
-Start scene: {outline.get("start_scene_id", "")}
+Start scene: {outline.get("start_scene_id", "")}{world_vars_block}
 
-For EACH scene, specify navigation, music, AND transition cards. Return this JSON:
+For EACH scene, specify navigation, music, transition cards, AND state I/O. Return this JSON:
 {{
   "scenes": [
     {{
       "id": "ch1_opening",
       "next_scene_id": "ch1_next_or_null",
-      "branches": [{{"text": "Choice text", "next_scene_id": "valid_scene_id"}}],
+      "branches": [
+        {{"text": "Choice text", "next_scene_id": "valid_scene_id",
+          "requires": {{}}}}
+      ],
       "music_mood": "peaceful",
       "music_description": "soft piano",
       "emotional_arc": "curiosity -> unease",
       "entry_context": "What the player just experienced (for non-start scenes)",
-      "exit_hook": "How this scene should end to set up the next"
+      "exit_hook": "How this scene should end to set up the next",
+      "state_reads": [],
+      "state_writes": {{}}
     }}
   ]
 }}
@@ -265,7 +324,13 @@ Rules:
 - **Transition cards**: entry_context describes the prior scene's ending mood/event \
 (leave empty "" for the start scene). exit_hook describes what this scene sets up \
 (leave empty "" for terminal scenes with no successor). emotional_arc is short, \
-like "warmth -> anticipation" or "hope -> despair"."""
+like "warmth -> anticipation" or "hope -> despair".
+- **State I/O (Sprint 9-1)**: state_reads lists world_variables this scene's \
+dialogue depends on (empty [] if none). state_writes maps variable → new value \
+for changes made by this scene (empty {{}} if none). branch.requires maps \
+variable → expected value as a symbolic visibility guard (empty {{}} = always \
+visible). Only reference variables from the declared list above. If no \
+world_variables were declared, all three stay empty."""
 
     response = await ainvoke_llm(
         system, user_prompt, model=settings.llm_director_model, caller="director/step2",
@@ -296,6 +361,9 @@ def _merge_outline_details(outline: dict, details: dict) -> dict:
         merged["emotional_arc"] = d.get("emotional_arc") or None
         merged["entry_context"] = d.get("entry_context") or None
         merged["exit_hook"] = d.get("exit_hook") or None
+        # Sprint 9-2: state I/O from step2
+        merged["state_reads"] = d.get("state_reads") or []
+        merged["state_writes"] = d.get("state_writes") or {}
         merged_scenes.append(merged)
     # Filter out invalid branch/next_scene_id references from step2
     valid_ids = {s["id"] for s in merged_scenes}
@@ -606,7 +674,12 @@ def _build_from_plan(plan: dict, theme: str) -> tuple[VNScript, dict[str, Charac
 
         # Build branches — handle null from LLM
         branches = [
-            BranchOption(text=b["text"], next_scene_id=b["next_scene_id"])
+            BranchOption(
+                text=b["text"],
+                next_scene_id=b["next_scene_id"],
+                # Sprint 9-1: symbolic guard on visibility
+                requires=b.get("requires") or {},
+            )
             for b in (s.get("branches") or [])
             if b and b.get("text") and b.get("next_scene_id")
         ]
@@ -626,8 +699,19 @@ def _build_from_plan(plan: dict, theme: str) -> tuple[VNScript, dict[str, Charac
             entry_context=s.get("entry_context") or None,
             exit_hook=s.get("exit_hook") or None,
             emotional_arc=s.get("emotional_arc") or None,
+            # Sprint 9-1: symbolic state I/O
+            state_reads=s.get("state_reads") or [],
+            state_writes=s.get("state_writes") or {},
         )
         scenes.append(scene)
+
+    # Sprint 9-1: Director-declared world variables
+    world_variables: list[WorldVariable] = []
+    for v in plan.get("world_variables") or []:
+        try:
+            world_variables.append(WorldVariable(**v))
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Skipped invalid world_variable {v.get('name', '?')}: {e}")
 
     script = VNScript(
         title=plan.get("title", "Untitled Story"),
@@ -636,5 +720,6 @@ def _build_from_plan(plan: dict, theme: str) -> tuple[VNScript, dict[str, Charac
         start_scene_id=plan.get("start_scene_id", scenes[0].id if scenes else ""),
         scenes=scenes,
         characters=list(characters.keys()),
+        world_variables=world_variables,
     )
     return script, characters
