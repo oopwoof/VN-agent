@@ -78,21 +78,54 @@ def _get_llm_cached(
         return ChatOpenAI(**kwargs)
 
 
+def _infer_provider_from_model(model: str) -> str | None:
+    """Infer the API provider from a model name when the caller hasn't
+    explicitly set one. Lets Sprint 8-1 cross-model judging pass
+    model='gpt-4o' and have it routed to OpenAI even though the pipeline
+    default is Anthropic.
+    """
+    lower = model.lower()
+    if lower.startswith("claude"):
+        return "anthropic"
+    if lower.startswith("gpt") or lower.startswith("o1") or lower.startswith("o3"):
+        return "openai"
+    if lower.startswith("gemini"):
+        return "google_gemini"  # future: add gemini langchain provider
+    return None
+
+
 def get_llm(model: str | None = None):
-    """Get configured LLM instance (cached per model)."""
+    """Get configured LLM instance (cached per model).
+
+    Sprint 8-1 fix: when `model` is an OpenAI name (gpt-*, o1-*) but the
+    pipeline provider is Anthropic (or vice versa), override the provider
+    based on the model name. Prevents the Sonnet reviewer's cross-model
+    judge calls to gpt-4o from being routed to Anthropic (which returns
+    a 404 for unknown model names).
+    """
     settings = get_settings()
     resolved_model = model or settings.llm_model
 
-    # Explicit api_key override takes priority; then provider-specific env key
+    # Determine effective provider. Explicit base_url always wins (custom
+    # OpenAI-compatible endpoints like Ollama). Otherwise, if the model
+    # name clearly belongs to a different provider than the pipeline
+    # default, swap.
+    effective_provider = settings.llm_provider
+    if not settings.llm_base_url:
+        inferred = _infer_provider_from_model(resolved_model)
+        if inferred and inferred != effective_provider and inferred in {"anthropic", "openai"}:
+            effective_provider = inferred
+
+    # Explicit api_key override wins; then provider-specific env key
     if settings.llm_api_key:
         api_key = settings.llm_api_key
-    elif settings.llm_provider == "anthropic":
+    elif effective_provider == "anthropic":
         api_key = settings.anthropic_api_key
     else:
         api_key = settings.openai_api_key
 
     return _get_llm_cached(
-        settings.llm_provider,
+        effective_provider,
         resolved_model,
         settings.llm_temperature,
         settings.llm_max_tokens,
