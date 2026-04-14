@@ -38,7 +38,13 @@ image {{ bg_id }} = "images/backgrounds/{{ bg_id }}.png"
 # instead of getting the head clipped at the top. Characters dim to 70%
 # when not actively speaking (Sprint 12 dialogue polish).
 transform vn_sprite_base:
-    zoom 0.78
+    # Our sprites are ~864×1184 (3:4). At zoom 1.0 they exceed 1080 in
+    # height and a scaled-down crop inevitably clips the top of the
+    # head or overlaps the textbox. 0.55 lands the full-body sprite at
+    # ~650px tall — leaves ~430px from crown to textbox edge for BG
+    # context, which is the VN-industry-standard framing (see Fata
+    # Morgana, Umineko, Never7).
+    zoom 0.55
     yanchor 1.0
     ypos 1.0
     subpixel True

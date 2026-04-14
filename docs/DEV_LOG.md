@@ -42,6 +42,24 @@
 
 ## 开发记录
 
+### 2026-04-14 | 实现 - 2026-04-14 13:58
+
+**变更文件** (2 个):
+**源码变更** (2 文件):
+  - `src/vn_agent/compiler/templates/gui.rpy.j2`
+  - `src/vn_agent/compiler/templates/init.rpy.j2`
+
+**变更统计**:
+```
+src/vn_agent/compiler/templates/gui.rpy.j2  | 64 +++++++++++++++++++++++++----
+ src/vn_agent/compiler/templates/init.rpy.j2 |  8 +++-
+ 2 files changed, 62 insertions(+), 10 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-14 | 实现 - 2026-04-14 13:53
 
 **变更文件** (6 个):

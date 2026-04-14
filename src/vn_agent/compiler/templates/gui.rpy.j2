@@ -104,17 +104,26 @@ screen say(who, what):
             ypos 720  ## sits just above the 300px textbox at ypos 780
             text who id "who" style "nameplate_text"
 
-    ## Textbox panel — gradient backdrop + body text + CTC arrow
+    ## Textbox panel — gradient backdrop + body text + CTC arrow.
+    ## IMPORTANT: `window` is anchored bottom-center of the screen.
+    ## xsize must be explicitly 1920 so the text xmaximum inside stays
+    ## within the visible frame; without it, window's default width is
+    ## 'fill' which nests weirdly and lets text overflow the right edge.
     window:
         id "window"
         background "textbox_bg"
+        xsize 1920
         ysize gui.textbox_height
+        xalign 0.5
         yalign gui.textbox_yalign
 
         text what id "what":
             xpos gui.textbox_xpadding
             ypos gui.textbox_ypadding_top
-            xsize 1920 - 2 * gui.textbox_xpadding
+            ## xmaximum is the wrap width (content is allowed to be
+            ## smaller); xsize forces a fixed width which can overflow.
+            ## Use xmaximum and trust word-wrap.
+            xmaximum 1920 - 2 * gui.textbox_xpadding
             size gui.text_size
             color gui.text_color
             line_spacing gui.text_line_spacing
@@ -123,6 +132,46 @@ screen say(who, what):
         add "ctc":
             xalign 0.98
             yalign 0.92
+
+## ── Custom choice screen ───────────────────────────────────────────
+## Player-facing branches render as floating buttons stacked in the
+## middle of the screen, NOT inside the dialogue box. The backdrop
+## dims to ~50% so focus jumps to the choices without hiding the
+## scene entirely (player remembers what prompted the decision).
+screen choice(items):
+    style_prefix "vn_choice"
+
+    ## Scene dimmer — a full-screen low-alpha solid that kills
+    ## distraction without blacking out the BG entirely.
+    add Solid("#000000a0")
+
+    ## Choice stack, vertically centered. Works for 2-4 items cleanly;
+    ## 5+ would want a scroll viewport (rare in VN design).
+    vbox:
+        xalign 0.5
+        yalign 0.5
+        spacing 28
+
+        for i in items:
+            textbutton i.caption:
+                action i.action
+                style "vn_choice_button"
+
+style vn_choice_button is default:
+    background Frame(Solid("#1a2030e8"), 40, 20)
+    hover_background Frame(Solid("#3a4a70f0"), 40, 20)
+    padding (48, 22)
+    xsize 900
+    xalign 0.5
+
+style vn_choice_button_text is default:
+    font gui.text_font
+    size 28
+    color "#e8d49a"
+    hover_color "#ffe8a0"
+    outlines [(2, "#000000d8", 0, 0)]
+    xalign 0.5
+    text_align 0.5
 
 style nameplate_frame:
     background "nameplate_bg"
@@ -134,10 +183,7 @@ style nameplate_text:
     outlines gui.name_text_outlines
     font gui.name_text_font
 
-## ── Choice menu ───────────────────────────────────────────────────
-## Wider, more breathable hit targets; hover state brightens to gold.
-define gui.choice_button_width = 1080
-define gui.choice_button_height = 72
-define gui.choice_button_text_size = 24
-define gui.choice_button_text_color = "#e2d9c2"
-define gui.choice_button_text_hover_color = "#ffe0a0"
+## NOTE: the legacy gui.choice_button_* defines are intentionally omitted.
+## Our custom `screen choice` above uses the vn_choice_button style block
+## directly, so Ren'Py's default menu screen (which reads gui.choice_*)
+## is never invoked. Keeps the GUI source a single source of truth.
