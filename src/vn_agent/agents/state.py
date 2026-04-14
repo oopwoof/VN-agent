@@ -1,7 +1,7 @@
 """LangGraph shared state TypedDict for VN-Agent pipeline."""
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -50,6 +50,14 @@ class AgentState(dict):
     max_scenes: int
     num_characters: int
     art_direction: str
+    # Sprint 9-1: live symbolic state — populated from
+    # VNScript.world_variables at init time, mutated by each scene's
+    # state_writes, consumed by StateOrchestrator (9-6) to compile
+    # narrative constraints for Writer.
+    world_state: dict[str, Any]
+    # Sprint 9-6: compiled constraint text from StateOrchestrator.
+    # Written by structure_orchestrator node, read by Writer.
+    state_constraints: str
 
 
 def initial_state(
@@ -78,4 +86,6 @@ def initial_state(
         "max_scenes": max_scenes,
         "num_characters": num_characters,
         "art_direction": "",
+        "world_state": {},
+        "state_constraints": "",
     }

@@ -25,3 +25,14 @@ class CharacterProfile(BaseModel):
     background: str = Field(description="Character backstory and motivation")
     role: str = Field(description="Role in the story, e.g. 'protagonist', 'love interest', 'antagonist'")
     visual: VisualProfile | None = Field(default=None, description="Visual design, filled by CharacterDesigner")
+    # Sprint 9-1 (immutability constitution): per-attribute lock scores.
+    # Higher score = more inviolable. DialogueReviewer (Sprint 9-5) fails
+    # scripts where Writer dialogue contradicts a high-score attribute.
+    # Keys are attribute names ('name', 'role', 'personality', ...);
+    # values in [0, 10]. Missing key = 0 (not protected).
+    # Defaults protect the two attributes a Writer must never change.
+    immutability_score: dict[str, int] = Field(
+        default_factory=lambda: {"name": 10, "role": 10, "background": 6, "personality": 4},
+        description="{attribute_name: lock_score 0-10}. 10 = Reviewer FAIL on "
+                    "contradiction. 0 = free for Writer to evolve.",
+    )
