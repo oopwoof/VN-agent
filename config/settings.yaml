@@ -16,12 +16,16 @@ llm:
   api_key: ""    # explicit key (use "ollama" as dummy for local servers)
 
   # Per-agent model overrides (balance quality vs cost)
-  director_model: claude-sonnet-4-6          # complex planning — keep sonnet
-  writer_model: claude-sonnet-4-6            # dialogue quality — keep sonnet
-  reviewer_model: claude-haiku-4-5-20251001        # structural + short quality check — haiku sufficient
-  character_designer_model: claude-haiku-4-5-20251001  # simple JSON visual profile — haiku
-  scene_artist_model: claude-haiku-4-5-20251001       # prompt formatting — haiku
-  music_director_model: claude-haiku-4-5-20251001     # mood assignment — haiku
+  # Rule (Sprint 7-3): Sonnet = narrative analysis / structural diagnosis /
+  # style comparison / high-level suggestions. Haiku = quick local checks,
+  # simple polishing, single-item batch processing.
+  director_model: claude-sonnet-4-6          # narrative structure — sonnet
+  writer_model: claude-sonnet-4-6            # dialogue craft — sonnet
+  reviewer_model: claude-sonnet-4-6          # full-script rubric + diagnosis — sonnet (was haiku; Sprint 7-3)
+  character_designer_model: claude-haiku-4-5-20251001  # 1-shot visual profile JSON — haiku
+  scene_artist_model: claude-haiku-4-5-20251001       # single prompt formatting — haiku
+  music_director_model: claude-haiku-4-5-20251001     # mood classification — haiku
+  judge_model: claude-sonnet-4-6             # eval_strategy_adherence per-scene judge — sonnet (Sprint 7-3)
 
 image_gen:
   provider: openai  # openai | stability

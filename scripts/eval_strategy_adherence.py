@@ -90,7 +90,10 @@ async def _judge_scene(scene, strategy: str) -> tuple[int, str]:
     settings = get_settings()
     response = await ainvoke_llm(
         JUDGE_SYSTEM, prompt,
-        model=settings.llm_reviewer_model,
+        # Sprint 7-3: judge is its own config field (default Sonnet). Decoupled
+        # from reviewer so eval remains rigorous even if pipeline reviewer is
+        # swapped for cheaper models.
+        model=settings.llm_judge_model,
         caller=f"judge/{scene.id}/{strategy}",
     )
     content = (response.content if hasattr(response, "content") else str(response)).strip()

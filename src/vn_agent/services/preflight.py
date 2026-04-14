@@ -111,7 +111,9 @@ def estimate_cost(
     #   director_step1:   in≈1400 out≈3700  (thinking blocks inflate output)
     #   director_step2:   in≈900  out≈7200  (entry_context + exit_hook + branches)
     #   writer (×6):      in≈1100 out≈3250  (max_dialogue_lines=20 usually filled)
-    #   reviewer (Haiku): in≈5300 out≈1300  (now reads FULL dialogue post-6-9c)
+    #   reviewer:        in≈5300 out≈1300  (reads FULL dialogue; model now
+    #                    Sonnet per Sprint 7-3, rate auto-applied via
+    #                    settings.llm_reviewer_model lookup below)
     # Previous values under-estimated total spend by ~3x.
     MEDIAN_TOK = {
         "director_step1": (1400, 3700),
