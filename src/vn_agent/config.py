@@ -39,11 +39,15 @@ class Settings(BaseSettings):
     # Per-agent model overrides
     llm_director_model: str = "claude-sonnet-4-6"
     llm_writer_model: str = "claude-sonnet-4-6"
-    # Sprint 7-5: DialogueReviewer is back to Haiku — it checks mechanical
-    # execution (line counts, character IDs, emotion tags, keyword presence).
-    # Narrative/structural judgment moved upstream to structure_reviewer which
-    # runs BEFORE Writer and catches bad plans cheaply.
-    llm_reviewer_model: str = "claude-haiku-4-5-20251001"
+    # Sprint 7-5b: DialogueReviewer is Sonnet. Earlier iterations tried
+    # Haiku-only or Sonnet-only; both failed differently (Haiku rubber-stamped
+    # at 5.0, Sonnet alone handled mechanical issues at full-model cost).
+    # Final architecture: Python _mechanical_check() gates first (cheap,
+    # deterministic), Sonnet reviewer only fires on structurally-valid output
+    # where its narrative judgment (voice/subtext/arc/pacing) actually adds
+    # value. Structural duplication with structure_reviewer avoided by
+    # scoping Reviewer's prompt to craft dimensions only.
+    llm_reviewer_model: str = "claude-sonnet-4-6"
     llm_structure_reviewer_model: str = "claude-sonnet-4-6"  # narrative audit
     llm_character_designer_model: str = "claude-haiku-4-5-20251001"
     llm_scene_artist_model: str = "claude-haiku-4-5-20251001"

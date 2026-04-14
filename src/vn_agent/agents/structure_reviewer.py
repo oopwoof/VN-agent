@@ -205,6 +205,32 @@ def _local_structural_audit(
             f"'{strategies[0]}' — arc is flat"
         )
 
+    # 2b. Strategy diversity for longer scripts: need at least 3 distinct
+    # strategies if there are 5+ scenes, otherwise the narrative arc is thin
+    # regardless of which single strategy is over-represented.
+    if len(strategies) >= 5 and len(set(strategies)) < 3:
+        issues.append(
+            f"{len(strategies)} scenes but only "
+            f"{len(set(strategies))} distinct strategies — "
+            f"arc lacks beginning/middle/end contrast"
+        )
+
+    # 2c. Emotional arc shape: expect a "rising" or "rising-falling" shape.
+    # Sprint 7-5b heuristic: if the LAST scene's strategy is one of the
+    # "early" strategies (drift/accumulate) with no resolution-style ending
+    # anywhere, the story has no landing.
+    early_strategies = {"drift", "accumulate"}
+    ending_strategies = {"resolve", "uncover", "rupture"}
+    if len(strategies) >= 4:
+        last = strategies[-1]
+        has_ending = any(s in ending_strategies for s in strategies)
+        if last in early_strategies and not has_ending:
+            issues.append(
+                f"final scene strategy '{last}' is an opening-type "
+                f"strategy and no ending-type strategy (resolve/uncover/"
+                f"rupture) appears anywhere — story has no landing"
+            )
+
     # 3. Sprint 6-13 tag: if Director emits a non-enum strategy value,
     # downstream Writer/Reviewer/Judge all get confused (see "branch"
     # hallucination in sweep cell vn_20260413_194624).

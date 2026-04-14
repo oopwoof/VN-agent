@@ -33,19 +33,37 @@ async def run_reviewer(state: AgentState) -> dict:
             "revision_count": state.get("revision_count", 0) + 1,
         }
 
-    # First run structural checks (fast, no LLM needed)
+    # Sprint 7-5b review flow:
+    #   1. Structural check (scene graph reachability, branch targets valid)
+    #   2. Mechanical check (line counts, character IDs, emotion tags)
+    #   3. LLM quality check (Sonnet, craft rubric only — voice/subtext/arc)
+    # The first two are pure Python, deterministic, cheap. If either fails
+    # we return precise feedback without spending a Sonnet call — the
+    # feedback is already actionable ("scene X has 2 lines, needs 5-20").
     structural_result = _structural_check(script)
-
     if not structural_result.passed:
-        logger.info(f"Reviewer found {len(structural_result.issues)} structural issues")
+        logger.info(f"Reviewer: {len(structural_result.issues)} structural issues")
         return {
             "review_passed": False,
             "review_feedback": structural_result.feedback,
             "revision_count": state.get("revision_count", 0) + 1,
         }
 
-    # Then LLM quality check (can be skipped for budget-sensitive runs)
+    characters = state.get("characters", {}) or {}
     settings = get_settings()
+    mechanical_result = _mechanical_check(script, characters, settings)
+    if not mechanical_result.passed:
+        logger.info(
+            f"Reviewer: {len(mechanical_result.issues)} mechanical issues "
+            f"(skipping LLM quality check — Writer must fix format first)"
+        )
+        return {
+            "review_passed": False,
+            "review_feedback": mechanical_result.feedback,
+            "revision_count": state.get("revision_count", 0) + 1,
+        }
+
+    # Then LLM quality check (can be skipped for budget-sensitive runs)
     if settings.reviewer_skip_llm:
         logger.info("Reviewer: skipping LLM quality check (reviewer_skip_llm=True)")
         result = structural_result
@@ -82,6 +100,74 @@ async def run_reviewer(state: AgentState) -> dict:
         "review_scores": result.scores,
         "revision_count": state.get("revision_count", 0) + 1,
     }
+
+
+_VALID_EMOTIONS = {
+    "neutral", "happy", "sad", "angry", "surprised",
+    "scared", "thoughtful", "loving", "determined",
+}
+
+
+def _mechanical_check(
+    script: VNScript, characters: dict, settings,
+) -> ReviewResult:
+    """Pure-Python format audit — fails fast on writer output defects.
+
+    Runs between _structural_check (scene graph) and _quality_check (LLM
+    craft judgment). Catches defects that need Writer to fix the output
+    format rather than improve the craft:
+      - dialogue line count outside [min_dialogue_lines, max_dialogue_lines]
+      - character_id values that don't match the cast
+      - emotion tags outside the enum Ren'Py knows about
+      - empty dialogue (no lines at all)
+
+    Keeps the Sonnet reviewer free to focus on narrative craft — if
+    it's brought in at all, the script is at least mechanically valid.
+    """
+    issues: list[str] = []
+    cast = set(characters.keys())
+
+    min_lines = settings.min_dialogue_lines
+    max_lines = settings.max_dialogue_lines
+
+    for scene in script.scenes:
+        n = len(scene.dialogue)
+        if n == 0:
+            issues.append(f"Scene '{scene.id}': no dialogue lines written")
+            continue
+        if n < min_lines:
+            issues.append(
+                f"Scene '{scene.id}': {n} lines (need at least {min_lines})"
+            )
+        elif n > max_lines:
+            issues.append(
+                f"Scene '{scene.id}': {n} lines (max {max_lines})"
+            )
+
+        for i, line in enumerate(scene.dialogue, 1):
+            cid = line.character_id
+            # character_id=None is valid (narration)
+            if cid is not None and cast and cid not in cast:
+                issues.append(
+                    f"Scene '{scene.id}' line {i}: character_id '{cid}' "
+                    f"not in cast {sorted(cast)}"
+                )
+            if line.emotion and line.emotion not in _VALID_EMOTIONS:
+                issues.append(
+                    f"Scene '{scene.id}' line {i}: emotion '{line.emotion}' "
+                    f"not in valid set"
+                )
+
+    if not issues:
+        return ReviewResult(passed=True, feedback="Mechanical checks passed", issues=[])
+
+    feedback = (
+        "Mechanical/format issues found — these must be fixed before craft review:\n"
+        + "\n".join(f"- {i}" for i in issues[:20])  # cap feedback size
+    )
+    if len(issues) > 20:
+        feedback += f"\n... and {len(issues) - 20} more"
+    return ReviewResult(passed=False, feedback=feedback, issues=issues)
 
 
 def _structural_check(script: VNScript) -> ReviewResult:
@@ -239,11 +325,17 @@ def _parse_scores(text: str) -> dict[str, float] | None:
     scores: dict[str, float] = {}
     # Match patterns like "coherence=4" or "coherence: 4" or "Narrative Coherence (4/5)"
     for key, patterns in {
-        "coherence": [r"coherence[=:\s]+(\d+(?:\.\d+)?)", r"narrative coherence[^0-9]*(\d+)"],
+        # Sprint 7-5b rubric: voice/subtext/arc/pacing/strategy. Older
+        # runs with coherence/branches dimensions still parse gracefully
+        # (missing keys just drop out of the average).
         "voice": [r"voice[=:\s]+(\d+(?:\.\d+)?)", r"character voice[^0-9]*(\d+)"],
+        "subtext": [r"subtext[=:\s]+(\d+(?:\.\d+)?)"],
         "arc": [r"arc[=:\s]+(\d+(?:\.\d+)?)", r"emotional arc[^0-9]*(\d+)"],
+        "pacing": [r"pacing[=:\s]+(\d+(?:\.\d+)?)"],
+        "strategy": [r"strategy[=:\s]+(\d+(?:\.\d+)?)", r"strategy execution[^0-9]*(\d+)"],
+        # Backwards-compat for legacy runs
+        "coherence": [r"coherence[=:\s]+(\d+(?:\.\d+)?)", r"narrative coherence[^0-9]*(\d+)"],
         "branches": [r"branches[=:\s]+(\d+(?:\.\d+)?)", r"branch quality[^0-9]*(\d+)"],
-        "pacing": [r"pacing[=:\s]+(\d+(?:\.\d+)?)", r"pacing[^0-9]*(\d+)"],
     }.items():
         for pattern in patterns:
             m = _re.search(pattern, text, _re.IGNORECASE)

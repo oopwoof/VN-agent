@@ -42,6 +42,32 @@
 
 ## 开发记录
 
+### 2026-04-13 | 实现 - 2026-04-13 22:45
+
+**变更文件** (5 个):
+**源码变更** (4 文件):
+  - `src/vn_agent/agents/reviewer.py`
+  - `src/vn_agent/agents/structure_reviewer.py`
+  - `src/vn_agent/config.py`
+  - `src/vn_agent/prompts/templates.py`
+
+**配置变更** (1 文件):
+  - `config/settings.yaml`
+
+**变更统计**:
+```
+config/settings.yaml                      |  10 ++-
+ src/vn_agent/agents/reviewer.py           | 104 ++++++++++++++++++++++++++++--
+ src/vn_agent/agents/structure_reviewer.py |  26 ++++++++
+ src/vn_agent/config.py                    |  14 ++--
+ src/vn_agent/prompts/templates.py         | 102 ++++++++++++++++++-----------
+ 5 files changed, 207 insertions(+), 49 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-13 | 实现 - 2026-04-13 22:17
 
 **变更文件** (8 个):

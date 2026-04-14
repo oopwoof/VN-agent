@@ -28,7 +28,15 @@ llm:
   #     sufficient for format / ID / keyword / rubric checks, and cheaper
   #     to run on potentially-many revision rounds.
   structure_reviewer_model: claude-sonnet-4-6
-  reviewer_model: claude-haiku-4-5-20251001  # dialogue-level checks — haiku (was sonnet; reverted Sprint 7-5)
+  # Sprint 7-5b: DialogueReviewer back to Sonnet.
+  # Per the model-selection rule (Sonnet = narrative/style analysis),
+  # dialogue review is voice/subtext/arc/pacing judgment — that's
+  # craft-level narrative work, not mechanical. Haiku couldn't
+  # discriminate on these dimensions (satisfaction bias). Mechanical
+  # checks moved to pure-Python _mechanical_check() pre-gate which
+  # fails fast before the Sonnet call, so the Sonnet reviewer only
+  # spends tokens when the output is at least structurally valid.
+  reviewer_model: claude-sonnet-4-6
   character_designer_model: claude-haiku-4-5-20251001  # 1-shot visual profile JSON — haiku
   scene_artist_model: claude-haiku-4-5-20251001       # single prompt formatting — haiku
   music_director_model: claude-haiku-4-5-20251001     # mood classification — haiku
