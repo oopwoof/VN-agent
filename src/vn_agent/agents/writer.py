@@ -155,6 +155,15 @@ async def run_writer(state: AgentState) -> dict:
             except Exception as e:  # noqa: BLE001
                 logger.debug(f"Summarization skipped for {updated_scene.id}: {e}")
 
+        # Sprint 11-4: per-scene snapshot (scene, state_after, optional
+        # summary). Foundation for Sprint 12-4 local regen. Best-effort.
+        _write_scene_snapshot(
+            output_dir,
+            scene=updated_scene,
+            world_state_after=world_state,
+            summary=updated_scene.summary,
+        )
+
     updated_script = script.model_copy(update={"scenes": updated_scenes})
     logger.info(f"Writer completed: dialogue written for {len(updated_scenes)} scenes")
 
@@ -212,6 +221,50 @@ def _build_character_bible(characters: dict[str, CharacterProfile]) -> str:
             lines.append(f"Locked attributes (must not contradict): {sorted(locked)}")
         lines.append("")
     return "\n".join(lines)
+
+
+def _write_scene_snapshot(
+    output_dir: str,
+    scene: Scene,
+    world_state_after: dict,
+    summary: str | None = None,
+) -> None:
+    """Sprint 11-4: persist a per-scene snapshot that downstream tooling
+    (Sprint 12-4 local regen, replay, debug) can read to reconstruct the
+    run state at that point in time.
+
+    Written to <output_dir>/snapshots/<scene_id>.json as a single JSON
+    object. Best-effort — any exception is logged at DEBUG, never
+    raised. The primary pipeline artifact is still vn_script.json; this
+    is supplementary.
+    """
+    import json
+    from datetime import datetime
+    from pathlib import Path
+
+    try:
+        snap_dir = Path(output_dir) / "snapshots"
+        snap_dir.mkdir(parents=True, exist_ok=True)
+        record = {
+            "scene_id": scene.id,
+            "title": scene.title,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "dialogue": [
+                {"character_id": d.character_id, "text": d.text, "emotion": d.emotion}
+                for d in scene.dialogue
+            ],
+            "narrative_strategy": scene.narrative_strategy,
+            "state_reads": list(scene.state_reads),
+            "state_writes": dict(scene.state_writes),
+            "world_state_after": dict(world_state_after),
+            "summary": summary,
+        }
+        (snap_dir / f"{scene.id}.json").write_text(
+            json.dumps(record, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Scene snapshot failed for {scene.id}: {e}")
 
 
 def _append_rag_record(
