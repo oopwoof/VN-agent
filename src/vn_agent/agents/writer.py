@@ -83,6 +83,47 @@ def _build_char_descriptions(characters: dict[str, CharacterProfile]) -> str:
     return "\n".join(lines)
 
 
+def _append_rag_record(
+    output_dir: str,
+    scene_id: str,
+    strategy: str,
+    query: str,
+    examples,
+) -> None:
+    """Append one retrieval event to <output_dir>/rag_retrievals.jsonl.
+
+    Each line is a self-contained JSON object. Future-you can grep any past
+    run to audit which corpus sessions were shown to Writer for which scene
+    — no re-run needed.
+    """
+    import json
+    from pathlib import Path
+
+    try:
+        record = {
+            "scene_id": scene_id,
+            "strategy": strategy,
+            "query": query,
+            "retrieved": [
+                {
+                    "id": getattr(ex, "id", "") or None,
+                    "title": getattr(ex, "title", ""),
+                    "strategy": getattr(ex, "strategy", None),
+                    "pivot_line_idx": getattr(ex, "pivot_line_idx", None),
+                    "pacing": getattr(ex, "pacing", None),
+                    "text_preview": (getattr(ex, "text", "") or "")[:400],
+                }
+                for ex in examples
+            ],
+        }
+        path = Path(output_dir) / "rag_retrievals.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:  # noqa: BLE001 — debug artifact is best-effort
+        logger.debug(f"Failed to persist RAG record for {scene_id}: {e}")
+
+
 def _build_or_load_embedding_index(corpus, settings):
     """Build or load an embedding index for semantic retrieval. Returns None on failure."""
     try:
@@ -175,6 +216,7 @@ After dialogue, if branches exist, the player will choose:
             )
 
             strategy_label = scene.narrative_strategy or ""
+            query = ""
             if embedding_index is not None:
                 query = f"{scene.description} | strategy: {strategy_label}"
                 examples = retrieve_examples_semantic(
@@ -191,13 +233,19 @@ After dialogue, if branches exist, the player will choose:
                     f"\n\nReference examples of '{strategy_label}' strategy:\n"
                     f"{few_shot_block}"
                 )
-                # Surface which corpus items landed in the prompt so we can
-                # reason about RAG quality after the run (instead of guessing).
-                ex_ids = [getattr(e, "id", "?") for e in examples]
+                # Persist per-run retrieval record so RAG quality can be
+                # audited after the fact — not just during live logs.
+                _append_rag_record(
+                    output_dir,
+                    scene_id=scene.id,
+                    strategy=strategy_label,
+                    query=query,
+                    examples=examples,
+                )
                 ex_strats = [getattr(e, "strategy", "?") for e in examples]
                 logger.info(
                     f"Writer[{scene.id}]: few-shot injected for '{strategy_label}' — "
-                    f"{len(examples)} examples: ids={ex_ids} strategies={ex_strats}"
+                    f"{len(examples)} examples, strategies={ex_strats}"
                 )
         except Exception as e:
             logger.debug(f"Few-shot injection skipped: {e}")

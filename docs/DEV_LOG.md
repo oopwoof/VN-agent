@@ -42,6 +42,24 @@
 
 ## 开发记录
 
+### 2026-04-13 | 实现 - 2026-04-13 18:00
+
+**变更文件** (2 个):
+**源码变更** (2 文件):
+  - `src/vn_agent/agents/writer.py`
+  - `src/vn_agent/eval/corpus.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/writer.py | 56 +++++++++++++++++++++++++++++++++++++++----
+ src/vn_agent/eval/corpus.py   |  5 +++-
+ 2 files changed, 56 insertions(+), 5 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-13 | 实现 - 2026-04-13 17:45
 
 **变更文件** (1 个):

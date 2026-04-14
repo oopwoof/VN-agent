@@ -48,7 +48,10 @@ def load_corpus(csv_path: Path) -> list[AnnotatedSession]:
     - Rows with unknown strategies mapped to None
     """
     sessions: list[AnnotatedSession] = []
-    with open(csv_path, encoding="utf-8") as f:
+    # utf-8-sig strips the UTF-8 BOM so the first header is 'id', not '\ufeffid'
+    # — without this, row.get("id") silently returned '' and every session id
+    # came out empty, making RAG retrieval records unidentifiable.
+    with open(csv_path, encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         for row in reader:
             raw_strategy = row.get("predominant_strategy", "").strip().title()
