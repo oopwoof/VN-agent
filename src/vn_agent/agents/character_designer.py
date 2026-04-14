@@ -188,19 +188,22 @@ async def _generate_sprites(
 
     # Sprint 12-3b: sprites composite over scene backgrounds in Ren'Py,
     # so they need transparent PNGs. Two layers of defense:
-    # (1) prompt asks the model for a clean silhouette on a flat,
-    #     high-contrast background so the downstream matte step has a
-    #     crisp edge to follow — pure white bleeds into light hair/skin
-    #     and creates halos, so we use flat medium gray (#808080).
+    # (1) prompt asks the model for a flat, high-contrast background so
+    #     the matte step has a clean edge to follow — pure white bleeds
+    #     into light hair/skin and creates halos, so we use medium gray
+    #     (#808080). We deliberately do NOT say "clean silhouette" or
+    #     "sharp edges" — those phrases push the model toward sticker/
+    #     vector style and flatten painterly hair/fabric edges. We also
+    #     do NOT say "no props" — held items (swords, books, instruments)
+    #     are part of character identity and u2net_human_seg can keep
+    #     them as foreground when they're close to the body.
     # (2) rembg post-process runs u2net_human_seg on the saved PNG and
     #     replaces the background with alpha. Deterministic, local, ~1s.
-    # Keyword "clean silhouette" + "sharp edges" + "no shadow on the floor"
-    # are the phrases Nano Banana responds to most reliably for cutout
-    # work — the model tends to draw floor shadows otherwise which rembg
-    # treats as part of the subject.
+    #     For non-human or prop-heavy subjects the cutout model can be
+    #     swapped to `isnet-general-use` via settings.sprite_cutout_model.
     bg_clause = (
-        "flat medium gray background, clean silhouette, sharp crisp edges, "
-        "no shadow on the floor, no environment, no props, isolated character"
+        "flat medium gray background, no scene behind, no ground shadow, "
+        "full body visible, well-lit character portrait"
     )
 
     def _sprite_path(emotion: str) -> tuple[str, Path]:
