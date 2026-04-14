@@ -1,4 +1,4 @@
-"""Image generation service (DALL-E 3 / Stability AI / gpt-image-1).
+"""Image generation service (Nano Banana / gpt-image-1 / DALL-E 3 / Stability).
 
 Supports two generation modes:
   - generate_image(prompt, output) → pure text-to-image (all providers)
@@ -6,9 +6,15 @@ Supports two generation modes:
     image-to-image for character consistency across emotions
 
 Provider capabilities:
-  openai (DALL-E 3) — text only, no reference
+  google_gemini (Nano Banana, gemini-2.5-flash-image) — text + reference,
+    multi-image ref supported natively (best for VN character consistency)
   openai_gpt_image (gpt-image-1) — text + reference via /v1/images/edits
   stability (SDXL) — text + reference via init_image
+  openai (DALL-E 3) — text only, no reference
+
+Sprint 10-1: Nano Banana added as preferred provider. Fallback chain on
+4xx/5xx: google_gemini → openai_gpt_image → openai (DALL-E 3) → stability.
+Config `image_provider` chooses the primary.
 
 Character consistency strategy: Sprint 6-9b generates neutral sprite
 first as a visual anchor, then happy/sad as reference-based variants.
@@ -34,7 +40,15 @@ class ImageGenerationError(Exception):
 
 
 # Providers that support reference-image conditioning
-_PROVIDERS_WITH_REFERENCE = {"openai_gpt_image", "stability"}
+_PROVIDERS_WITH_REFERENCE = {"google_gemini", "openai_gpt_image", "stability"}
+
+# Fallback chain for text-to-image (Sprint 10-1).
+# When the primary provider hits a 4xx/5xx we walk down this list.
+_TEXT_FALLBACK_CHAIN = ["google_gemini", "openai_gpt_image", "openai", "stability"]
+
+# Fallback chain for reference-conditioned gen — only reference-capable
+# providers; others would silently discard the reference image.
+_REF_FALLBACK_CHAIN = ["google_gemini", "openai_gpt_image", "stability"]
 
 
 def provider_supports_reference(provider: str | None = None) -> bool:
@@ -44,51 +58,115 @@ def provider_supports_reference(provider: str | None = None) -> bool:
     return provider in _PROVIDERS_WITH_REFERENCE
 
 
-async def generate_image(prompt: str, output_path: Path) -> Path:
-    """Generate an image from prompt and save to output_path."""
-    settings = get_settings()
-    provider = settings.image_provider
+async def _dispatch_text(provider: str, prompt: str, output_path: Path) -> Path:
+    """Dispatch a text-to-image call to the right backend."""
+    if provider == "google_gemini":
+        return await _generate_gemini_image(prompt, output_path)
     if provider in {"openai", "openai_gpt_image"}:
         return await _generate_openai(prompt, output_path)
     if provider == "stability":
         return await _generate_stability(prompt, output_path)
-    # Unknown provider — try DALL-E as a sensible default
-    logger.warning(f"Unknown image_provider '{provider}', defaulting to DALL-E")
-    return await _generate_openai(prompt, output_path)
+    raise ImageGenerationError(f"Unknown text provider: {provider}")
+
+
+async def _dispatch_ref(
+    provider: str, prompt: str, reference_path: Path, output_path: Path,
+) -> Path:
+    """Dispatch a reference-conditioned call to the right backend."""
+    if provider == "google_gemini":
+        return await _edit_gemini_with_reference(prompt, reference_path, output_path)
+    if provider == "openai_gpt_image":
+        return await _edit_openai_gpt_image(prompt, reference_path, output_path)
+    if provider == "stability":
+        return await _img2img_stability(prompt, reference_path, output_path)
+    raise ImageGenerationError(f"Provider {provider} doesn't support reference")
+
+
+async def generate_image(prompt: str, output_path: Path) -> Path:
+    """Text-to-image with provider fallback chain.
+
+    Tries the configured primary provider first; on failure walks down
+    _TEXT_FALLBACK_CHAIN. This lets a paid-Gemini setup keep working
+    even if Nano Banana rate-limits, and lets a free-tier Gemini user
+    degrade to DALL-E transparently.
+    """
+    settings = get_settings()
+    primary = settings.image_provider
+
+    # Primary first, then rest of chain (dedup to keep order stable)
+    chain = [primary] + [p for p in _TEXT_FALLBACK_CHAIN if p != primary]
+    last_error: Exception | None = None
+    for provider in chain:
+        if not _provider_has_credentials(provider, settings):
+            continue
+        try:
+            return await _dispatch_text(provider, prompt, output_path)
+        except Exception as e:  # noqa: BLE001
+            last_error = e
+            logger.warning(
+                f"Image provider '{provider}' failed ({type(e).__name__}: "
+                f"{str(e)[:100]}), trying next in chain"
+            )
+    raise ImageGenerationError(
+        f"All image providers in fallback chain failed. Last error: {last_error}"
+    )
 
 
 async def generate_image_with_reference(
     prompt: str, reference_path: Path, output_path: Path,
 ) -> Path:
-    """Generate an image using a reference image for visual consistency.
+    """Generate with reference image + provider fallback chain.
 
-    Used by CharacterDesigner to produce emotion variants (happy/sad) that
-    share the neutral sprite's face, outfit, and art style.
-
-    Falls back to pure text-to-image if the configured provider doesn't
-    support reference images — the caller should ideally detect this via
-    provider_supports_reference() first and enrich the prompt accordingly.
+    When no configured ref-capable provider has credentials, silently
+    degrades to text-only via generate_image — caller should have called
+    provider_supports_reference() first to enrich the prompt if needed.
     """
     settings = get_settings()
-    provider = settings.image_provider
-
     if not reference_path.exists():
         logger.warning(
             f"Reference {reference_path} missing — falling back to text-to-image"
         )
         return await generate_image(prompt, output_path)
 
-    if provider == "openai_gpt_image":
-        return await _edit_openai_gpt_image(prompt, reference_path, output_path)
-    if provider == "stability":
-        return await _img2img_stability(prompt, reference_path, output_path)
+    primary = settings.image_provider
+    chain = [primary] + [p for p in _REF_FALLBACK_CHAIN if p != primary]
+    last_error: Exception | None = None
+    tried_any = False
+    for provider in chain:
+        if not provider_supports_reference(provider):
+            continue
+        if not _provider_has_credentials(provider, settings):
+            continue
+        tried_any = True
+        try:
+            return await _dispatch_ref(provider, prompt, reference_path, output_path)
+        except Exception as e:  # noqa: BLE001
+            last_error = e
+            logger.warning(
+                f"Ref-image provider '{provider}' failed "
+                f"({type(e).__name__}: {str(e)[:100]}), trying next"
+            )
 
-    # Provider doesn't support reference → degrade gracefully
-    logger.info(
-        f"Provider '{provider}' doesn't support reference images — "
-        f"generating from prompt only (consistency may drift)"
+    if not tried_any:
+        logger.info(
+            "No reference-capable provider has credentials — "
+            "degrading to text-only (consistency may drift)"
+        )
+        return await generate_image(prompt, output_path)
+    raise ImageGenerationError(
+        f"All ref-capable providers failed. Last error: {last_error}"
     )
-    return await generate_image(prompt, output_path)
+
+
+def _provider_has_credentials(provider: str, settings) -> bool:
+    """Whether the given provider has the credentials it needs."""
+    if provider == "google_gemini":
+        return bool(settings.google_api_key)
+    if provider in {"openai", "openai_gpt_image"}:
+        return bool(settings.openai_api_key)
+    if provider == "stability":
+        return bool(settings.stability_api_key)
+    return False
 
 
 async def _generate_openai(prompt: str, output_path: Path) -> Path:
@@ -224,3 +302,109 @@ async def _img2img_stability(
         output_path.write_bytes(base64.b64decode(image_data))
     logger.info(f"Generated image (reference): {output_path} ← {reference_path.name}")
     return output_path
+
+
+# ── Google Gemini (Nano Banana) backend ──────────────────────────────────
+# Gemini 2.5 Flash Image (aka "Nano Banana") generates images via the
+# generateContent endpoint with response_modalities=["IMAGE"]. Reference-image
+# editing works by including the reference as an inline_data part in the
+# same request alongside the text prompt.
+#
+# Key property for VN character consistency: supports MULTIPLE reference
+# images in one call — the Sprint 6-9b neutral-first strategy can anchor
+# to neutral + prior-emotion together.
+#
+# Endpoint: POST to the v1beta API. Auth via ?key= query string.
+
+_GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image-preview"
+_GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+
+
+async def _generate_gemini_image(prompt: str, output_path: Path) -> Path:
+    """Text-to-image via Gemini 2.5 Flash Image."""
+    settings = get_settings()
+    if not settings.google_api_key:
+        raise ImageGenerationError("GOOGLE_API_KEY not set")
+
+    url = f"{_GEMINI_BASE}/{_GEMINI_IMAGE_MODEL}:generateContent?key={settings.google_api_key}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseModalities": ["IMAGE"]},
+    }
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(url, json=payload)
+        resp.raise_for_status()
+        image_b64 = _extract_gemini_image_bytes(resp.json())
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(base64.b64decode(image_b64))
+    logger.info(f"Generated image (gemini text): {output_path}")
+    return output_path
+
+
+async def _edit_gemini_with_reference(
+    prompt: str, reference_path: Path, output_path: Path,
+) -> Path:
+    """Reference-conditioned gen via Gemini 2.5 Flash Image.
+
+    The reference is sent as an inline_data part; the prompt instructs the
+    model to preserve the subject's features. Multi-reference (neutral +
+    prior emotion) is supported by adding more inline_data parts — we keep
+    it single-reference here to match the existing sprite-gen signature.
+    """
+    settings = get_settings()
+    if not settings.google_api_key:
+        raise ImageGenerationError("GOOGLE_API_KEY not set")
+
+    with open(reference_path, "rb") as f:
+        ref_bytes = f.read()
+    ref_b64 = base64.b64encode(ref_bytes).decode("ascii")
+
+    url = f"{_GEMINI_BASE}/{_GEMINI_IMAGE_MODEL}:generateContent?key={settings.google_api_key}"
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inlineData": {
+                            "mimeType": "image/png",
+                            "data": ref_b64,
+                        }
+                    },
+                ]
+            }
+        ],
+        "generationConfig": {"responseModalities": ["IMAGE"]},
+    }
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(url, json=payload)
+        resp.raise_for_status()
+        image_b64 = _extract_gemini_image_bytes(resp.json())
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(base64.b64decode(image_b64))
+    logger.info(
+        f"Generated image (gemini reference): {output_path} ← {reference_path.name}"
+    )
+    return output_path
+
+
+def _extract_gemini_image_bytes(response_json: dict) -> str:
+    """Pull the base64 image payload out of a Gemini generateContent response.
+
+    Response shape:
+      {candidates: [{content: {parts: [{inlineData: {data: "<b64>"}}, ...]}}]}
+    """
+    try:
+        candidates = response_json["candidates"]
+        parts = candidates[0]["content"]["parts"]
+        for part in parts:
+            # SDK may use camelCase OR snake_case depending on version
+            inline = part.get("inlineData") or part.get("inline_data")
+            if inline and inline.get("data"):
+                return inline["data"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise ImageGenerationError(
+            f"Gemini response missing image data: {e}. "
+            f"Response keys: {list(response_json.keys())}"
+        ) from e
+    raise ImageGenerationError("Gemini response had no inline image part")

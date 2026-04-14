@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     stability_api_key: str = Field(default="", alias="STABILITY_API_KEY")
     suno_api_key: str = Field(default="", alias="SUNO_API_KEY")
+    # Sprint 10-1: Google Gemini API key (used by Nano Banana image provider).
+    # Free tier covers text models; image generation (gemini-2.5-flash-image)
+    # requires a paid-tier account. Pipeline falls back to gpt-image-1 / DALL-E
+    # on 4xx so missing payment doesn't brick the run.
+    google_api_key: str = Field(default="", alias="GOOGLE_API_KEY")
 
     # Loaded from settings.yaml
     llm_provider: str = "anthropic"
