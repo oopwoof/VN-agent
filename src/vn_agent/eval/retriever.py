@@ -59,16 +59,34 @@ def retrieve_examples_semantic(
     )
 
 
-def format_examples(examples: list[AnnotatedSession]) -> str:
-    """Format retrieved examples as a text block for prompt injection."""
+def format_examples(examples: list[AnnotatedSession], max_chars: int = 2000) -> str:
+    """Format retrieved examples as a text block for prompt injection.
+
+    Each corpus session is a 12-line VN dialogue whose annotated pivot
+    (where the strategy mechanism lands) sits at lines 3-10 — median text
+    length ≈ 754 chars, p95 ≈ 1,296. An earlier 300-char cap sliced every
+    single example mid-setup, **before** the pivot, so Writer was learning
+    style from the opening beats but never seeing how the strategy
+    actually resolves. Cap is now generous enough (2,000 chars ≈ p99) to
+    include the full session for nearly all entries, and the pacing tag +
+    pivot_line_idx are exposed so Writer sees *where* the mechanism lands.
+    """
     if not examples:
         return ""
 
     blocks = []
     for i, ex in enumerate(examples, 1):
-        pacing_info = f" (pacing: {ex.pacing})" if ex.pacing else ""
+        pacing_info = f", pacing: {ex.pacing}" if ex.pacing else ""
+        pivot_info = (
+            f", pivot@line{ex.pivot_line_idx}"
+            if ex.pivot_line_idx is not None
+            else ""
+        )
+        text = ex.text[:max_chars]
+        if len(ex.text) > max_chars:
+            text += "…"
         blocks.append(
-            f"Example {i} [{ex.strategy}{pacing_info}]:\n"
-            f'"{ex.text[:300]}"'
+            f"Example {i} [{ex.strategy}{pacing_info}{pivot_info}]:\n"
+            f'"{text}"'
         )
     return "\n\n".join(blocks)

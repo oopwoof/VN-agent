@@ -94,8 +94,11 @@
 | 策略 taxonomy 对齐 annotation guideline | Phase 10 Sprint 6-fix | ✅ 完成 |
 | Reviewer 阈值硬判（avg ≥ 3.5 覆盖 LLM） | Phase 10 Sprint 6-fix | ✅ 完成 |
 | Writer 注入角色 background + Reviewer 读完整对白 | Phase 10 Sprint 6-fix | ✅ 完成 |
+| RAG 检索 jsonl 持久化 + BOM bug 修复 + few-shot 截断 300→2000 | Phase 10 Sprint 6-fix | ✅ 完成 |
 | Intent alignment 分支意图校验（第 4 层防御） | Phase 10 Sprint 6-10 | 🔜 下一步 |
 | Nano Banana (Gemini) 图像 provider 集成 | Phase 10 Sprint 6-11 | 🔜 下一步 |
+| 异质语料作为 generation-only 策略的 fallback | Phase 10 Sprint 6-12 | 🔜 Backlog |
+| Few-shot 显式标注 pivot 位置（`>>> PIVOT <<<` 内联） | Phase 10 Sprint 6-13 | 🔜 Backlog |
 | Suno API 音乐生成 | Phase 3 | ⏳ 待 Suno API 公开 |
 
 ---
