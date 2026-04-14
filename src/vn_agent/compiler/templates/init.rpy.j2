@@ -37,31 +37,41 @@ image {{ bg_id }} = "images/backgrounds/{{ bg_id }}.png"
 # anchor at the bottom so the character stands on the textbox edge
 # instead of getting the head clipped at the top. Characters dim to 70%
 # when not actively speaking (Sprint 12 dialogue polish).
-transform vn_sprite_base:
-    # Sprite zoom comes from settings.sprite_zoom — tied to
-    # settings.sprite_aspect_ratio so both change together. 864×1184
-    # (3:4 from Nano Banana) × 0.45 → ~389×533 (49% of 1080), which
-    # matches the industry-standard VN framing (Umineko, Fata Morgana,
-    # Never7 all sit in the 45-50% range).
+# Sprite transforms — self-contained, NOT chained. Previous version had
+# `transform vn_sprite_{left,center,right}: vn_sprite_base` inheriting
+# zoom from a shared base, but in practice the center slot was
+# rendering at zoom 1.0 (full-size) while left/right were correctly
+# scaled. ATL inheritance via `transform X: other_transform` is
+# order-sensitive and doesn't always interact cleanly with properties
+# that rely on defaults — flattening to three independent transforms
+# eliminates the failure mode entirely.
+#
+# Zoom value from settings.sprite_zoom (paired with sprite_aspect_ratio):
+# 864×1184 × 0.45 → ~389×533 (49% of 1080 screen height, matches the
+# industry-standard VN framing: Umineko, Fata Morgana, Never7).
+transform vn_sprite_left:
     zoom {{ sprite_zoom }}
     yanchor 1.0
     ypos 1.0
-    subpixel True
-
-transform vn_sprite_left:
-    vn_sprite_base
     xanchor 0.5
     xpos 0.22
+    subpixel True
 
 transform vn_sprite_center:
-    vn_sprite_base
+    zoom {{ sprite_zoom }}
+    yanchor 1.0
+    ypos 1.0
     xanchor 0.5
     xpos 0.5
+    subpixel True
 
 transform vn_sprite_right:
-    vn_sprite_base
+    zoom {{ sprite_zoom }}
+    yanchor 1.0
+    ypos 1.0
     xanchor 0.5
     xpos 0.78
+    subpixel True
 
 # Speaker-focus helper: full brightness when speaking, dim + slightly
 # desaturated when listening. Wired into the say screen in gui.rpy.
