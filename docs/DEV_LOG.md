@@ -40,6 +40,47 @@
 
 ---
 
+## Phase 12-3 完成摘要 (2026-04-14)
+
+创作者模式 + Ren'Py 视觉层一次性做完，从"能跑通生成"进到"能被玩"。
+
+### Sprint 12-3 Creator-mode pause/continue
+`vn-agent generate --pause-after outline` 在 Director → structure_reviewer → state_orchestrator 全部跑完后停下，dump `outline_checkpoint.json` sidecar。创作者编辑 `vn_script.json` / `characters.json`（任何 Pydantic 兼容的修改都生效），然后 `vn-agent continue-outline --output <dir>` 用 writer-only graph 跑完剩余 pipeline。`world_state` 从（可能编辑过的）`world_variables[].initial_value` 重新播种，让初值修改生效。5 新 pytest 覆盖（`test_creator_pause.py`）。
+
+### Sprint 12-3b 立绘透明抠图 (rembg u2net_human_seg)
+Sprite 3:4 portrait（864×1184 Nano Banana 输出）→ rembg 本地 ONNX 推理抠出透明 PNG。延后到 neutral/happy/sad 全生成后批量抠图，保证参考图链的 neutral 在 Nano Banana 眼里仍是不透明。可选依赖（`uv sync --extra cutout`），未装时安全降级。
+
+### Sprint 12-3c Ren'Py 视觉层全面补完
+- **Image 路径声明**：`init.rpy` 显式声明每个 `<char> <emotion>` → 真实 PNG 路径，filesystem-aware 情感别名（CharacterDesigner 只生成 3 种，其他 6 种按语义链 fallback，创作者放入真文件后下次 compile 自动切换）
+- **BG 1920×1080 固定**：scene_artist 生成后用 PIL LANCZOS 强 resize 到精确 1920×1080，Ren'Py `scene` 原生全屏无黑边
+- **Sprite zoom 0.45**：864×1184 × 0.45 = 389×533（49% 屏高，Umineko/Fata Morgana/Never7 同级），三个 self-contained ATL transform 避免 chained inheritance 的不稳定
+- **Branch menu 悬浮中央**：自定义 `screen choice` 用 vbox 大按钮 + 50% 黑蒙
+- **renpy_safe 全覆盖**：`script.title` / `char.name` / dialogue / branch 全部过 Jinja filter，backslash→`[`→`{`→`"` 严格顺序
+- **对话框**：经过多轮挣扎（custom `screen say` → `style window` global reset → scoped `say_window` → 最终退回 Ren'Py stock say screen + `define gui.*` 定制）。教训：don't fight Ren'Py style inheritance，只调 `gui.*` knobs。
+
+### Sprint 12-4 Local regen
+`vn-agent regen --scene <id> --output <dir>` 只重跑 Writer+DialogueReviewer，walk 之前所有场景的 state_writes 重建 scene-start 时的 world_state，splice 回 vn_script.json。
+
+### Sprint 12-5 Unknown-character resolver metadata
+Creator-edited dialogue 引入 cast 外 character_id 时，reviewer 在 `unknown_characters` state 字段附带 structured payload（id / reference_count / first_appearance / sample_lines / profile_stub），供创作者 UI 选择 auto-fill 或打开 cast editor。9 新 pytest。
+
+### 评估硬核化
+- Sprint 8-5 重跑 sweep（cells 复用，只重跑 judge，$0.15 而非 $3）：Sonnet 3.68 / GPT-4o 3.66（均值差 0.02），**Pearson r = 0.643, ±1-pt agreement = 87%**。直接反驳"Sonnet 给 Sonnet 的作业打分"echo chamber 批评。
+- Sprint 8-5 数据：literary 4.17 > action 3.92 > baseline_self_refine 3.45 > baseline_single 3.25，multi-agent 相对 self_refine 基线 +0.72 绝对分。
+
+### Sync tails 全收
+- **Emotion 词表去重**：`src/vn_agent/schema/emotions.py` 作为 single source of truth，reviewer + renpy_compiler 都 import。
+- **User strings 转义**：`script.title`、`char.name` 也走 `| renpy_safe`。
+- **Aspect+zoom 共享常量**：`config.sprite_aspect_ratio/sprite_zoom/bg_aspect_ratio/bg_zoom`，character_designer/scene_artist 读取 aspect，renpy_compiler 把 zoom 传入 template。
+
+### Showcase demo
+`demo_output/vn_showcase_20260414_130234/` — "Three Hours Before the Tide"，6 scenes / 3 chars (Maret/Sable/Tomas)，码头信使/爱人/督察三小时前的离港故事。Writer $0.46 / 9min（continue-outline 后半程），15 images（9 sprite + 6 bg，全部最终 1920×1080 或 864×1184），正常 Ren'Py 启动。
+
+### 测试状态
+352 passed, 1 deselected。ruff clean。新覆盖：9-5 unknown-character resolver (9)、12-3 creator pause/continue (5)、init.rpy image decls (4)、aspect_ratio plumbing (5)。
+
+---
+
 ## 开发记录
 
 ### 2026-04-14 | 实现 - 2026-04-14 15:49
@@ -3222,15 +3263,23 @@ _（每次 commit 后更新）_
 | 优先级 | 问题 | 状态 |
 |--------|------|------|
 | P0 | Phase 1-5 核心管线 | ✅ 完成 |
-| P0 | Phase 6 迭代体验（5 Sprint） | ✅ 完成（56 测试） |
-| P0 | Phase 7 工业化（Sprint 7-11） | ✅ 完成（122 测试） |
-| P0 | Phase 8 AI 深度补全（Sprint 12-15） | ✅ 完成（140 测试） |
-| P0 | Phase 9 Web 前端 Sprint 1-3 | ✅ 完成（React + 分步生成 + 场景编辑） |
-| P0 | Ollama 7B 本地模型适配 | ✅ 完成（4 场景+分支） |
-| P1 | Phase 9 Sprint 4：资产管理面板 | 🔜 下一步 |
-| P1 | Phase 9 Sprint 5：体验打磨 + 双 Key Pool | 🔜 后续 |
-| P1 | 真实 BGM 文件替换占位 WAV | 待开始 |
-| P2 | 自然语言编辑（对话式修改设定/脚本） | 待开始 |
+| P0 | Phase 6 迭代体验 | ✅ 完成（56 测试） |
+| P0 | Phase 7 工业化 | ✅ 完成（122 测试） |
+| P0 | Phase 8 AI 深度补全 | ✅ 完成（140 测试） |
+| P0 | Phase 9 Web 前端 Sprint 1-3 | ✅ 完成 |
+| P0 | Sprint 8-5 cross-model judge 重跑 | ✅ 完成（Pearson 0.643, 87% ±1-pt） |
+| P0 | Sprint 10/11 长篇记忆 + Nano Banana 图像 | ✅ 完成 |
+| P0 | Sprint 12-3 创作者模式 pause/continue | ✅ 完成（5 pytest） |
+| P0 | Sprint 12-3b rembg 透明立绘 | ✅ 完成 |
+| P0 | Sprint 12-3c Ren'Py 视觉层（BG/sprite/dialog/menu） | ✅ 完成 |
+| P0 | Sprint 12-4 local regen CLI | ✅ 完成 |
+| P0 | Sprint 12-5 unknown-character resolver metadata | ✅ 完成（9 pytest） |
+| P0 | 当前测试总数 | ✅ 352 passed |
+| P1 | Sprint 12-1 流式 pipeline (JIT scene delivery) | 🔜 下一步 |
+| P1 | Sprint 13-1 API key pool (多用户前置) | 🔜 后续 |
+| P1 | 真实 BGM 文件替换占位 OGG | 待开始 |
+| P1 | CharacterDesigner 额外 emotion (thoughtful/angry 等) | 待开始（filesystem-aware alias 已支持） |
+| P2 | Sprint 13-2/3/4 queue + cost caps + fleet obs | 待开始 |
 | P2 | Suno API 音乐生成 | 待 API 公开 |
 
 ---

@@ -23,7 +23,18 @@
 
 ## 产品状态
 
-**当前阶段**: Phase 13 长篇记忆 + 图像 provider 转向 + 评估硬核化完成（Sprint 10/11 + Gemini code review fixes）。329 tests pass。Sprint 8-5 sweep 数据出：literary 4.17 > action 3.92 > baselines 3.25/3.45，multi-agent 证明有效。GPT-4o cross-judge 需下次 sweep 重新验证（bug 已修）。下一步 Sprint 12（流式+双模式）/ 13（多用户）
+**当前阶段**: Phase 12-3 创作者模式 + Ren'Py 视觉层全面补完。352 tests pass。
+
+**Sprint 8-5 sweep + cross-model judge 完成**：literary 4.17 > action 3.92 > baseline_self_refine 3.45 > baseline_single 3.25。GPT-4o cross-judge 重跑后 Sonnet 3.68 / GPT-4o 3.66，**Pearson r = 0.643, ±1-pt agreement = 87%** — 直接反驳"自评自"批评。
+
+**Sprint 12 进度**：
+- 12-3 创作者模式 pause-after-outline + continue-outline ✅（CLI + 5 pytest）
+- 12-3b 立绘 rembg 抠图（u2net_human_seg，3:4 portrait）✅
+- 12-3c Ren'Py 视觉层：image 路径声明、情感别名（filesystem-aware）、1920×1080 BG resize（PIL LANCZOS 保存时）、sprite zoom 0.45（self-contained ATL transforms）、悬浮 branch 菜单、renpy_safe 全覆盖、emotion 词表 dedupe 到 `schema/emotions.py`、sprite/BG aspect+zoom 共享常量 ✅
+- 12-4 local regen CLI（单场景重写不跑全 pipeline）✅
+- 12-5 unknown-character resolver metadata（creator-mode 阻断时附带结构化 payload）✅
+
+下一步：Sprint 12-1（streaming pipeline, JIT scene delivery）/ 13-1（API key pool, 多用户前置）
 
 | 功能模块 | 计划 | 状态 |
 |---------|------|------|
@@ -386,12 +397,12 @@ Phase 11 就是对这批批评的系统化响应（Sprint 9/10 deferred 处理 s
 ## 关键指标
 
 - 生成成功率（端到端不报错）
-- 剧本质量评分（人工评估 + `eval strategy` 自动评估）
-- 生成时间（从输入到输出）— **现可通过 trace.json 追踪每步耗时**
-- API 成本（每次生成的花费）— **现可通过 TokenTracker 精确追踪**
-- 策略分类准确率 — **`vn-agent eval strategy` 量化**
-- 管线质量指标 — **结构完整性 / 对话质量 / 策略覆盖 / 成本效率**
-- 测试通过率 — **当前 122 passed, 1 deselected**
+- 剧本质量评分 — **Sonnet 3.68 / GPT-4o 3.66 双判分均值**, Pearson r=0.643, ±1-pt agreement=87%（Sprint 8-5 重跑数据，commit 4f1228f）
+- 生成时间（从输入到输出）— 现通过 trace.json 追踪每步耗时，showcase demo 6 scenes 约 9 min（creator-pause continue 路径）
+- API 成本（每次生成的花费）— 现通过 TokenTracker 精确追踪。Showcase demo Writer+Reviewer+Assets ≈ $1.7 / 30 min 全流程；continue-outline ≈ $0.46 / 9 min（仅后半程）
+- 策略分类准确率 — `vn-agent eval strategy` 量化
+- 管线质量指标 — literary 4.17 > action 3.92 > baseline_self_refine 3.45 > baseline_single 3.25（8-cell sweep，multi-agent 效果验证）
+- 测试通过率 — **当前 352 passed, 1 deselected**
 
 ---
 
@@ -399,23 +410,25 @@ Phase 11 就是对这批批评的系统化响应（Sprint 9/10 deferred 处理 s
 
 ### 近期
 
-**P0 - Web 前端**
-- [ ] 简单的 React/Vue 前端：输入框 + 进度条 + 预览 + 下载
-- [ ] vn_script.json 可视化编辑器（场景图 / 对话编辑）
+**P0 - Sprint 12-1 流式 pipeline（player mode JIT delivery）**
+- [ ] 重写 graph.astream 为 segmented streaming，`pipeline_lookahead=2`
+- [ ] 首场景 TTFS 从 5min 降到 ~60s（Director+structure+writer1+mechanical）
+- [ ] FastAPI SSE/WebSocket 推 `scene_ready` 事件
 
-**P1 - 质量提升**
-- [ ] 真实 BGM 文件（freesound.org CC0 素材替换占位 WAV）
-- [ ] 图像生成端到端验证（Stability AI / FLUX 本地）
+**P0 - Sprint 13-1 API key pool**
+- [ ] `anthropic_api_keys: list[str]` 轮询 + 429 自动切换
+- [ ] 为 100 并发用户打基础
+
+**P1 - Visual/audio polish**
+- [ ] 真实 BGM 文件（freesound.org CC0 素材替换占位 OGG）
+- [ ] 角色立绘更丰富 emotion（目前 CharacterDesigner 只生成 neutral/happy/sad，其他 6 种 alias 到 neutral，filesystem-aware 已支持真实 PNG 替换）
 - [ ] 多语言扩展（日文、韩文 prompt 适配）
-- [ ] Writer 输出更丰富的情感状态（目前以 neutral/happy/sad 为主）
-- [ ] 评估框架扩展：对真实语料跑 LLM 策略分类 baseline
 
 ### 中期
 
 **质量与稳定性**
-- [ ] 验证 Ollama 本地模型完整流程（释放内存后 qwen2.5:1.5b）
-- [ ] Suno API 音乐生成（待 API 公开）
 - [ ] 评估框架：Writer 输出自动与 gold label 对比（strategy consistency 精细化）
 - [ ] Trace 分析工具（从 trace.json 提取瓶颈、优化建议）
+- [ ] Sprint 13-2/3/4: job queue + cost caps + fleet dashboard (multi-user ops)
 
 _最后更新: 2026-04-14_
