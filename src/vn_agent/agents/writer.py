@@ -191,6 +191,14 @@ After dialogue, if branches exist, the player will choose:
                     f"\n\nReference examples of '{strategy_label}' strategy:\n"
                     f"{few_shot_block}"
                 )
+                # Surface which corpus items landed in the prompt so we can
+                # reason about RAG quality after the run (instead of guessing).
+                ex_ids = [getattr(e, "id", "?") for e in examples]
+                ex_strats = [getattr(e, "strategy", "?") for e in examples]
+                logger.info(
+                    f"Writer[{scene.id}]: few-shot injected for '{strategy_label}' — "
+                    f"{len(examples)} examples: ids={ex_ids} strategies={ex_strats}"
+                )
         except Exception as e:
             logger.debug(f"Few-shot injection skipped: {e}")
 
