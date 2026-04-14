@@ -40,11 +40,39 @@ label {{ scene.id }}:
 {% endif %}
 {% endfor %}
 
+{# Sprint 9-4: apply state_writes at scene end before jump/menu/return #}
+{% if scene.state_writes %}
+{% for var, val in scene.state_writes.items() %}
+{% if val is string %}
+    $ {{ var }} = "{{ val }}"
+{% elif val is sameas true %}
+    $ {{ var }} = True
+{% elif val is sameas false %}
+    $ {{ var }} = False
+{% else %}
+    $ {{ var }} = {{ val }}
+{% endif %}
+{% endfor %}
+{% endif %}
 {% if scene.branches %}
     menu:
 {% for branch in scene.branches %}
+{% if branch.requires %}
+{# Sprint 9-1: symbolic visibility guard — branch only shown when state matches #}
+{% set guard_parts = [] %}
+{% for req_var, req_val in branch.requires.items() %}
+{% if req_val is string %}{% set _ = guard_parts.append(req_var ~ ' == "' ~ req_val ~ '"') %}
+{% elif req_val is sameas true %}{% set _ = guard_parts.append(req_var) %}
+{% elif req_val is sameas false %}{% set _ = guard_parts.append('not ' ~ req_var) %}
+{% else %}{% set _ = guard_parts.append(req_var ~ ' == ' ~ req_val) %}
+{% endif %}
+{% endfor %}
+        "{{ branch.text | replace('"', '\\"') }}" if {{ guard_parts | join(' and ') }}:
+            jump {{ branch.next_scene_id }}
+{% else %}
         "{{ branch.text | replace('"', '\\"') }}":
             jump {{ branch.next_scene_id }}
+{% endif %}
 {% endfor %}
 {% elif scene.next_scene_id %}
     jump {{ scene.next_scene_id }}

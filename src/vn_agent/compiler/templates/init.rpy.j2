@@ -7,3 +7,18 @@ init:
     $ config.has_music = True
     $ config.has_voice = False
     $ config.main_menu_music = None
+
+{% if script.world_variables %}
+
+# World variables (Sprint 9-1): symbolic state declared by Director.
+# Values mutate via `$ var = value` lines inside scene labels.
+{% for var in script.world_variables %}
+{% if var.type == 'string' or var.type == 'enum' %}
+default {{ var.name }} = "{{ var.initial_value }}"
+{% elif var.type == 'bool' %}
+default {{ var.name }} = {{ 'True' if var.initial_value else 'False' }}
+{% else %}
+default {{ var.name }} = {{ var.initial_value }}
+{% endif %}
+{% endfor %}
+{% endif %}
