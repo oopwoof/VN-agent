@@ -186,24 +186,28 @@ async def _generate_sprites(
         f"{visual.art_style}, {visual.appearance}, {visual.default_outfit}"
     )
 
-    # Sprint 12-3b: sprites composite over scene backgrounds in Ren'Py,
-    # so they need transparent PNGs. Two layers of defense:
-    # (1) prompt asks the model for a flat, high-contrast background so
-    #     the matte step has a clean edge to follow — pure white bleeds
-    #     into light hair/skin and creates halos, so we use medium gray
-    #     (#808080). We deliberately do NOT say "clean silhouette" or
-    #     "sharp edges" — those phrases push the model toward sticker/
-    #     vector style and flatten painterly hair/fabric edges. We also
-    #     do NOT say "no props" — held items (swords, books, instruments)
-    #     are part of character identity and u2net_human_seg can keep
-    #     them as foreground when they're close to the body.
+    # Sprint 12-3b → 12-3c: sprites composite over scene backgrounds in
+    # Ren'Py, so they need transparent PNGs. Two layers of defense:
+    # (1) prompt asks the model for a flat background so the matte step
+    #     has a clean edge to follow. Critical bug we hit first: saying
+    #     "flat medium gray background" + "character portrait" made
+    #     Nano Banana interpret this as a stylized monochrome silhouette
+    #     art style — the model rendered characters as solid dark shapes
+    #     against gray and rembg faithfully cut those out, producing
+    #     black silhouettes in-game. Fix: use a warm off-white (not pure
+    #     white, which blends with light hair/skin) and explicitly
+    #     demand "full color" + "NOT a silhouette" to block the
+    #     stylized-shadow interpretation. Held props stay — we want
+    #     character identity preserved.
     # (2) rembg post-process runs u2net_human_seg on the saved PNG and
     #     replaces the background with alpha. Deterministic, local, ~1s.
     #     For non-human or prop-heavy subjects the cutout model can be
     #     swapped to `isnet-general-use` via settings.sprite_cutout_model.
     bg_clause = (
-        "flat medium gray background, no scene behind, no ground shadow, "
-        "full body visible, well-lit character portrait"
+        "soft off-white studio background, full-color character with all "
+        "facial features and clothing details clearly visible, "
+        "NOT a silhouette, NOT a shadow, NOT a monochrome shape, "
+        "standing pose, full body from head to toe in frame"
     )
 
     def _sprite_path(emotion: str) -> tuple[str, Path]:
