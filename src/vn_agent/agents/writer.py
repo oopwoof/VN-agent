@@ -52,12 +52,19 @@ async def run_writer(state: AgentState) -> dict:
         except Exception as e:
             logger.debug(f"Corpus loading failed, few-shot disabled: {e}")
 
-    # Write dialogue for each scene
+    # Write dialogue for each scene. Sprint 7-2: pass prior_scenes for
+    # long-context coherence — Writer can reference previous scenes' actual
+    # dialogue, not just Director's entry_context one-liner.
     updated_scenes = []
-    for scene in script.scenes:
+    for idx, scene in enumerate(script.scenes):
+        window = settings.writer_context_window
+        prior_scenes = (
+            updated_scenes[max(0, idx - window) : idx] if window > 0 else []
+        )
         updated_scene = await _write_scene(
             scene, script, char_desc, revision_feedback, output_dir,
             corpus=corpus, embedding_index=embedding_index,
+            prior_scenes=prior_scenes,
         )
         updated_scenes.append(updated_scene)
 
@@ -157,6 +164,7 @@ async def _write_scene(
     output_dir: str = ".",
     corpus=None,
     embedding_index=None,
+    prior_scenes: list[Scene] | None = None,
 ) -> Scene:
     """Write dialogue for a single scene."""
     settings = get_settings()
@@ -169,6 +177,29 @@ async def _write_scene(
     feedback_note = ""
     if revision_feedback:
         feedback_note = f"\nIMPORTANT - Revision feedback to address:\n{revision_feedback}\n"
+
+    # Sprint 7-2: long-context — inject prior scenes' actual dialogue so
+    # Writer can keep character voice coherent across scene boundaries. Only
+    # populated when writer_context_window > 0.
+    prior_context_block = ""
+    if prior_scenes:
+        prior_blocks = []
+        for ps in prior_scenes:
+            dialog_lines = [
+                f"  {d.character_id or 'NARR'} ({d.emotion}): {d.text}"
+                for d in ps.dialogue
+            ]
+            strat = ps.narrative_strategy or "unspecified"
+            prior_blocks.append(
+                f"=== Previous scene: {ps.id} — {ps.title} "
+                f"(strategy: {strat}) ===\n" + "\n".join(dialog_lines)
+            )
+        prior_context_block = (
+            "\n\n--- Recent story context (prior scene dialogue, "
+            "for voice + continuity; do NOT copy lines) ---\n"
+            + "\n\n".join(prior_blocks)
+            + "\n--- End of prior context ---\n"
+        )
 
     # Transition cards for cross-scene coherence (Sprint 6-1)
     transition_lines: list[str] = []
@@ -195,6 +226,7 @@ Music mood: {scene.music.mood.value if scene.music else 'none'}
 {char_descriptions}
 
 Story context: {script.description}
+{prior_context_block}
 
 Write {settings.min_dialogue_lines}-{settings.max_dialogue_lines} dialogue/narration lines.
 Return JSON array:
