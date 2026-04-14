@@ -29,6 +29,11 @@ async def run_writer(state: AgentState) -> dict:
     # branch intent misalignment) surfaced so Writer can be more careful when
     # setting up choice points.
     structure_issues = state.get("structure_review_issues", []) or []
+    # Sprint 9-3: current symbolic state. Mutable across scenes in this run —
+    # each scene's state_writes applied right after the scene is written.
+    # Seeded by Director (9-2) from world_variables initial_values.
+    world_state = dict(state.get("world_state", {}) or {})
+    state_constraints = state.get("state_constraints", "")
     output_dir = state.get("output_dir", ".")
 
     if not script:
@@ -70,13 +75,30 @@ async def run_writer(state: AgentState) -> dict:
             corpus=corpus, embedding_index=embedding_index,
             prior_scenes=prior_scenes,
             structure_issues=structure_issues,
+            world_state=world_state,
+            state_constraints=state_constraints,
         )
         updated_scenes.append(updated_scene)
+
+        # Sprint 9-3: apply state_writes AFTER the scene is written so the
+        # next scene sees the updated state. scene.state_writes was
+        # declared by Director (9-2); Writer may also propose additional
+        # writes via the JSON output (parsed into scene already).
+        if updated_scene.state_writes:
+            for var, value in updated_scene.state_writes.items():
+                world_state[var] = value
+            logger.debug(
+                f"Writer[{updated_scene.id}] applied state_writes: "
+                f"{list(updated_scene.state_writes.keys())}"
+            )
 
     updated_script = script.model_copy(update={"scenes": updated_scenes})
     logger.info(f"Writer completed: dialogue written for {len(updated_scenes)} scenes")
 
-    return {"vn_script": updated_script}
+    return {
+        "vn_script": updated_script,
+        "world_state": world_state,
+    }
 
 
 def _build_char_descriptions(characters: dict[str, CharacterProfile]) -> str:
@@ -171,6 +193,8 @@ async def _write_scene(
     embedding_index=None,
     prior_scenes: list[Scene] | None = None,
     structure_issues: list[str] | None = None,
+    world_state: dict | None = None,
+    state_constraints: str = "",
 ) -> Scene:
     """Write dialogue for a single scene."""
     settings = get_settings()
@@ -237,13 +261,39 @@ async def _write_scene(
     if transition_block:
         transition_block = f"\n--- Transition Guidance ---\n{transition_block}\n"
 
+    # Sprint 9-3: state awareness block. Only injects when the scene
+    # actually reads state variables, or when StateOrchestrator (9-6)
+    # compiled narrative constraints. Scenes without state I/O get
+    # nothing extra.
+    state_block = ""
+    if world_state and scene.state_reads:
+        state_lines = [
+            f"  {k} = {world_state[k]!r}"
+            for k in scene.state_reads if k in world_state
+        ]
+        if state_lines:
+            state_block += "\n--- Current world state (read-only) ---\n"
+            state_block += "\n".join(state_lines)
+            state_block += "\n"
+    if scene.state_writes:
+        state_block += (
+            "\n--- State changes this scene makes (Director-declared) ---\n"
+            + "\n".join(f"  {k} → {v!r}" for k, v in scene.state_writes.items())
+            + "\nWrite dialogue consistent with these changes landing by scene end.\n"
+        )
+    if state_constraints:
+        state_block += (
+            "\n--- StateOrchestrator narrative constraints ---\n"
+            f"{state_constraints}\n"
+        )
+
     user_prompt = f"""Write dialogue for this scene:
 
 Scene ID: {scene.id}
 Title: {scene.title}
 Description: {scene.description}
 {strategy_guidance}
-{feedback_note}{structure_note}{transition_block}
+{feedback_note}{structure_note}{transition_block}{state_block}
 Characters present: {', '.join(scene.characters_present)}
 Music mood: {scene.music.mood.value if scene.music else 'none'}
 
