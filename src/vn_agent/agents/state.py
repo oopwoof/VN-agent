@@ -58,6 +58,11 @@ class AgentState(dict):
     # Sprint 9-6: compiled constraint text from StateOrchestrator.
     # Written by structure_orchestrator node, read by Writer.
     state_constraints: str
+    # Sprint 12-5: when reviewer FAILs because dialogue references
+    # a character_id that isn't in the cast, this carries structured
+    # metadata so a creator-mode UI can offer auto-fill or cast-editor
+    # workflows instead of making the creator re-open the JSON.
+    unknown_characters: list[dict]
 
 
 def initial_state(
@@ -88,4 +93,5 @@ def initial_state(
         "art_direction": "",
         "world_state": {},
         "state_constraints": "",
+        "unknown_characters": [],
     }

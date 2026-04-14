@@ -40,16 +40,28 @@ async def run_reviewer(state: AgentState) -> dict:
     # The first two are pure Python, deterministic, cheap. If either fails
     # we return precise feedback without spending a Sonnet call — the
     # feedback is already actionable ("scene X has 2 lines, needs 5-20").
+    characters = state.get("characters", {}) or {}
+    # Sprint 12-5: extract unknown-character metadata BEFORE the structural
+    # check so a creator-mode failure carries the resolver payload. The
+    # structural check still sees and flags them the same way — this is
+    # additive, not a replacement of validation.
+    from vn_agent.agents.unknown_chars import extract_unknown_characters
+    unknown_chars_payload = extract_unknown_characters(script, characters)
+
     structural_result = _structural_check(script)
     if not structural_result.passed:
         logger.info(f"Reviewer: {len(structural_result.issues)} structural issues")
+        if unknown_chars_payload:
+            logger.info(
+                f"Reviewer: {len(unknown_chars_payload)} unknown character(s): "
+                f"{[u['character_id'] for u in unknown_chars_payload]}"
+            )
         return {
             "review_passed": False,
             "review_feedback": structural_result.feedback,
             "revision_count": state.get("revision_count", 0) + 1,
+            "unknown_characters": unknown_chars_payload,
         }
-
-    characters = state.get("characters", {}) or {}
     settings = get_settings()
     mechanical_result = _mechanical_check(script, characters, settings)
     if not mechanical_result.passed:
@@ -109,6 +121,9 @@ async def run_reviewer(state: AgentState) -> dict:
         "review_feedback": feedback,
         "review_scores": result.scores,
         "revision_count": state.get("revision_count", 0) + 1,
+        # Clear on any path that reaches here — reviewer fell through the
+        # structural check, meaning no unknown characters are blocking.
+        "unknown_characters": [],
     }
 
 
