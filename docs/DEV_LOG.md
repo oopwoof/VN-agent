@@ -188,6 +188,32 @@ src/vn_agent/agents/state.py     | 12 +++++++-
 
 ---
 
+### 2026-04-14 | Phase 12: Symbolic World State（Sprint 9 完整 7 子项）
+
+**触发点**：外部批评的第 4 硬伤 — 无 symbolic state，跨场景靠长上下文硬记，伸缩性崩。Phase 12 给 VN-Agent 补上"游戏引擎"那一半。
+
+**9-1 schema 基础**：新 `WorldVariable`（name / type {bool,int,string,enum} / initial / enum_values）+ `Scene.state_reads/writes` + `BranchOption.requires` + `VNScript.world_variables` + `CharacterProfile.immutability_score`。AgentState 加 `world_state + state_constraints`。
+
+**9-2 Director 产出**：step1 prompt 要求声明 world_variables（明示"只列真要用的"），step2 prompt 每场景填 state_reads/writes/branch.requires。`run_director` 返 `world_state` seed。
+
+**9-3 Writer 消费**：prompt 新增按需可选的 state 块。设计决策：**Writer 不产出 state_writes** — Director 在大纲时声明，Writer 只写符合的对白。权责干净。
+
+**9-4 Ren'Py 编译**：`default var = initial` + `$ var = value` + menu 生成 Ren'Py 原生 `"choice" if has_key and not cursed:` 守护。
+
+**9-5+9-7 Reviewer 强制**：`_mechanical_check` 扩 state I/O 有效性 + 类型/enum 合约。bool 拒 int、int 拒 bool（抓误声明）、enum 必须在 enum_values 里。这层"加法式"回滚策略含义：Writer 能自由演化值（3→7），但不能破坏类型契约。
+
+**9-6 State Orchestrator (Haiku)**：插在 structure_reviewer 和 writer 之间，读 world_state → 产叙事约束文本。Writer 不用脑内算 "affinity=6/10 意味着什么说话方式"，Haiku 提前翻译。~$0.002/run，**Sonnet 不花在该 Haiku 干的活上**。
+
+**架构收益**：
+- VN-Agent 从"扩写器"变"引擎"：跨场景符号状态，不靠长上下文记忆
+- 长篇伸缩性解决：state 是固定大小 dict，100 场景的状态仍 < 10KB
+- 创作者可手编 world_variables.initial_value 做"平行世界"（Sprint 12-4 local regen 准备好）
+- Sprint 8-5 sweep 触发后跑的数据带完整 state 机制
+
+**真实指标**：Tests 279 → 287（8 新 9-7 + 1 旧维度 test 更新）
+
+---
+
 ### 2026-04-13 | Phase 11: 双通道 Writer + 评估严谨性（Sprint 7 + 8）
 
 **触发点**：Phase 10 首次真实 demo 跑通后，外部架构评审（GPT/Gemini + 资深审查者）指四个硬伤：对齐诅咒 / 自审 echo chamber / 无 baseline / 无 symbolic state。Phase 11 是对前三个的系统化响应，state 推 Phase 12。

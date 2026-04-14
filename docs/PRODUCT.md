@@ -23,7 +23,7 @@
 
 ## 产品状态
 
-**当前阶段**: Phase 11 双通道 Writer + 评估严谨性（Sprint 7 + 8）完成 — 面对外部架构批评的系统化响应
+**当前阶段**: Phase 12 Symbolic World State 完成（Sprint 7/8/9）— 287 tests pass。Sprint 8-5 sweep 触发后进 Sprint 10 (Nano Banana) → 12 (流式+双模式) → 13 (多用户)
 
 | 功能模块 | 计划 | 状态 |
 |---------|------|------|
@@ -107,8 +107,12 @@
 | Anthropic prompt caching（≥1500 chars system prompts） | Phase 11 Sprint 8-4 | ✅ 完成 |
 | 8-cell sweep 实际运行 | Phase 11 Sprint 8-5 | 🔜 待用户 --confirm 触发 |
 | Nano Banana (Gemini) 图像 provider 集成 | Phase 11 Sprint 10 | 🔜 下一步 |
-| World state 符号化追踪（flags/affinity/items + Ren'Py $ vars） | Phase 11 Sprint 9 | 🔜 8-5 数据出后 |
-| State Orchestrator (Haiku) pre-Writer 约束注入 | Phase 11 Sprint 9-6 | 🔜 Sprint 9 子项 |
+| World state 符号化追踪（WorldVariable schema + Scene state I/O + BranchOption requires） | Phase 12 Sprint 9-1 | ✅ 完成 |
+| Director 发出 world_variables + 每场景 state_reads/writes | Phase 12 Sprint 9-2 | ✅ 完成 |
+| Writer 读 world_state 遵循 Director 写入 | Phase 12 Sprint 9-3 | ✅ 完成 |
+| Ren'Py 编译器 `default` + `$ var = value` + `"choice" if guard:` | Phase 12 Sprint 9-4 | ✅ 完成 |
+| DialogueReviewer 状态一致性 + 类型/enum 合约校验 | Phase 12 Sprint 9-5/9-7 | ✅ 完成 |
+| State Orchestrator (Haiku pre-Writer 约束注入) | Phase 12 Sprint 9-6 | ✅ 完成 |
 | 图像 fallback UX 升级（text-first 降级，替换 neutral-bytes copy） | Phase 11 Sprint 10-1 | 🔜 |
 | RAG ROI 转向 — lore / 实体检索（而非对白风格） | Phase 11 Sprint 10-2 | 🔜 |
 | 长篇记忆三层架构（递归摘要 + Character Bible + Persona fingerprinting） | Phase 12 Sprint 11 | 🔜 20+ scene 时启用 |
