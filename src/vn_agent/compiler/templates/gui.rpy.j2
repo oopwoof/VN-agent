@@ -100,22 +100,17 @@ screen say(who, what):
             text who id "who" style "nameplate_text"
 
     ## Textbox panel — flat backdrop + body text + CTC arrow.
-    ## Using explicit xpos/ypos (not xalign) because xalign on a
-    ## screen-width window nested under the stock `say` layout
-    ## confused the layout engine — text was getting rendered
-    ## starting from a negative x so the first 200px of every line
-    ## fell off the left edge.
+    ## Geometry is set via `style window` below (see the explicit reset
+    ## at end of this file) so it doesn't inherit xfill/xalign/padding
+    ## from Ren'Py's stock window style. Here the screen just supplies
+    ## the id + backdrop image.
     window:
         id "window"
         background "textbox_bg"
-        xpos 0
-        ypos 780
-        xsize 1920
-        ysize gui.textbox_height
 
         text what id "what":
             ## xpos/ypos here are inside the window's local coord
-            ## system (0,0 = window's top-left = screen 0,780).
+            ## system (0,0 = window's top-left = screen (0, 780)).
             xpos gui.textbox_xpadding
             ypos gui.textbox_ypadding_top
             xmaximum 1920 - 2 * gui.textbox_xpadding
@@ -127,6 +122,26 @@ screen say(who, what):
         add "ctc":
             xpos 1860
             ypos 240
+
+## ── style window reset ────────────────────────────────────────────
+## Ren'Py's default `style window` ships with xalign 0.5, xfill True,
+## a Frame() background, and nonzero padding. Those interact badly
+## with inline screen-level xpos/xsize overrides (previous version
+## ended up either clipped-on-both-sides or shifted-left depending on
+## which property won). Explicitly zero out every layout property so
+## screen-level directives are the sole source of truth.
+style window is default:
+    background None
+    xpos 0
+    ypos 780
+    xsize 1920
+    ysize gui.textbox_height
+    xalign 0.0
+    yalign 0.0
+    xfill False
+    yfill False
+    padding (0, 0, 0, 0)
+    margin (0, 0, 0, 0)
 
 ## ── Custom choice screen ───────────────────────────────────────────
 ## Player-facing branches render as floating buttons stacked in the
