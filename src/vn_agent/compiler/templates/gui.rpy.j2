@@ -47,8 +47,10 @@ define gui.choice_button_text_size = 22
 define gui.choice_button_text_color = "#e0d8c8"
 define gui.choice_button_text_hover_color = "#ffe8a0"
 
-## ── Fonts & text speed ─────────────────────────────────────────
-define config.default_font = "DejaVuSans.ttf"
+## ── Text speed default ─────────────────────────────────────────
+## Fonts set via gui.text_font / gui.name_text_font above.
+## config.default_font does NOT exist in Ren'Py 8.x — setting it raises
+## "not a known configuration variable" at init.
 define _preferences.text_cps = 40
 
 ## ── Custom say screen ────────────────────────────────────────────
