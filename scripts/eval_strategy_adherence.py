@@ -21,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from vn_agent.config import get_settings  # noqa: E402
+from vn_agent.eval.strategy_metrics import compute_signals  # noqa: E402
 from vn_agent.schema.script import VNScript  # noqa: E402
 from vn_agent.services.llm import ainvoke_llm  # noqa: E402
 from vn_agent.strategies.narrative import STRATEGIES, StrategyType  # noqa: E402
@@ -156,6 +157,10 @@ async def _score_run(name: str, script: VNScript) -> list[dict]:
     for scene in script.scenes:
         strategy = scene.narrative_strategy or "drift"
         judged = await _judge_scene(scene, strategy)
+        # Sprint 8-2: rule-based metrics — zero-LLM triangulation signal
+        signals = compute_signals(scene)
+        sig_dict = signals.as_dict()
+        rule_for_assigned = sig_dict.get(strategy, 0.0)
         row = {
             "scene_id": scene.id,
             "strategy": strategy,
@@ -164,13 +169,17 @@ async def _score_run(name: str, script: VNScript) -> list[dict]:
             "score": judged.get("score_primary", 0),
             "reason": judged.get("reason_primary", ""),
             **judged,
+            "rule_signals": sig_dict,
+            "rule_for_assigned": round(rule_for_assigned, 3),
+            "rule_best_match": signals.best_match(),
         }
         results.append(row)
         sec = judged.get("score_secondary")
         sec_str = f" sec={sec}" if sec is not None else ""
         print(
             f"  [{name}] {scene.id:<30} {strategy:<12} "
-            f"primary={row['score']}{sec_str}  {row['reason'][:50]}"
+            f"primary={row['score']}{sec_str} rule={rule_for_assigned:.2f} "
+            f"rule_best={signals.best_match():<10}  {row['reason'][:40]}"
         )
     return results
 
