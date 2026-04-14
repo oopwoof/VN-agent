@@ -108,6 +108,43 @@ _VALID_EMOTIONS = {
 }
 
 
+def _validate_value_against_type(wv, value) -> str | None:
+    """Sprint 9-7: check if a state write / requires value respects the
+    WorldVariable's declared type.
+
+    Returns None if valid, otherwise a short error string for the
+    mechanical-check feedback. Enforces:
+      - bool: value is a Python bool
+      - int: value is an int (or a bool — tolerate since Python bool IS int)
+      - string: value is str
+      - enum: value is str AND in enum_values
+
+    Keeps Writer honest about the "addition-only, no type shifting"
+    rollback policy. Writer can evolve state over scenes; it cannot
+    redefine what the variable means.
+    """
+    expected = wv.type
+    if expected == "bool":
+        if not isinstance(value, bool):
+            return f"type mismatch (declared bool, got {type(value).__name__})"
+    elif expected == "int":
+        # Python bool is a subclass of int — accept but warn
+        if isinstance(value, bool) or not isinstance(value, int):
+            if isinstance(value, bool):
+                return "type mismatch (declared int, got bool — was the type meant to be 'bool'?)"
+            return f"type mismatch (declared int, got {type(value).__name__})"
+    elif expected == "string":
+        if not isinstance(value, str):
+            return f"type mismatch (declared string, got {type(value).__name__})"
+    elif expected == "enum":
+        if not isinstance(value, str):
+            return f"type mismatch (declared enum, got {type(value).__name__})"
+        allowed = wv.enum_values or []
+        if allowed and value not in allowed:
+            return f"not in enum_values {allowed}"
+    return None
+
+
 def _mechanical_check(
     script: VNScript, characters: dict, settings,
 ) -> ReviewResult:
@@ -159,7 +196,10 @@ def _mechanical_check(
                 )
 
     # Sprint 9-5: world state symbolic-integrity checks.
-    declared_vars = {v.name for v in script.world_variables}
+    # Sprint 9-7: extended with type/enum validation to enforce the
+    # addition-only rollback policy. Writer can evolve state; Writer
+    # cannot break the variable's declared type contract.
+    declared_vars = {v.name: v for v in script.world_variables}
     for scene in script.scenes:
         # state_reads references must exist in declared_vars
         for var in scene.state_reads:
@@ -168,20 +208,37 @@ def _mechanical_check(
                     f"Scene '{scene.id}': state_reads references undeclared "
                     f"variable '{var}' (declared: {sorted(declared_vars) or 'none'})"
                 )
-        # state_writes references must exist in declared_vars
-        for var in scene.state_writes:
+        # state_writes references must exist in declared_vars AND value
+        # must be type-compatible with the declaration (Sprint 9-7).
+        for var, value in scene.state_writes.items():
             if var not in declared_vars:
                 issues.append(
                     f"Scene '{scene.id}': state_writes targets undeclared "
                     f"variable '{var}'"
                 )
-        # branch.requires references must exist in declared_vars
+                continue
+            wv = declared_vars[var]
+            err = _validate_value_against_type(wv, value)
+            if err:
+                issues.append(
+                    f"Scene '{scene.id}': state_writes[{var!r}] = {value!r} — {err}"
+                )
+        # branch.requires references must exist AND compare values must
+        # be type-compatible (Sprint 9-7).
         for branch in scene.branches:
-            for req_var in branch.requires:
+            for req_var, req_val in branch.requires.items():
                 if req_var not in declared_vars:
                     issues.append(
                         f"Scene '{scene.id}' branch '{branch.text[:40]}': "
                         f"requires references undeclared variable '{req_var}'"
+                    )
+                    continue
+                wv = declared_vars[req_var]
+                err = _validate_value_against_type(wv, req_val)
+                if err:
+                    issues.append(
+                        f"Scene '{scene.id}' branch '{branch.text[:40]}' "
+                        f"requires[{req_var!r}]={req_val!r} — {err}"
                     )
 
     # Sprint 9-5 (immutability constitution): Writer dialogue must not

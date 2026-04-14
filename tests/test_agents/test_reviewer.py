@@ -434,3 +434,118 @@ class TestBranchDivergence:
         ])
         warnings = _check_branch_divergence(script)
         assert warnings == []  # character difference saves it
+
+
+# ── Sprint 9-7: state type/enum validation via _mechanical_check ─────────
+class TestWorldStateValidation:
+    """_mechanical_check rejects state writes/requires that violate declared types."""
+
+    def _make_script_with_var(self, var, scene_extra=None):
+        from vn_agent.schema.script import DialogueLine, Scene, VNScript
+        scene_kwargs = dict(
+            id="s1", title="s1", description="", background_id="bg",
+            characters_present=["alice"],
+            dialogue=[DialogueLine(character_id="alice", text="Hi.")],
+            next_scene_id=None,
+        )
+        if scene_extra:
+            scene_kwargs.update(scene_extra)
+        return VNScript(
+            title="T", description="", theme="", start_scene_id="s1",
+            scenes=[Scene(**scene_kwargs)],
+            world_variables=[var],
+        )
+
+    def _run(self, script, characters=None):
+        from vn_agent.agents.reviewer import _mechanical_check
+
+        class _FakeSettings:
+            min_dialogue_lines = 1
+            max_dialogue_lines = 20
+        return _mechanical_check(script, characters or {"alice": _MkChar()}, _FakeSettings())
+
+    def test_bool_write_accepts_bool(self):
+        from vn_agent.schema.script import WorldVariable
+        wv = WorldVariable(name="has_key", type="bool", initial_value=False, description="x")
+        script = self._make_script_with_var(wv, {"state_writes": {"has_key": True}})
+        r = self._run(script)
+        assert r.passed
+
+    def test_bool_write_rejects_int(self):
+        from vn_agent.schema.script import WorldVariable
+        wv = WorldVariable(name="has_key", type="bool", initial_value=False, description="x")
+        script = self._make_script_with_var(wv, {"state_writes": {"has_key": 1}})
+        r = self._run(script)
+        assert not r.passed
+        assert any("type mismatch" in i for i in r.issues)
+
+    def test_int_write_accepts_int(self):
+        from vn_agent.schema.script import WorldVariable
+        wv = WorldVariable(name="affinity", type="int", initial_value=3, description="x")
+        script = self._make_script_with_var(wv, {"state_writes": {"affinity": 7}})
+        r = self._run(script)
+        assert r.passed
+
+    def test_int_write_rejects_bool(self):
+        """bool technically is int in Python — catch as a type contract violation."""
+        from vn_agent.schema.script import WorldVariable
+        wv = WorldVariable(name="affinity", type="int", initial_value=3, description="x")
+        script = self._make_script_with_var(wv, {"state_writes": {"affinity": True}})
+        r = self._run(script)
+        assert not r.passed
+        assert any("got bool" in i for i in r.issues)
+
+    def test_enum_write_accepts_member(self):
+        from vn_agent.schema.script import WorldVariable
+        wv = WorldVariable(
+            name="weather", type="enum", initial_value="clear",
+            description="x", enum_values=["clear", "storm", "fog"],
+        )
+        script = self._make_script_with_var(wv, {"state_writes": {"weather": "storm"}})
+        r = self._run(script)
+        assert r.passed
+
+    def test_enum_write_rejects_non_member(self):
+        from vn_agent.schema.script import WorldVariable
+        wv = WorldVariable(
+            name="weather", type="enum", initial_value="clear",
+            description="x", enum_values=["clear", "storm", "fog"],
+        )
+        script = self._make_script_with_var(wv, {"state_writes": {"weather": "rainbow"}})
+        r = self._run(script)
+        assert not r.passed
+        assert any("not in enum_values" in i for i in r.issues)
+
+    def test_undeclared_state_read_flagged(self):
+        from vn_agent.schema.script import WorldVariable
+        wv = WorldVariable(name="affinity", type="int", initial_value=3, description="x")
+        script = self._make_script_with_var(wv, {"state_reads": ["nonexistent"]})
+        r = self._run(script)
+        assert not r.passed
+        assert any("undeclared" in i for i in r.issues)
+
+    def test_no_world_vars_no_checks(self):
+        """Scripts without world_variables pass trivially."""
+        from vn_agent.schema.script import DialogueLine, Scene, VNScript
+        script = VNScript(
+            title="T", description="", theme="", start_scene_id="s1",
+            scenes=[Scene(
+                id="s1", title="s", description="", background_id="bg",
+                characters_present=["alice"],
+                dialogue=[DialogueLine(character_id="alice", text="Hi.")],
+                next_scene_id=None,
+            )],
+        )
+        r = self._run(script)
+        assert r.passed
+
+
+class _MkChar:
+    """Minimal CharacterProfile stand-in for mechanical check tests."""
+    def __init__(self):
+        self.id = "alice"
+        self.name = "Alice"
+        self.role = "protagonist"
+        self.personality = "curious"
+        self.background = "young"
+        self.immutability_score = {"name": 10, "role": 10}
