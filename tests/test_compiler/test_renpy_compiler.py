@@ -196,3 +196,55 @@ class TestRenPyCompiler:
         result = compile_to_string(script, chars)
         assert "at left" in result
         assert "at right" in result
+
+
+class TestInitRpyImageDeclarations:
+    """Sprint 12-3c: init.rpy must declare image paths so Ren'Py's
+    auto-discovery (which only walks `images/<name>.png` or
+    `images/<tag>/<attr>.png`) can resolve `show sable neutral` to
+    our deeper layout `images/characters/<id>/<emotion>.png`. Without
+    these declarations Ren'Py silently falls back to a label-over-
+    silhouette placeholder — exactly the bug from demo vn_joint_20260414.
+    """
+
+    def test_init_rpy_declares_every_character_emotion(self):
+        script, chars = make_simple_script()
+        files = compile_script(script, chars)
+        init = files["game/init.rpy"]
+        for char_id in chars:
+            for emotion in ["neutral", "happy", "sad"]:
+                expected = f'image {char_id} {emotion} = "images/characters/{char_id}/{emotion}.png"'
+                assert expected in init, (
+                    f"Missing image decl for {char_id} {emotion} — Ren'Py will "
+                    f"render this as a label-over-silhouette placeholder"
+                )
+
+    def test_init_rpy_declares_every_scene_background(self):
+        script, chars = make_simple_script()
+        files = compile_script(script, chars)
+        init = files["game/init.rpy"]
+        for scene in script.scenes:
+            if scene.background_id:
+                expected = (
+                    f'image {scene.background_id} = '
+                    f'"images/backgrounds/{scene.background_id}.png"'
+                )
+                assert expected in init, (
+                    f"Missing BG decl for {scene.background_id}"
+                )
+
+    def test_init_rpy_no_duplicate_declarations(self):
+        """Same bg referenced in 3 scenes → emit one image statement."""
+        script, chars = make_simple_script()
+        files = compile_script(script, chars)
+        init = files["game/init.rpy"]
+        # bg_classroom is used by all 3 scenes in the fixture
+        count = init.count('image bg_classroom = "images/backgrounds/bg_classroom.png"')
+        assert count == 1, f"Expected 1 bg_classroom decl, got {count}"
+
+    def test_init_rpy_stable_ordering(self):
+        """Deterministic output — two compile runs give byte-identical init.rpy."""
+        script, chars = make_simple_script()
+        a = compile_script(script, chars)["game/init.rpy"]
+        b = compile_script(script, chars)["game/init.rpy"]
+        assert a == b

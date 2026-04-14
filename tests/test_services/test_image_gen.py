@@ -290,3 +290,112 @@ class TestImageByteValidation:
     def test_valid_webp_accepted(self):
         webp = b"RIFF" + b"\x00" * 32
         image_gen._validate_image_bytes(webp)
+
+
+class TestAspectRatioPlumbing:
+    """Sprint 12-3c: aspect_ratio kwarg must reach the Gemini payload.
+
+    Without this, scene backgrounds default to 1:1 and stretch ugly on
+    Ren'Py's 1920x1080 base, and character sprites crop full-body poses.
+    """
+
+    @pytest.mark.asyncio
+    async def test_aspect_ratio_forwards_through_text_dispatch(self, tmp_path):
+        out = tmp_path / "out.png"
+        settings = _FakeSettings("google_gemini", google_key="AIza-fake")
+        with patch("vn_agent.services.image_gen.get_settings", return_value=settings):
+            with patch(
+                "vn_agent.services.image_gen._generate_gemini_image",
+                new=AsyncMock(return_value=out),
+            ) as gem:
+                await image_gen.generate_image("prompt", out, aspect_ratio="16:9")
+                gem.assert_awaited_once_with("prompt", out, "16:9")
+
+    @pytest.mark.asyncio
+    async def test_aspect_ratio_forwards_through_ref_dispatch(self, tmp_path):
+        out = tmp_path / "out.png"
+        ref = tmp_path / "ref.png"
+        ref.write_bytes(b"fake")
+        settings = _FakeSettings("google_gemini", google_key="AIza-fake")
+        with patch("vn_agent.services.image_gen.get_settings", return_value=settings):
+            with patch(
+                "vn_agent.services.image_gen._edit_gemini_with_reference",
+                new=AsyncMock(return_value=out),
+            ) as gem:
+                await image_gen.generate_image_with_reference(
+                    "prompt", ref, out, aspect_ratio="3:4",
+                )
+                gem.assert_awaited_once_with("prompt", ref, out, "3:4")
+
+    @pytest.mark.asyncio
+    async def test_aspect_ratio_none_preserves_prior_behavior(self, tmp_path):
+        """Missing aspect_ratio must stay backward-compatible — Gemini
+        should be called with aspect_ratio=None, NOT a default string."""
+        out = tmp_path / "out.png"
+        settings = _FakeSettings("google_gemini", google_key="AIza-fake")
+        with patch("vn_agent.services.image_gen.get_settings", return_value=settings):
+            with patch(
+                "vn_agent.services.image_gen._generate_gemini_image",
+                new=AsyncMock(return_value=out),
+            ) as gem:
+                await image_gen.generate_image("prompt", out)
+                gem.assert_awaited_once_with("prompt", out, None)
+
+    @pytest.mark.asyncio
+    async def test_gemini_payload_includes_image_config_when_aspect_set(self, tmp_path):
+        """Direct check that Gemini's generationConfig carries imageConfig.aspectRatio."""
+        out = tmp_path / "out.png"
+        captured_payload = {}
+
+        async def fake_post(self, url, json):  # noqa: A002 — 'json' is httpx's kwarg name
+            captured_payload.update(json)
+            class R:
+                status_code = 200
+                def raise_for_status(self): pass
+                def json(self):
+                    # Return a valid one-image response shape
+                    import base64
+                    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 80
+                    return {"candidates": [{"content": {"parts": [
+                        {"inlineData": {"data": base64.b64encode(png).decode()}}
+                    ]}}]}
+            return R()
+
+        settings = _FakeSettings("google_gemini", google_key="AIza-fake")
+        with patch("vn_agent.services.image_gen.get_settings", return_value=settings), \
+             patch("httpx.AsyncClient.post", new=fake_post), \
+             patch("vn_agent.services.image_gen._write_validated"):
+            await image_gen._generate_gemini_image("prompt", out, aspect_ratio="16:9")
+
+        gen_cfg = captured_payload["generationConfig"]
+        assert gen_cfg["imageConfig"] == {"aspectRatio": "16:9"}
+        assert gen_cfg["responseModalities"] == ["IMAGE"]
+
+    @pytest.mark.asyncio
+    async def test_gemini_payload_omits_image_config_when_aspect_none(self, tmp_path):
+        """When aspect_ratio is None, imageConfig must NOT appear in payload
+        (otherwise Gemini may reject unknown empty config keys)."""
+        out = tmp_path / "out.png"
+        captured_payload = {}
+
+        async def fake_post(self, url, json):  # noqa: A002
+            captured_payload.update(json)
+            class R:
+                status_code = 200
+                def raise_for_status(self): pass
+                def json(self):
+                    import base64
+                    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 80
+                    return {"candidates": [{"content": {"parts": [
+                        {"inlineData": {"data": base64.b64encode(png).decode()}}
+                    ]}}]}
+            return R()
+
+        settings = _FakeSettings("google_gemini", google_key="AIza-fake")
+        with patch("vn_agent.services.image_gen.get_settings", return_value=settings), \
+             patch("httpx.AsyncClient.post", new=fake_post), \
+             patch("vn_agent.services.image_gen._write_validated"):
+            await image_gen._generate_gemini_image("prompt", out)
+
+        gen_cfg = captured_payload["generationConfig"]
+        assert "imageConfig" not in gen_cfg

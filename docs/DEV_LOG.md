@@ -42,6 +42,24 @@
 
 ## 开发记录
 
+### 2026-04-14 | 测试 - 2026-04-14 13:06
+
+**变更文件** (2 个):
+**测试变更** (2 文件):
+  - `tests/test_compiler/test_renpy_compiler.py`
+  - `tests/test_services/test_image_gen.py`
+
+**变更统计**:
+```
+tests/test_compiler/test_renpy_compiler.py |  52 ++++++++++++++
+ tests/test_services/test_image_gen.py      | 109 +++++++++++++++++++++++++++++
+ 2 files changed, 161 insertions(+)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-14 | 实现 - 2026-04-14 12:59
 
 **变更文件** (8 个):
