@@ -120,8 +120,11 @@ Return a JSON object:
     # Try to generate image; collect error if it fails
     file_path = Path(output_dir) / "game" / "images" / "backgrounds" / f"{scene.background_id}.png"
     try:
-        await generate_image(bg_prompt, file_path)
-        logger.info(f"Generated background: {scene.background_id}")
+        # 16:9 matches Ren'Py's default 1920x1080 base resolution —
+        # stretches ugly at any other aspect. Nano Banana honors this
+        # via generationConfig.imageConfig.aspectRatio.
+        await generate_image(bg_prompt, file_path, aspect_ratio="16:9")
+        logger.info(f"Generated background: {scene.background_id} (16:9)")
     except Exception as e:
         logger.warning(f"Could not generate background {scene.background_id}: {e}")
         errors.append(f"SceneArtist: image {scene.background_id}: {e}")

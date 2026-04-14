@@ -42,6 +42,38 @@
 
 ## 开发记录
 
+### 2026-04-14 | 实现 - 2026-04-14 12:59
+
+**变更文件** (8 个):
+**源码变更** (6 文件):
+  - `src/vn_agent/agents/character_designer.py`
+  - `src/vn_agent/agents/scene_artist.py`
+  - `src/vn_agent/compiler/renpy_compiler.py`
+  - `src/vn_agent/compiler/templates/gui.rpy.j2`
+  - `src/vn_agent/compiler/templates/init.rpy.j2`
+  - `src/vn_agent/services/image_gen.py`
+
+**测试变更** (2 文件):
+  - `tests/test_agents/test_character_designer.py`
+  - `tests/test_services/test_image_gen.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/character_designer.py    | 10 +++-
+ src/vn_agent/agents/scene_artist.py          |  7 ++-
+ src/vn_agent/compiler/renpy_compiler.py      |  7 +++
+ src/vn_agent/compiler/templates/gui.rpy.j2   | 90 +++++++++++++++++++++++++++-
+ src/vn_agent/compiler/templates/init.rpy.j2  | 15 +++++
+ src/vn_agent/services/image_gen.py           | 56 +++++++++++++----
+ tests/test_agents/test_character_designer.py |  9 ++-
+ tests/test_services/test_image_gen.py        |  2 +-
+ 8 files changed, 173 insertions(+), 23 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-14 | 实现 - 2026-04-14 12:40
 
 **变更文件** (1 个):

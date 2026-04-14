@@ -58,10 +58,18 @@ def provider_supports_reference(provider: str | None = None) -> bool:
     return provider in _PROVIDERS_WITH_REFERENCE
 
 
-async def _dispatch_text(provider: str, prompt: str, output_path: Path) -> Path:
-    """Dispatch a text-to-image call to the right backend."""
+async def _dispatch_text(
+    provider: str, prompt: str, output_path: Path,
+    aspect_ratio: str | None = None,
+) -> Path:
+    """Dispatch a text-to-image call to the right backend.
+
+    aspect_ratio is provider-hinted (Nano Banana uses it directly; DALL-E /
+    Stability map to nearest supported size, others ignore). Allowed values
+    for Gemini: "1:1", "16:9", "9:16", "4:3", "3:4", "2:3", "3:2".
+    """
     if provider == "google_gemini":
-        return await _generate_gemini_image(prompt, output_path)
+        return await _generate_gemini_image(prompt, output_path, aspect_ratio)
     if provider in {"openai", "openai_gpt_image"}:
         return await _generate_openai(prompt, output_path)
     if provider == "stability":
@@ -71,10 +79,13 @@ async def _dispatch_text(provider: str, prompt: str, output_path: Path) -> Path:
 
 async def _dispatch_ref(
     provider: str, prompt: str, reference_path: Path, output_path: Path,
+    aspect_ratio: str | None = None,
 ) -> Path:
     """Dispatch a reference-conditioned call to the right backend."""
     if provider == "google_gemini":
-        return await _edit_gemini_with_reference(prompt, reference_path, output_path)
+        return await _edit_gemini_with_reference(
+            prompt, reference_path, output_path, aspect_ratio,
+        )
     if provider == "openai_gpt_image":
         return await _edit_openai_gpt_image(prompt, reference_path, output_path)
     if provider == "stability":
@@ -82,13 +93,20 @@ async def _dispatch_ref(
     raise ImageGenerationError(f"Provider {provider} doesn't support reference")
 
 
-async def generate_image(prompt: str, output_path: Path) -> Path:
+async def generate_image(
+    prompt: str, output_path: Path, aspect_ratio: str | None = None,
+) -> Path:
     """Text-to-image with provider fallback chain.
 
     Tries the configured primary provider first; on failure walks down
     _TEXT_FALLBACK_CHAIN. This lets a paid-Gemini setup keep working
     even if Nano Banana rate-limits, and lets a free-tier Gemini user
     degrade to DALL-E transparently.
+
+    aspect_ratio (Sprint 12-3c): forwarded to provider where supported.
+    Use "16:9" for scene backgrounds (matches Ren'Py's 1920x1080 base)
+    and "3:4" for character sprites (traditional VN full-body framing).
+    None → provider default (usually 1:1).
     """
     settings = get_settings()
     primary = settings.image_provider
@@ -100,7 +118,7 @@ async def generate_image(prompt: str, output_path: Path) -> Path:
         if not _provider_has_credentials(provider, settings):
             continue
         try:
-            return await _dispatch_text(provider, prompt, output_path)
+            return await _dispatch_text(provider, prompt, output_path, aspect_ratio)
         except Exception as e:
             if not _is_retryable_image_error(e):
                 # Policy violation / auth / bad request — don't burn
@@ -118,6 +136,7 @@ async def generate_image(prompt: str, output_path: Path) -> Path:
 
 async def generate_image_with_reference(
     prompt: str, reference_path: Path, output_path: Path,
+    aspect_ratio: str | None = None,
 ) -> Path:
     """Generate with reference image + provider fallback chain.
 
@@ -130,7 +149,7 @@ async def generate_image_with_reference(
         logger.warning(
             f"Reference {reference_path} missing — falling back to text-to-image"
         )
-        return await generate_image(prompt, output_path)
+        return await generate_image(prompt, output_path, aspect_ratio)
 
     primary = settings.image_provider
     chain = [primary] + [p for p in _REF_FALLBACK_CHAIN if p != primary]
@@ -143,7 +162,9 @@ async def generate_image_with_reference(
             continue
         tried_any = True
         try:
-            return await _dispatch_ref(provider, prompt, reference_path, output_path)
+            return await _dispatch_ref(
+                provider, prompt, reference_path, output_path, aspect_ratio,
+            )
         except Exception as e:
             if not _is_retryable_image_error(e):
                 raise
@@ -158,7 +179,7 @@ async def generate_image_with_reference(
             "No reference-capable provider has credentials — "
             "degrading to text-only (consistency may drift)"
         )
-        return await generate_image(prompt, output_path)
+        return await generate_image(prompt, output_path, aspect_ratio)
     raise ImageGenerationError(
         f"All ref-capable providers failed. Last error: {last_error}"
     )
@@ -404,16 +425,23 @@ def _gemini_image_model() -> str:
     return _GEMINI_IMAGE_DEFAULT
 
 
-async def _generate_gemini_image(prompt: str, output_path: Path) -> Path:
+async def _generate_gemini_image(
+    prompt: str, output_path: Path, aspect_ratio: str | None = None,
+) -> Path:
     """Text-to-image via Gemini 2.5 Flash Image."""
     settings = get_settings()
     if not settings.google_api_key:
         raise ImageGenerationError("GOOGLE_API_KEY not set")
 
     url = f"{_GEMINI_BASE}/{_gemini_image_model()}:generateContent?key={settings.google_api_key}"
+    gen_config: dict = {"responseModalities": ["IMAGE"]}
+    if aspect_ratio:
+        # Gemini 2.5 Flash Image accepts aspectRatio in imageConfig.
+        # Valid values: "1:1", "16:9", "9:16", "4:3", "3:4", "2:3", "3:2".
+        gen_config["imageConfig"] = {"aspectRatio": aspect_ratio}
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"responseModalities": ["IMAGE"]},
+        "generationConfig": gen_config,
     }
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(url, json=payload)
@@ -426,6 +454,7 @@ async def _generate_gemini_image(prompt: str, output_path: Path) -> Path:
 
 async def _edit_gemini_with_reference(
     prompt: str, reference_path: Path, output_path: Path,
+    aspect_ratio: str | None = None,
 ) -> Path:
     """Reference-conditioned gen via Gemini 2.5 Flash Image.
 
@@ -443,6 +472,9 @@ async def _edit_gemini_with_reference(
     ref_b64 = base64.b64encode(ref_bytes).decode("ascii")
 
     url = f"{_GEMINI_BASE}/{_gemini_image_model()}:generateContent?key={settings.google_api_key}"
+    gen_config: dict = {"responseModalities": ["IMAGE"]}
+    if aspect_ratio:
+        gen_config["imageConfig"] = {"aspectRatio": aspect_ratio}
     payload = {
         "contents": [
             {
@@ -457,7 +489,7 @@ async def _edit_gemini_with_reference(
                 ]
             }
         ],
-        "generationConfig": {"responseModalities": ["IMAGE"]},
+        "generationConfig": gen_config,
     }
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(url, json=payload)

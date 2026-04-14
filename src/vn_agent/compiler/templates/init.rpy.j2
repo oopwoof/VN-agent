@@ -8,6 +8,21 @@ init:
     $ config.has_voice = False
     $ config.main_menu_music = None
 
+# Image declarations — Ren'Py's automatic image discovery only searches
+# `images/<name>.png` and `images/<tag>/<attr>.png`. Our asset layout
+# uses `images/characters/<id>/<emotion>.png` which is one level too
+# deep, so without these explicit defines Ren'Py falls back to its
+# built-in label-over-silhouette placeholder. We also define scene
+# backgrounds as transforms so Ren'Py can `scene bg_foo` cleanly.
+{% for char_id in character_ids %}
+{% for emotion in ['neutral', 'happy', 'sad'] %}
+image {{ char_id }} {{ emotion }} = "images/characters/{{ char_id }}/{{ emotion }}.png"
+{% endfor %}
+{% endfor %}
+{% for bg_id in background_ids %}
+image {{ bg_id }} = "images/backgrounds/{{ bg_id }}.png"
+{% endfor %}
+
 {% if script.world_variables %}
 
 # World variables (Sprint 9-1): symbolic state declared by Director.

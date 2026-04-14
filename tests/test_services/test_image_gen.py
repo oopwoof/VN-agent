@@ -121,7 +121,7 @@ class TestGeminiProvider:
                 new=AsyncMock(return_value=out),
             ) as gem:
                 await image_gen.generate_image_with_reference("prompt", ref, out)
-                gem.assert_awaited_once_with("prompt", ref, out)
+                gem.assert_awaited_once_with("prompt", ref, out, None)
 
     @pytest.mark.asyncio
     async def test_gemini_falls_through_to_gpt_image_on_failure(self, tmp_path):

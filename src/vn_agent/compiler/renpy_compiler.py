@@ -56,9 +56,16 @@ def compile_script(
     )
 
     # init.rpy
+    # Sprint 12-3c: explicit image declarations needed because our asset
+    # layout is `images/characters/<id>/<emotion>.png` (one level deeper
+    # than Ren'Py's auto-discovery finds). Without these, Ren'Py shows
+    # its label-over-silhouette placeholder instead of the real sprite.
     init_template = env.get_template("init.rpy.j2")
+    bg_ids = sorted({s.background_id for s in script.scenes if s.background_id})
     files["game/init.rpy"] = init_template.render(
         script=script,
+        character_ids=sorted(characters.keys()),
+        background_ids=bg_ids,
     )
 
     return files

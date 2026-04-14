@@ -28,13 +28,16 @@ def _make_visual() -> VisualProfile:
     )
 
 
-async def _write_png(prompt: str, output_path: Path):
+async def _write_png(prompt: str, output_path: Path, aspect_ratio: str | None = None):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(b"neutral-bytes")
     return output_path
 
 
-async def _write_png_ref(prompt: str, reference_path: Path, output_path: Path):
+async def _write_png_ref(
+    prompt: str, reference_path: Path, output_path: Path,
+    aspect_ratio: str | None = None,
+):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(b"variant-bytes")
     return output_path
@@ -97,7 +100,7 @@ class TestNeutralFirstSprites:
         visual = _make_visual()
         captured: list[str] = []
 
-        async def capture(prompt: str, output_path: Path):
+        async def capture(prompt: str, output_path: Path, aspect_ratio: str | None = None):
             captured.append(prompt)
             return await _write_png(prompt, output_path)
 
