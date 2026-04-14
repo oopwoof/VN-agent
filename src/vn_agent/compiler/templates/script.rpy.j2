@@ -22,7 +22,7 @@ label {{ scene.id }}:
 {% else %}
     scene {{ scene.background_id }} with dissolve
 {% endif %}
-{% set positions = ['center'] if scene.characters_present|length == 1 else ['left', 'right'] if scene.characters_present|length == 2 else ['left', 'center', 'right'] %}
+{% set positions = ['vn_sprite_center'] if scene.characters_present|length == 1 else ['vn_sprite_left', 'vn_sprite_right'] if scene.characters_present|length == 2 else ['vn_sprite_left', 'vn_sprite_center', 'vn_sprite_right'] %}
 {% for char_id in scene.characters_present %}
     show {{ char_id }} neutral at {{ positions[loop.index0 % positions|length] }}
 {% endfor %}
@@ -34,9 +34,9 @@ label {{ scene.id }}:
     show {{ line.character_id }} {{ line.emotion }}
 {% set _ = ns_emo.map.update({line.character_id: line.emotion}) %}
 {% endif %}
-    {{ line.character_id }} "{{ line.text | replace('"', '\\"') }}"
+    {{ line.character_id }} "{{ line.text | renpy_safe }}"
 {% else %}
-    "{{ line.text | replace('"', '\\"') }}"
+    "{{ line.text | renpy_safe }}"
 {% endif %}
 {% endfor %}
 
@@ -67,10 +67,10 @@ label {{ scene.id }}:
 {% else %}{% set _ = guard_parts.append(req_var ~ ' == ' ~ req_val) %}
 {% endif %}
 {% endfor %}
-        "{{ branch.text | replace('"', '\\"') }}" if {{ guard_parts | join(' and ') }}:
+        "{{ branch.text | renpy_safe }}" if {{ guard_parts | join(' and ') }}:
             jump {{ branch.next_scene_id }}
 {% else %}
-        "{{ branch.text | replace('"', '\\"') }}":
+        "{{ branch.text | renpy_safe }}":
             jump {{ branch.next_scene_id }}
 {% endif %}
 {% endfor %}

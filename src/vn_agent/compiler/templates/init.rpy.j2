@@ -12,16 +12,59 @@ init:
 # `images/<name>.png` and `images/<tag>/<attr>.png`. Our asset layout
 # uses `images/characters/<id>/<emotion>.png` which is one level too
 # deep, so without these explicit defines Ren'Py falls back to its
-# built-in label-over-silhouette placeholder. We also define scene
-# backgrounds as transforms so Ren'Py can `scene bg_foo` cleanly.
-{% for char_id in character_ids %}
-{% for emotion in ['neutral', 'happy', 'sad'] %}
-image {{ char_id }} {{ emotion }} = "images/characters/{{ char_id }}/{{ emotion }}.png"
+# built-in label-over-silhouette placeholder.
+#
+# CharacterDesigner only generates 3 sprite variants by default
+# (neutral/happy/sad) to keep image cost at ~$0.12/character. Writer's
+# dialogue vocabulary is richer (_VALID_EMOTIONS has 9 entries), so
+# for emotions without a generated PNG we alias to the nearest real
+# sprite. The alias is FILESYSTEM-AWARE: renpy_compiler scans
+# images/characters/<id>/ at compile time — if the creator later
+# generates (or hand-drops) `thoughtful.png`, compile emits a direct
+# reference instead of the fallback alias. No manual edit required.
+{% for char_id, emotion_map in character_sprites.items() %}
+# {{ char_id }}: {{ emotion_map.values() | unique | list | length }} distinct file(s), {{ emotion_map | length }} emotion names
+{% for emotion, file_path in emotion_map.items() %}
+image {{ char_id }} {{ emotion }} = "{{ file_path }}"
 {% endfor %}
 {% endfor %}
 {% for bg_id in background_ids %}
 image {{ bg_id }} = "images/backgrounds/{{ bg_id }}.png"
 {% endfor %}
+
+# Sprite transforms — our sprites are generated at 3:4 portrait (~864x1184)
+# which exceeds Ren'Py's 1920x1080 base height. Scale down to fit AND
+# anchor at the bottom so the character stands on the textbox edge
+# instead of getting the head clipped at the top. Characters dim to 70%
+# when not actively speaking (Sprint 12 dialogue polish).
+transform vn_sprite_base:
+    zoom 0.78
+    yanchor 1.0
+    ypos 1.0
+    subpixel True
+
+transform vn_sprite_left:
+    vn_sprite_base
+    xanchor 0.5
+    xpos 0.22
+
+transform vn_sprite_center:
+    vn_sprite_base
+    xanchor 0.5
+    xpos 0.5
+
+transform vn_sprite_right:
+    vn_sprite_base
+    xanchor 0.5
+    xpos 0.78
+
+# Speaker-focus helper: full brightness when speaking, dim + slightly
+# desaturated when listening. Wired into the say screen in gui.rpy.
+transform vn_sprite_active:
+    matrixcolor BrightnessMatrix(0.0) * SaturationMatrix(1.0)
+
+transform vn_sprite_inactive:
+    matrixcolor BrightnessMatrix(-0.15) * SaturationMatrix(0.85)
 
 {% if script.world_variables %}
 

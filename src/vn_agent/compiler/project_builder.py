@@ -36,8 +36,11 @@ def build_project(
     for subdir in GAME_DIRS:
         (output_dir / subdir).mkdir(parents=True, exist_ok=True)
 
-    # Compile .rpy files
-    rpy_files = compile_script(script, characters)
+    # Compile .rpy files. Passing output_dir lets the compiler scan
+    # existing sprite files and alias emotions only for the ones missing,
+    # so a later regeneration of `thoughtful.png` (etc.) is picked up
+    # automatically on next recompile without manual template edits.
+    rpy_files = compile_script(script, characters, output_dir=output_dir)
     for rel_path, content in rpy_files.items():
         target = output_dir / rel_path
         target.parent.mkdir(parents=True, exist_ok=True)

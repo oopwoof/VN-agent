@@ -42,6 +42,34 @@
 
 ## 开发记录
 
+### 2026-04-14 | 实现 - 2026-04-14 13:53
+
+**变更文件** (6 个):
+**源码变更** (5 文件):
+  - `src/vn_agent/compiler/project_builder.py`
+  - `src/vn_agent/compiler/renpy_compiler.py`
+  - `src/vn_agent/compiler/templates/gui.rpy.j2`
+  - `src/vn_agent/compiler/templates/init.rpy.j2`
+  - `src/vn_agent/compiler/templates/script.rpy.j2`
+
+**测试变更** (1 文件):
+  - `tests/test_compiler/test_renpy_compiler.py`
+
+**变更统计**:
+```
+src/vn_agent/compiler/project_builder.py      |   7 +-
+ src/vn_agent/compiler/renpy_compiler.py       |  91 +++++++++++-
+ src/vn_agent/compiler/templates/gui.rpy.j2    | 196 ++++++++++++++++----------
+ src/vn_agent/compiler/templates/init.rpy.j2   |  53 ++++++-
+ src/vn_agent/compiler/templates/script.rpy.j2 |  10 +-
+ tests/test_compiler/test_renpy_compiler.py    |   7 +-
+ 6 files changed, 274 insertions(+), 90 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-14 | 实现 - 2026-04-14 13:28
 
 **变更文件** (1 个):

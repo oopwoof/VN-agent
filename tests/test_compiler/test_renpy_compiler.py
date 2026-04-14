@@ -164,7 +164,8 @@ class TestRenPyCompiler:
         assert "with dissolve" in result
 
     def test_character_positioning(self):
-        """2-character scene should use 'at left' and 'at right'."""
+        """2-character scene should use vn_sprite_left / vn_sprite_right transforms
+        (custom scale+anchor transforms, NOT Ren'Py's default `at left/right`)."""
         chars = {
             "char_a": CharacterProfile(
                 id="char_a", name="A", color="#ff0000",
@@ -194,8 +195,8 @@ class TestRenPyCompiler:
             characters=["char_a", "char_b"],
         )
         result = compile_to_string(script, chars)
-        assert "at left" in result
-        assert "at right" in result
+        assert "at vn_sprite_left" in result
+        assert "at vn_sprite_right" in result
 
 
 class TestInitRpyImageDeclarations:
