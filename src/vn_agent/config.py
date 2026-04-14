@@ -90,13 +90,18 @@ class Settings(BaseSettings):
     #   "literary" — zero-shot with physics-framework system prompt, no raw
     #                text few-shot injected (RAG retrieval still runs for audit).
     #                Better for psychological / literary VN output.
-    #   "action"   — inject raw text-shot into Writer prompt (current behavior).
+    #   "action"   — inject raw text-shot into Writer prompt.
     #                Better for galgame / action-anime VN where format fidelity
     #                and stage-direction-heavy dialogue matter more than
     #                subtextual depth.
-    # Default kept as "action" for backward compatibility until Sprint 7-4
-    # sweep data confirms which should win by default.
-    writer_mode: Literal["literary", "action"] = "action"
+    # Default flipped to "literary" after Sprint 8-5 sweep (2026-04-14):
+    # literary mean 4.17 vs action 3.92 vs baseline_self_refine 3.45 vs
+    # baseline_single 3.25. literary beat action on BOTH themes including
+    # the action-leaning dragon (4.5 vs 4.17), so the physics prompt is
+    # the right default even when the theme sounds like "action mode's
+    # territory." Flip to "action" explicitly when the user wants
+    # galgame/furry VN style fidelity.
+    writer_mode: Literal["literary", "action"] = "literary"
 
     # How many prior scenes' full dialogue to inject into Writer prompt (Sprint 7-2).
     # 0 = no prior context (rely on scene.entry_context card only).

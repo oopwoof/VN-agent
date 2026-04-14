@@ -42,6 +42,22 @@
 
 ## 开发记录
 
+### 2026-04-14 | 实现 - 2026-04-14 06:00
+
+**变更文件** (1 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/config.py`
+
+**变更统计**:
+```
+src/vn_agent/config.py | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-14 | Phase 13: 长篇记忆 + Nano Banana + Gemini-review fixes + 首次 sweep 数据
 
 用户睡觉我自动推了一轮。核心产出：
