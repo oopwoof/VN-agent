@@ -209,3 +209,17 @@ __marimo__/
 # Frontend
 frontend/node_modules/
 frontend/dist/
+
+# VN-Agent local artifacts (kept on disk, excluded from version control)
+# - demo_output: generated VN runs, large, per-user, regenerable
+# - data: raw corpus + lore, large, external source of truth
+# - _eval_tmp: scratch for smoke tests
+# - _eval_ollama_output: old eval runs against local Ollama
+# - vn_jobs.db: SQLite job store for web-mode runtime state
+# - .claude/scheduled_tasks.lock: scheduler runtime lock
+demo_output/
+data/
+_eval_tmp/
+_eval_ollama_output/
+vn_jobs.db
+.claude/scheduled_tasks.lock
