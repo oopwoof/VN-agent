@@ -13,7 +13,11 @@ API call (~$0.35) and takes ~9 minutes. We want resumability (skip
 cells already done), explicit --confirm for spend, and a human-readable
 markdown report that can be cited in docs/RESUME.md.
 
-Budget: 3x3 = 9 cells × ~$0.35 ≈ $3.15. User approved in plan.
+Sprint 8-3 update: 4-mode x 2-theme = 8 cells. Baselines added:
+  - baseline_single: one Sonnet call, skips the graph entirely (~$0.05)
+  - baseline_self_refine: draft + self-critique + revise (~$0.15)
+Plus literary, action (full graph, ~$0.50 each).
+Total 8-cell budget: ~$2.40 + ~$0.10 judge cost ≈ $2.50.
 """
 from __future__ import annotations
 
@@ -32,11 +36,10 @@ from statistics import pstdev
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-MODES = ["literary", "action", "no_rag"]
+MODES = ["literary", "action", "baseline_single", "baseline_self_refine"]
 THEMES = [
     ("lighthouse", "A lighthouse keeper during a storm"),
     ("dragon",     "Dragon slays the warrior"),
-    ("classmates", "Two classmates share an umbrella on the way home"),
 ]
 
 SWEEP_DIR = ROOT / "demo_output" / "sweep"
@@ -53,6 +56,81 @@ def _cell_already_done(cell_dir: Path) -> bool:
     return (cell_dir / "run_meta.json").exists() and (cell_dir / "scored.json").exists()
 
 
+def _run_baseline_cell(mode: str, theme: str, cell_dir: Path) -> Path | None:
+    """Run a baseline (single-shot or self-refine) in-process, then write a
+    minimal run_meta.json + vn_script.json so the rest of the sweep plumbing
+    (judging, reporting) doesn't need mode-specific branches downstream.
+    """
+    from vn_agent.agents.baseline_runners import (
+        run_baseline_self_refine,
+        run_baseline_single,
+    )
+    from vn_agent.services.token_tracker import TokenTracker, current_tracker
+
+    run_dir = cell_dir / f"vn_baseline_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    tracker = TokenTracker()
+    token = current_tracker.set(tracker)
+    t0 = time.perf_counter()
+    try:
+        if mode == "baseline_single":
+            result = asyncio.run(run_baseline_single(theme, max_scenes=6, num_characters=3))
+        else:
+            result = asyncio.run(run_baseline_self_refine(theme, max_scenes=6, num_characters=3))
+    except Exception as e:
+        print(f"  [FAIL] baseline {mode} crashed: {e}")
+        return None
+    finally:
+        current_tracker.reset(token)
+    wall = time.perf_counter() - t0
+
+    # Persist vn_script.json
+    (run_dir / "vn_script.json").write_text(
+        result.script.model_dump_json(indent=2), encoding="utf-8",
+    )
+    if result.characters:
+        (run_dir / "characters.json").write_text(
+            json.dumps(
+                {cid: c.model_dump() for cid, c in result.characters.items()},
+                indent=2, ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+    # Minimal run_meta.json matching the full-graph shape enough for
+    # downstream aggregation
+    usage = tracker.summary_dict()
+    actual_cost = tracker.estimated_cost()
+    meta = {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "theme": theme,
+        "mode": mode,
+        "max_scenes": 6,
+        "num_characters": 3,
+        "text_only": True,
+        "wall_time_seconds": round(wall, 1),
+        "actual": {
+            "token_usage": usage,
+            "estimated_cost_usd": round(actual_cost, 4),
+        },
+        "script": {
+            "title": result.script.title,
+            "scene_count": len(result.script.scenes),
+            "character_count": len(result.characters),
+        },
+        "errors": result.errors,
+    }
+    (run_dir / "run_meta.json").write_text(
+        json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8",
+    )
+    print(
+        f"  [OK] baseline {mode} wall={wall:.1f}s "
+        f"cost=${actual_cost:.4f} scenes={len(result.script.scenes)}"
+    )
+    return run_dir
+
+
 def _run_one_cell(mode: str, theme_id: str, theme: str, force: bool) -> dict:
     """Run pipeline + judge for one (mode, theme) cell. Returns summary dict."""
     cell_dir = _cell_dir(mode, theme_id)
@@ -62,47 +140,56 @@ def _run_one_cell(mode: str, theme_id: str, theme: str, force: bool) -> dict:
         print(f"  [SKIP] {mode}/{theme_id} — already has run_meta.json + scored.json")
         return _load_cell_summary(cell_dir)
 
-    # ── 1. Compose env overrides per mode ────────────────────────────────
-    env = os.environ.copy()
-    # All three modes use Sonnet Writer/Director/Reviewer. Only injection differs.
-    if mode == "literary":
-        env["WRITER_MODE"] = "literary"
-        # corpus still set so RAG retrieval runs (audit), just not injected
-    elif mode == "action":
-        env["WRITER_MODE"] = "action"
-    elif mode == "no_rag":
-        env["WRITER_MODE"] = "literary"  # shouldn't matter — corpus disabled
-        env["CORPUS_PATH"] = ""  # fully disables RAG
-
-    # ── 2. Run pipeline ───────────────────────────────────────────────────
     print(f"\n== CELL: mode={mode} theme={theme_id} ({theme!r}) ==")
     t0 = time.perf_counter()
-    cmd = [
-        sys.executable, str(ROOT / "scripts" / "run_real_demo.py"),
-        "--theme", theme,
-        "--text-only", "--confirm",
-        "--max-scenes", "6",
-        "--output-root", str(cell_dir),
-    ]
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True, cwd=ROOT)
-    wall = time.perf_counter() - t0
-    if result.returncode != 0:
-        print(f"  [FAIL] exit={result.returncode} wall={wall:.1f}s")
-        print("  stderr tail:", result.stderr[-400:])
-        return {"mode": mode, "theme": theme_id, "error": result.stderr[-400:]}
 
-    # Locate the vn_<timestamp> subdir inside cell_dir
-    run_subdirs = sorted([p for p in cell_dir.glob("vn_*") if p.is_dir()])
-    if not run_subdirs:
-        return {"mode": mode, "theme": theme_id, "error": "No vn_* output directory"}
-    run_dir = run_subdirs[-1]
-    meta = json.loads((run_dir / "run_meta.json").read_text(encoding="utf-8"))
+    # ── 1. Dispatch by mode ──────────────────────────────────────────────
+    if mode in ("baseline_single", "baseline_self_refine"):
+        # In-process baseline; no full graph.
+        run_dir = _run_baseline_cell(mode, theme, cell_dir)
+        if run_dir is None:
+            wall = time.perf_counter() - t0
+            return {"mode": mode, "theme": theme_id, "error": "baseline failed"}
+        meta = json.loads((run_dir / "run_meta.json").read_text(encoding="utf-8"))
+        wall = time.perf_counter() - t0
+    else:
+        # Full graph via subprocess, env-controlled writer_mode.
+        env = os.environ.copy()
+        if mode == "literary":
+            env["WRITER_MODE"] = "literary"
+        elif mode == "action":
+            env["WRITER_MODE"] = "action"
+        elif mode == "no_rag":
+            env["WRITER_MODE"] = "literary"
+            env["CORPUS_PATH"] = ""
+
+        cmd = [
+            sys.executable, str(ROOT / "scripts" / "run_real_demo.py"),
+            "--theme", theme,
+            "--text-only", "--confirm",
+            "--max-scenes", "6",
+            "--output-root", str(cell_dir),
+        ]
+        result = subprocess.run(cmd, env=env, capture_output=True, text=True, cwd=ROOT)
+        wall = time.perf_counter() - t0
+        if result.returncode != 0:
+            print(f"  [FAIL] exit={result.returncode} wall={wall:.1f}s")
+            print("  stderr tail:", result.stderr[-400:])
+            return {"mode": mode, "theme": theme_id, "error": result.stderr[-400:]}
+
+        run_subdirs = sorted([p for p in cell_dir.glob("vn_*") if p.is_dir()])
+        if not run_subdirs:
+            return {"mode": mode, "theme": theme_id, "error": "No vn_* output directory"}
+        run_dir = run_subdirs[-1]
+        meta = json.loads((run_dir / "run_meta.json").read_text(encoding="utf-8"))
 
     # ── 3. Score with eval_strategy_adherence (in-process) ────────────────
     print(f"  [OK] pipeline wall={wall:.1f}s cost=${meta['actual']['estimated_cost_usd']:.4f}")
     print("  Scoring ...")
 
-    from vn_agent.schema.script import VNScript  # noqa: E402 (after sys.path insert)
+    from vn_agent.eval.strategy_metrics import compute_signals  # noqa: E402
+    from vn_agent.schema.script import VNScript  # noqa: E402
+
     sys.path.insert(0, str(ROOT / "scripts"))
     from eval_strategy_adherence import _judge_scene  # type: ignore
 
@@ -110,14 +197,27 @@ def _run_one_cell(mode: str, theme_id: str, theme: str, force: bool) -> dict:
     scored = []
     for scene in script.scenes:
         strategy = scene.narrative_strategy or "drift"
-        score, reason = asyncio.run(_judge_scene(scene, strategy))
-        scored.append({
+        judged = asyncio.run(_judge_scene(scene, strategy))
+        # Sprint 8-2: also include rule-based metrics
+        signals = compute_signals(scene)
+        sig_dict = signals.as_dict()
+        row = {
             "scene_id": scene.id,
             "strategy": strategy,
-            "score": score,
-            "reason": reason,
-        })
-        print(f"    {scene.id:<30} {strategy:<12} score={score}")
+            "score": judged.get("score_primary", 0),
+            "reason": judged.get("reason_primary", ""),
+            **judged,
+            "rule_signals": sig_dict,
+            "rule_for_assigned": round(sig_dict.get(strategy, 0.0), 3),
+            "rule_best_match": signals.best_match(),
+        }
+        scored.append(row)
+        sec = judged.get("score_secondary")
+        sec_str = f" sec={sec}" if sec is not None else ""
+        print(
+            f"    {scene.id:<30} {strategy:<12} "
+            f"primary={row['score']}{sec_str} rule={row['rule_for_assigned']:.2f}"
+        )
 
     # Persist per-cell scored results
     (cell_dir / "scored.json").write_text(
