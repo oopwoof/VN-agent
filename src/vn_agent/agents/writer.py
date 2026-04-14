@@ -89,7 +89,7 @@ async def run_writer(state: AgentState) -> dict:
     # Write dialogue for each scene. Sprint 7-2: pass prior_scenes for
     # long-context coherence — Writer can reference previous scenes' actual
     # dialogue, not just Director's entry_context one-liner.
-    updated_scenes = []
+    updated_scenes: list[Scene] = []
     for idx, scene in enumerate(script.scenes):
         window = settings.writer_context_window
         prior_scenes = (
