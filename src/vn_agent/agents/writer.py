@@ -61,6 +61,18 @@ async def run_writer(state: AgentState) -> dict:
         except Exception as e:
             logger.debug(f"Corpus loading failed, few-shot disabled: {e}")
 
+    # Sprint 10-2: lore retrieval index — per-run, in-memory, extracted
+    # from Director outputs (chars + locations + world_vars + premise).
+    # Orthogonal to dialogue RAG: runs in BOTH literary and action modes
+    # because factual context doesn't style-contaminate.
+    lore_index = None
+    if settings.use_lore_retrieval:
+        try:
+            from vn_agent.eval.lore import build_lore_index
+            lore_index = build_lore_index(script, characters)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Lore index build failed: {e}")
+
     # Write dialogue for each scene. Sprint 7-2: pass prior_scenes for
     # long-context coherence — Writer can reference previous scenes' actual
     # dialogue, not just Director's entry_context one-liner.
@@ -77,6 +89,7 @@ async def run_writer(state: AgentState) -> dict:
             structure_issues=structure_issues,
             world_state=world_state,
             state_constraints=state_constraints,
+            lore_index=lore_index,
         )
         updated_scenes.append(updated_scene)
 
@@ -195,6 +208,7 @@ async def _write_scene(
     structure_issues: list[str] | None = None,
     world_state: dict | None = None,
     state_constraints: str = "",
+    lore_index=None,
 ) -> Scene:
     """Write dialogue for a single scene."""
     settings = get_settings()
@@ -261,6 +275,45 @@ async def _write_scene(
     if transition_block:
         transition_block = f"\n--- Transition Guidance ---\n{transition_block}\n"
 
+    # Sprint 10-2: lore retrieval block — per-scene top-k facts from the
+    # Director-extracted lore index. Runs in BOTH writer modes because
+    # facts (character backgrounds, location descriptions, world vars)
+    # don't contaminate literary style the way raw VN dialogue few-shot
+    # does. Absent lore index / index build failure → empty string, no-op.
+    lore_block = ""
+    if lore_index is not None:
+        try:
+            from vn_agent.eval.lore import format_lore_block
+
+            query = scene.description or scene.title or scene.id
+            # Plain .search without strategy pre-filter (entities have
+            # strategy=None), hybrid FAISS+BM25 top-k.
+            hits = lore_index.search(
+                query=query,
+                k=settings.lore_k,
+                strategy=None,
+                pre_filter_strategy=False,
+            )
+            lore_block = format_lore_block(hits)
+            if lore_block:
+                lore_block = f"\n{lore_block}\n"
+                # Persist to rag_retrievals.jsonl with __lore__ sentinel
+                # so audit can distinguish from dialogue RAG
+                _append_rag_record(
+                    output_dir,
+                    scene_id=scene.id,
+                    strategy="__lore__",
+                    query=query,
+                    examples=hits,
+                )
+                logger.info(
+                    f"Writer[{scene.id}]: lore INJECTED — "
+                    f"{len(hits)} entities: "
+                    f"{[getattr(h, 'id', '?') for h in hits]}"
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Lore retrieval skipped: {e}")
+
     # Sprint 9-3: state awareness block. Only injects when the scene
     # actually reads state variables, or when StateOrchestrator (9-6)
     # compiled narrative constraints. Scenes without state I/O get
@@ -293,7 +346,7 @@ Scene ID: {scene.id}
 Title: {scene.title}
 Description: {scene.description}
 {strategy_guidance}
-{feedback_note}{structure_note}{transition_block}{state_block}
+{feedback_note}{structure_note}{transition_block}{lore_block}{state_block}
 Characters present: {', '.join(scene.characters_present)}
 Music mood: {scene.music.mood.value if scene.music else 'none'}
 

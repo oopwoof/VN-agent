@@ -121,6 +121,12 @@ class Settings(BaseSettings):
     # Embedding RAG (requires [rag] extras: sentence-transformers + faiss-cpu)
     use_semantic_retrieval: bool = True  # use embedding similarity; False = label filter
     rag_pre_filter_strategy: bool = True  # strategy hard-constraint before vector rank
+
+    # Sprint 10-2: lore retrieval — facts-not-style RAG that runs in
+    # BOTH literary and action modes. Cheap (~80ms build, ~$0.008/run)
+    # and orthogonal to dialogue RAG. Turn off to compare.
+    use_lore_retrieval: bool = True
+    lore_k: int = 4  # top-k lore entities to inject per scene
     embedding_model: str = "all-MiniLM-L6-v2"
     embedding_index_path: str = ""  # pre-built index dir; empty = build on-the-fly
 
