@@ -42,6 +42,28 @@
 
 ## 开发记录
 
+### 2026-04-14 | 实现 - 2026-04-14 15:43
+
+**变更文件** (4 个):
+**源码变更** (4 文件):
+  - `src/vn_agent/agents/scene_artist.py`
+  - `src/vn_agent/compiler/templates/gui.rpy.j2`
+  - `src/vn_agent/compiler/templates/init.rpy.j2`
+  - `src/vn_agent/compiler/templates/script.rpy.j2`
+
+**变更统计**:
+```
+src/vn_agent/agents/scene_artist.py           |  30 ++++-
+ src/vn_agent/compiler/templates/gui.rpy.j2    | 161 ++++++--------------------
+ src/vn_agent/compiler/templates/init.rpy.j2   |  20 ++--
+ src/vn_agent/compiler/templates/script.rpy.j2 |   4 +-
+ 4 files changed, 69 insertions(+), 146 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-14 | 实现 - 2026-04-14 15:25
 
 **变更文件** (12 个):

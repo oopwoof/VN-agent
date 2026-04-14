@@ -120,13 +120,33 @@ Return a JSON object:
     # Try to generate image; collect error if it fails
     file_path = Path(output_dir) / "game" / "images" / "backgrounds" / f"{scene.background_id}.png"
     try:
-        # BG aspect matched with Ren'Py zoom transform in init.rpy.j2;
-        # both sourced from settings (config.bg_aspect_ratio / bg_zoom).
-        # "16:9" → 1344×768 out of Nano Banana, Ren'Py upscales to
-        # 1920×1080 via `scene ... at vn_bg_fit`.
         bg_aspect = settings.bg_aspect_ratio
         await generate_image(bg_prompt, file_path, aspect_ratio=bg_aspect)
-        logger.info(f"Generated background: {scene.background_id} ({bg_aspect})")
+        # Nano Banana returns 1344×768 for "16:9" (the only ratio knob
+        # it exposes). Ren'Py's base is 1920×1080 and `scene bg_x` draws
+        # at native size centered — that leaves ~288px black bars on
+        # every side. Post-process resize to the exact base resolution
+        # so Ren'Py can render the scene with zero extra transforms and
+        # no letterboxing. LANCZOS gives clean detail for the ~1.4×
+        # upscale from 1344 wide.
+        try:
+            from PIL import Image
+            with Image.open(file_path) as img:
+                if img.size != (1920, 1080):
+                    img.convert("RGB").resize(
+                        (1920, 1080), Image.Resampling.LANCZOS,
+                    ).save(file_path)
+                    logger.info(
+                        f"Generated background: {scene.background_id} "
+                        f"({bg_aspect} → 1920×1080)"
+                    )
+                else:
+                    logger.info(f"Generated background: {scene.background_id}")
+        except Exception as resize_err:
+            logger.warning(
+                f"Could not resize BG {scene.background_id} to 1920×1080: "
+                f"{resize_err} (keeping native size)"
+            )
     except Exception as e:
         logger.warning(f"Could not generate background {scene.background_id}: {e}")
         errors.append(f"SceneArtist: image {scene.background_id}: {e}")
