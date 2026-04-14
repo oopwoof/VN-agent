@@ -216,6 +216,13 @@ Return ONLY this JSON (no branches, no music yet):
       "type": "int",
       "initial_value": 3,
       "description": "Emotional closeness between Kael and Mira (0-10)"
+    }},
+    {{
+      "name": "weather",
+      "type": "enum",
+      "initial_value": "clear",
+      "enum_values": ["clear", "storm", "fog"],
+      "description": "Current weather — affects travel and mood"
     }}
   ]
 }}

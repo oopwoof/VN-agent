@@ -29,10 +29,17 @@ async def run_writer(state: AgentState) -> dict:
     # branch intent misalignment) surfaced so Writer can be more careful when
     # setting up choice points.
     structure_issues = state.get("structure_review_issues", []) or []
-    # Sprint 9-3: current symbolic state. Mutable across scenes in this run —
-    # each scene's state_writes applied right after the scene is written.
-    # Seeded by Director (9-2) from world_variables initial_values.
-    world_state = dict(state.get("world_state", {}) or {})
+    # Sprint 9-3 + Gemini-review fix: seed symbolic state from the
+    # declared initial_values on EVERY Writer invocation so a revision
+    # loop doesn't inherit the end-of-story state from the previous
+    # attempt. Earlier versions read state["world_state"] which, after
+    # the first Writer pass, contained the final state — causing scene
+    # 1 on retry to see mid-story state values.
+    world_state: dict = {}
+    if state.get("vn_script") and state["vn_script"].world_variables:
+        world_state = {
+            v.name: v.initial_value for v in state["vn_script"].world_variables
+        }
     state_constraints = state.get("state_constraints", "")
     output_dir = state.get("output_dir", ".")
 
@@ -94,9 +101,12 @@ async def run_writer(state: AgentState) -> dict:
         updated_scenes.append(updated_scene)
 
         # Sprint 9-3: apply state_writes AFTER the scene is written so the
-        # next scene sees the updated state. scene.state_writes was
-        # declared by Director (9-2); Writer may also propose additional
-        # writes via the JSON output (parsed into scene already).
+        # next scene sees the updated state. state_writes is DIRECTOR-owned
+        # (declared in step2 via 9-2); Writer does NOT produce additional
+        # writes via its JSON output — _parse_dialogue only extracts
+        # DialogueLine, any "state_writes" key is silently dropped. This is
+        # intentional: authority boundary keeps Director responsible for
+        # state logic while Writer focuses on dialogue craft.
         if updated_scene.state_writes:
             for var, value in updated_scene.state_writes.items():
                 world_state[var] = value

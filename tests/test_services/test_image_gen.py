@@ -125,7 +125,12 @@ class TestGeminiProvider:
 
     @pytest.mark.asyncio
     async def test_gemini_falls_through_to_gpt_image_on_failure(self, tmp_path):
-        """If Gemini 403s (free tier), chain walks to gpt-image-1."""
+        """If Gemini returns a malformed response (retryable), chain walks to gpt-image-1.
+
+        Gemini-review fix: only infrastructure-level failures now trigger
+        chain walk. Policy violations / auth errors abort immediately to
+        avoid wasting credits on the same doomed prompt.
+        """
         out = tmp_path / "out.png"
         ref = tmp_path / "ref.png"
         ref.write_bytes(b"fake")
@@ -133,7 +138,9 @@ class TestGeminiProvider:
         with patch("vn_agent.services.image_gen.get_settings", return_value=settings):
             with patch(
                 "vn_agent.services.image_gen._edit_gemini_with_reference",
-                new=AsyncMock(side_effect=RuntimeError("simulated 403")),
+                new=AsyncMock(side_effect=image_gen.ImageGenerationError(
+                    "simulated malformed response"
+                )),
             ):
                 with patch(
                     "vn_agent.services.image_gen._edit_openai_gpt_image",
@@ -144,6 +151,32 @@ class TestGeminiProvider:
                     )
                     assert result == out
                     gpt.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_policy_violation_aborts_chain(self, tmp_path):
+        """400 policy violation → don't try other providers (same prompt doomed)."""
+        import httpx
+        out = tmp_path / "out.png"
+        settings = _FakeSettings("google_gemini", google_key="AIza-fake")
+        settings.openai_api_key = "sk-fake"  # gpt-image-1 would be tried if chain walked
+        with patch("vn_agent.services.image_gen.get_settings", return_value=settings):
+            policy_err = httpx.HTTPStatusError(
+                "policy",
+                request=httpx.Request("POST", "http://x"),
+                response=httpx.Response(400),
+            )
+            with patch(
+                "vn_agent.services.image_gen._generate_gemini_image",
+                new=AsyncMock(side_effect=policy_err),
+            ):
+                with patch(
+                    "vn_agent.services.image_gen._generate_openai",
+                    new=AsyncMock(return_value=out),
+                ) as openai_mock:
+                    with pytest.raises(httpx.HTTPStatusError):
+                        await image_gen.generate_image("bad prompt", out)
+                    # Chain must NOT have tried openai
+                    openai_mock.assert_not_called()
 
     def test_extract_gemini_bytes_camelcase(self):
         resp = {
@@ -169,3 +202,91 @@ class TestGeminiProvider:
         resp = {"candidates": [{"content": {"parts": [{"text": "no image"}]}}]}
         with pytest.raises(image_gen.ImageGenerationError):
             image_gen._extract_gemini_image_bytes(resp)
+
+
+class TestErrorClassification:
+    """Gemini-review fix: distinguish retryable infrastructure failures from
+    prompt/auth failures that should abort the chain immediately."""
+
+    def test_policy_400_not_retryable(self):
+        import httpx
+        exc = httpx.HTTPStatusError(
+            "policy violation",
+            request=httpx.Request("POST", "http://x"),
+            response=httpx.Response(400),
+        )
+        assert image_gen._is_retryable_image_error(exc) is False
+
+    def test_auth_401_not_retryable(self):
+        import httpx
+        exc = httpx.HTTPStatusError(
+            "unauthorized",
+            request=httpx.Request("POST", "http://x"),
+            response=httpx.Response(401),
+        )
+        assert image_gen._is_retryable_image_error(exc) is False
+
+    def test_billing_403_not_retryable(self):
+        import httpx
+        exc = httpx.HTTPStatusError(
+            "billing not enabled",
+            request=httpx.Request("POST", "http://x"),
+            response=httpx.Response(403),
+        )
+        assert image_gen._is_retryable_image_error(exc) is False
+
+    def test_rate_limit_429_retryable(self):
+        import httpx
+        exc = httpx.HTTPStatusError(
+            "rate limit",
+            request=httpx.Request("POST", "http://x"),
+            response=httpx.Response(429),
+        )
+        assert image_gen._is_retryable_image_error(exc) is True
+
+    def test_server_5xx_retryable(self):
+        import httpx
+        exc = httpx.HTTPStatusError(
+            "internal",
+            request=httpx.Request("POST", "http://x"),
+            response=httpx.Response(503),
+        )
+        assert image_gen._is_retryable_image_error(exc) is True
+
+    def test_timeout_retryable(self):
+        import httpx
+        exc = httpx.TimeoutException("timeout")
+        assert image_gen._is_retryable_image_error(exc) is True
+
+    def test_custom_image_error_retryable(self):
+        """Custom ImageGenerationError (malformed response) — next provider may work."""
+        exc = image_gen.ImageGenerationError("missing image")
+        assert image_gen._is_retryable_image_error(exc) is True
+
+
+class TestImageByteValidation:
+    """Reject zero-byte / malformed payloads so Ren'Py never gets a corrupt sprite."""
+
+    def test_empty_bytes_rejected(self):
+        with pytest.raises(image_gen.ImageGenerationError, match="too small"):
+            image_gen._validate_image_bytes(b"")
+
+    def test_too_short_rejected(self):
+        with pytest.raises(image_gen.ImageGenerationError, match="too small"):
+            image_gen._validate_image_bytes(b"1234")
+
+    def test_unknown_format_rejected(self):
+        with pytest.raises(image_gen.ImageGenerationError, match="known image format"):
+            image_gen._validate_image_bytes(b"\x00" * 32)
+
+    def test_valid_png_accepted(self):
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+        image_gen._validate_image_bytes(png)  # no exception
+
+    def test_valid_jpeg_accepted(self):
+        jpeg = b"\xff\xd8\xff" + b"\x00" * 32
+        image_gen._validate_image_bytes(jpeg)
+
+    def test_valid_webp_accepted(self):
+        webp = b"RIFF" + b"\x00" * 32
+        image_gen._validate_image_bytes(webp)

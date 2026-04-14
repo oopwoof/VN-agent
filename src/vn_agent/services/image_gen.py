@@ -101,7 +101,11 @@ async def generate_image(prompt: str, output_path: Path) -> Path:
             continue
         try:
             return await _dispatch_text(provider, prompt, output_path)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
+            if not _is_retryable_image_error(e):
+                # Policy violation / auth / bad request — don't burn
+                # other providers on the same doomed prompt.
+                raise
             last_error = e
             logger.warning(
                 f"Image provider '{provider}' failed ({type(e).__name__}: "
@@ -140,7 +144,9 @@ async def generate_image_with_reference(
         tried_any = True
         try:
             return await _dispatch_ref(provider, prompt, reference_path, output_path)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
+            if not _is_retryable_image_error(e):
+                raise
             last_error = e
             logger.warning(
                 f"Ref-image provider '{provider}' failed "
@@ -156,6 +162,70 @@ async def generate_image_with_reference(
     raise ImageGenerationError(
         f"All ref-capable providers failed. Last error: {last_error}"
     )
+
+
+def _is_retryable_image_error(exc: Exception) -> bool:
+    """Gemini-review fix: distinguish infrastructure failures (worth retrying
+    against the next provider) from content/auth failures (same prompt will
+    fail everywhere, fallback wastes money + risks safety-flag spirals).
+
+    Retry on:
+      - httpx.HTTPStatusError with 429 (rate limit) or 5xx (server-side)
+      - httpx.TimeoutException / network errors
+      - ImageGenerationError (our custom: malformed response, missing image)
+    Do NOT retry on:
+      - 400 (prompt policy violation / bad request)
+      - 401 / 403 (auth / billing / tier not enabled)
+      - 404 (model not found)
+    """
+    if isinstance(exc, ImageGenerationError):
+        return True  # malformed response — next provider may work
+    if isinstance(exc, httpx.TimeoutException):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        if status == 429:
+            return True
+        if 500 <= status < 600:
+            return True
+        # 400 / 401 / 403 / 404 / 422: not retryable
+        return False
+    # Generic network / transport
+    if isinstance(exc, (httpx.RequestError, ConnectionError, TimeoutError)):
+        return True
+    # Unknown exception: play it safe and don't retry (avoids loops)
+    return False
+
+
+def _write_validated(output_path: Path, data: bytes) -> None:
+    """Validate + write image bytes, ensuring parents exist."""
+    _validate_image_bytes(data)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(data)
+
+
+def _validate_image_bytes(data: bytes) -> None:
+    """Gemini-review fix: verify decoded bytes look like a real image
+    before writing to disk. Prevents a silent 0-byte file or malformed
+    base64 from being served to Ren'Py as a valid sprite.
+    """
+    if not data or len(data) < 16:
+        raise ImageGenerationError(
+            f"Image payload too small: {len(data) if data else 0} bytes"
+        )
+    # Known magic numbers for formats the pipeline may receive
+    magic_checks = (
+        b"\x89PNG\r\n\x1a\n",  # PNG
+        b"\xff\xd8\xff",       # JPEG
+        b"GIF87a",
+        b"GIF89a",
+        b"RIFF",               # WebP (starts with RIFF...WEBP)
+    )
+    if not any(data.startswith(m) for m in magic_checks):
+        raise ImageGenerationError(
+            f"Decoded bytes don't match a known image format "
+            f"(head: {data[:8]!r})"
+        )
 
 
 def _provider_has_credentials(provider: str, settings) -> bool:
@@ -191,13 +261,12 @@ async def _generate_openai(prompt: str, output_path: Path) -> Path:
         resp = await client.post(url, headers=headers, json=payload)
         resp.raise_for_status()
         data = resp.json()["data"][0]
-        output_path.parent.mkdir(parents=True, exist_ok=True)
         if "b64_json" in data:
-            output_path.write_bytes(base64.b64decode(data["b64_json"]))
+            _write_validated(output_path, base64.b64decode(data["b64_json"]))
         elif "url" in data:
             img_resp = await client.get(data["url"])
             img_resp.raise_for_status()
-            output_path.write_bytes(img_resp.content)
+            _write_validated(output_path, img_resp.content)
         else:
             raise ImageGenerationError(f"OpenAI response missing image data: {data.keys()}")
     logger.info(f"Generated image (text): {output_path}")
@@ -231,13 +300,12 @@ async def _edit_openai_gpt_image(
         resp = await client.post(url, headers=headers, files=files, data=data)
         resp.raise_for_status()
         payload = resp.json()["data"][0]
-        output_path.parent.mkdir(parents=True, exist_ok=True)
         if "b64_json" in payload:
-            output_path.write_bytes(base64.b64decode(payload["b64_json"]))
+            _write_validated(output_path, base64.b64decode(payload["b64_json"]))
         elif "url" in payload:
             img_resp = await client.get(payload["url"])
             img_resp.raise_for_status()
-            output_path.write_bytes(img_resp.content)
+            _write_validated(output_path, img_resp.content)
         else:
             raise ImageGenerationError(f"OpenAI edits response missing image: {payload.keys()}")
     logger.info(f"Generated image (reference): {output_path} ← {reference_path.name}")
@@ -264,8 +332,7 @@ async def _generate_stability(prompt: str, output_path: Path) -> Path:
         resp = await client.post(url, headers=headers, json=payload)
         resp.raise_for_status()
         image_data = resp.json()["artifacts"][0]["base64"]
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(base64.b64decode(image_data))
+        _write_validated(output_path, base64.b64decode(image_data))
     logger.info(f"Generated image (text): {output_path}")
     return output_path
 
@@ -298,8 +365,7 @@ async def _img2img_stability(
         resp = await client.post(url, headers=headers, files=files, data=data)
         resp.raise_for_status()
         image_data = resp.json()["artifacts"][0]["base64"]
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(base64.b64decode(image_data))
+        _write_validated(output_path, base64.b64decode(image_data))
     logger.info(f"Generated image (reference): {output_path} ← {reference_path.name}")
     return output_path
 
@@ -335,8 +401,7 @@ async def _generate_gemini_image(prompt: str, output_path: Path) -> Path:
         resp = await client.post(url, json=payload)
         resp.raise_for_status()
         image_b64 = _extract_gemini_image_bytes(resp.json())
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(base64.b64decode(image_b64))
+        _write_validated(output_path, base64.b64decode(image_b64))
     logger.info(f"Generated image (gemini text): {output_path}")
     return output_path
 
@@ -380,8 +445,7 @@ async def _edit_gemini_with_reference(
         resp = await client.post(url, json=payload)
         resp.raise_for_status()
         image_b64 = _extract_gemini_image_bytes(resp.json())
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(base64.b64decode(image_b64))
+        _write_validated(output_path, base64.b64decode(image_b64))
     logger.info(
         f"Generated image (gemini reference): {output_path} ← {reference_path.name}"
     )

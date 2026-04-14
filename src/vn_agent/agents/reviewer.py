@@ -139,8 +139,17 @@ def _validate_value_against_type(wv, value) -> str | None:
     elif expected == "enum":
         if not isinstance(value, str):
             return f"type mismatch (declared enum, got {type(value).__name__})"
-        allowed = wv.enum_values or []
-        if allowed and value not in allowed:
+        # Gemini-review fix: `allowed and value not in allowed` silently
+        # accepted any string when enum_values was empty/None. Demand
+        # a non-empty list — a type="enum" without options is an
+        # under-specified declaration, not a free-form string.
+        allowed = wv.enum_values
+        if not allowed:
+            return (
+                "enum variable has empty/missing enum_values — declaration "
+                "is under-specified; either populate enum_values or use type='string'"
+            )
+        if value not in allowed:
             return f"not in enum_values {allowed}"
     return None
 
@@ -241,28 +250,13 @@ def _mechanical_check(
                         f"requires[{req_var!r}]={req_val!r} — {err}"
                     )
 
-    # Sprint 9-5 (immutability constitution): Writer dialogue must not
-    # contradict high-score character attributes. Cheap substring check:
-    # if a line mentions a different value for a locked attribute, flag.
-    # This catches the Sprint 6-9c class of bug where Writer "discovers"
-    # that a lighthouse keeper was actually a former soldier.
-    for cid, char in characters.items():
-        locks = char.immutability_score
-        for attr_name, score in locks.items():
-            if score < 8:  # only enforce high-lock attrs (name, role are 10)
-                continue
-            canon = getattr(char, attr_name, None)
-            if not canon or not isinstance(canon, str):
-                continue
-            # Canonical value substring should appear in any dialogue that
-            # explicitly references the locked attribute. Lightweight:
-            # just check that dialogue doesn't contradict with a crude
-            # "role=teacher vs 'I'm a doctor'" substring mismatch. For v1
-            # we just log the canonical value as a Reviewer reminder —
-            # full NLI-based contradiction detection is Sprint 11+.
-            # (Intentionally NOT adding noisy warnings here to avoid
-            # false positives; the check is scaffolded for the future.)
-            _ = canon  # placeholder to document the intent
+    # Sprint 9-5 / Gemini-review: immutability_score schema field exists
+    # on CharacterProfile, but the contradiction check is NOT implemented
+    # here — a substring match has unacceptable false-positive rate
+    # ("I'm not the doctor" → flagged), and NLI-based detection belongs
+    # in Sprint 11's long-form pipeline. Until then: the schema field
+    # is read by human reviewers / downstream tooling, not enforced
+    # mechanically. Don't leave dead scaffolding pretending to enforce.
 
     if not issues:
         return ReviewResult(passed=True, feedback="Mechanical checks passed", issues=[])
