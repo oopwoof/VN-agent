@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -95,7 +95,6 @@ class TestContinueOutlineCLI:
     ):
         """Creator edits a world_variable's initial_value before continue —
         the resumed pipeline must see the NEW initial value, not the paused one."""
-        from vn_agent.schema.character import CharacterProfile
         from vn_agent.schema.script import VNScript
 
         # Simulate a paused run: write vn_script.json with world_variables that

@@ -232,7 +232,7 @@ async def _generate_sprites(
     try:
         # 3:4 portrait matches traditional VN full-body sprite framing —
         # character fills vertical space, 1920x1080 scenes get head-to-toe.
-        await generate_image(neutral_prompt, neutral_abs, aspect_ratio="3:4")
+        await generate_image(neutral_prompt, neutral_abs, aspect_ratio=settings.sprite_aspect_ratio)
         logger.info(f"Generated neutral sprite: {char.id}")
         cutout_targets.append((neutral_abs, f"{char.id}_neutral"))
         neutral_ok = True
@@ -274,10 +274,10 @@ async def _generate_sprites(
         try:
             if use_reference:
                 await generate_image_with_reference(
-                    prompt, neutral_abs, abs_path, aspect_ratio="3:4",
+                    prompt, neutral_abs, abs_path, aspect_ratio=settings.sprite_aspect_ratio,
                 )
             else:
-                await generate_image(prompt, abs_path, aspect_ratio="3:4")
+                await generate_image(prompt, abs_path, aspect_ratio=settings.sprite_aspect_ratio)
             logger.info(f"Generated {emotion} sprite: {char.id}")
             cutout_targets.append((abs_path, f"{char.id}_{emotion}"))
         except Exception as e:

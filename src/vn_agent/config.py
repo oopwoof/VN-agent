@@ -157,6 +157,19 @@ class Settings(BaseSettings):
     sprite_cutout: bool = True
     sprite_cutout_model: str = "u2net_human_seg"  # u2net | u2net_human_seg | isnet-general-use
 
+    # Sprint 12-3e: sprite & BG aspect + display-zoom coupling.
+    # Nano Banana returns fixed output resolutions per aspect_ratio
+    # selection (no custom-size knob), so the Ren'Py transform zoom
+    # in init.rpy.j2 needs to stay in lockstep with whatever aspect
+    # we ask for. Any change here must be matched in the paired
+    # number — both lines or neither. Actual Gemini outputs we've
+    # observed: "3:4" → 864×1184, "16:9" → 1344×768.
+    sprite_aspect_ratio: str = "3:4"
+    sprite_zoom: float = 0.45       # 864×1184 × 0.45 → 389×533 (49% of 1080)
+    bg_aspect_ratio: str = "16:9"
+    bg_zoom: float = 1.4286         # 1344×768 × 1.4286 → 1920×1097 (fills 1920 wide,
+                                    # 17px top+bottom crop — cheaper than black bars)
+
 
 def _load_yaml_settings() -> dict:
     config_path = ROOT / "config" / "settings.yaml"

@@ -13,9 +13,9 @@
 ##      without a bespoke frame per genre.
 
 init python:
-    config.name = "{{ script.title }}"
+    config.name = "{{ script.title | renpy_safe }}"
     config.version = "1.0"
-    config.window_title = "{{ script.title }}"
+    config.window_title = "{{ script.title | renpy_safe }}"
 
 ## ── Layout ─────────────────────────────────────────────────────────
 define gui.textbox_height = 300
@@ -100,12 +100,14 @@ screen say(who, what):
             text who id "who" style "nameplate_text"
 
     ## Textbox panel — flat backdrop + body text + CTC arrow.
-    ## Geometry is set via `style window` below (see the explicit reset
-    ## at end of this file) so it doesn't inherit xfill/xalign/padding
-    ## from Ren'Py's stock window style. Here the screen just supplies
-    ## the id + backdrop image.
+    ## Geometry is set via the NAMED `say_window` style below. Previous
+    ## iteration used `style window is default:` which was a global
+    ## override — it stripped backgrounds from save/load/preferences
+    ## screens too, making the dialog box look "disappeared" along
+    ## with every other built-in menu. `say_window` is scoped.
     window:
         id "window"
+        style "say_window"
         background "textbox_bg"
 
         text what id "what":
@@ -123,14 +125,13 @@ screen say(who, what):
             xpos 1860
             ypos 240
 
-## ── style window reset ────────────────────────────────────────────
-## Ren'Py's default `style window` ships with xalign 0.5, xfill True,
-## a Frame() background, and nonzero padding. Those interact badly
-## with inline screen-level xpos/xsize overrides (previous version
-## ended up either clipped-on-both-sides or shifted-left depending on
-## which property won). Explicitly zero out every layout property so
-## screen-level directives are the sole source of truth.
-style window is default:
+## ── Scoped say-window style (Bug 1 fix) ───────────────────────────
+## Inherits from `window` but overrides only the properties we care
+## about for the dialogue textbox. Crucially this does NOT touch the
+## base `window` style, so save/load/preferences keep their stock
+## Ren'Py chrome. Previous approach used `style window is default` which
+## clobbered all those other menus simultaneously.
+style say_window is window:
     background None
     xpos 0
     ypos 780

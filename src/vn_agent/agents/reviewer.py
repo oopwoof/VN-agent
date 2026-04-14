@@ -127,10 +127,9 @@ async def run_reviewer(state: AgentState) -> dict:
     }
 
 
-_VALID_EMOTIONS = {
-    "neutral", "happy", "sad", "angry", "surprised",
-    "scared", "thoughtful", "loving", "determined",
-}
+# Single source of truth lives in schema/emotions.py — compiler also
+# imports from there to emit matching image-alias declarations.
+from vn_agent.schema.emotions import VALID_EMOTIONS_SET as _VALID_EMOTIONS  # noqa: E402
 
 
 def _validate_value_against_type(wv, value) -> str | None:

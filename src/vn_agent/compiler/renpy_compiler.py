@@ -13,14 +13,11 @@ logger = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
-# Writer's full emotion vocabulary (must match reviewer._VALID_EMOTIONS).
-# Every emotion here needs to resolve to SOME image at Ren'Py-init time,
-# otherwise `show sable thoughtful` renders the label-over-silhouette
-# placeholder.
-_ALL_EMOTIONS = (
-    "neutral", "happy", "sad", "angry", "surprised",
-    "scared", "thoughtful", "loving", "determined",
-)
+# Single source of truth in schema/emotions.py; reviewer imports the
+# same tuple. Every emotion here needs to resolve to SOME image at
+# Ren'Py-init time, otherwise `show sable thoughtful` renders the
+# label-over-silhouette placeholder.
+from vn_agent.schema.emotions import VALID_EMOTIONS as _ALL_EMOTIONS  # noqa: E402
 
 # Fallback chain per emotion — used only when an emotion's own PNG is
 # missing. Order matters: try the first mapping, then the next, all
@@ -150,11 +147,18 @@ def compile_script(
     init_template = env.get_template("init.rpy.j2")
     bg_ids = sorted({s.background_id for s in script.scenes if s.background_id})
     character_sprites = _build_sprite_emotion_map(characters, output_dir)
+    # Sprint 12-3e: sprite/BG display zoom paired with generation aspect.
+    # Keep these as template vars so changing settings.sprite_zoom /
+    # bg_zoom takes effect on the next recompile — no template edit.
+    from vn_agent.config import get_settings
+    settings = get_settings()
     files["game/init.rpy"] = init_template.render(
         script=script,
         character_ids=sorted(characters.keys()),
         background_ids=bg_ids,
         character_sprites=character_sprites,
+        sprite_zoom=settings.sprite_zoom,
+        bg_zoom=settings.bg_zoom,
     )
 
     return files

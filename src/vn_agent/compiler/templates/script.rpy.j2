@@ -18,9 +18,9 @@ label {{ scene.id }}:
 {% set ns.current_music = None %}
 {% endif %}
 {% if loop.first %}
-    scene {{ scene.background_id }} with fade
+    scene {{ scene.background_id }} at vn_bg_fit with fade
 {% else %}
-    scene {{ scene.background_id }} with dissolve
+    scene {{ scene.background_id }} at vn_bg_fit with dissolve
 {% endif %}
 {% set positions = ['vn_sprite_center'] if scene.characters_present|length == 1 else ['vn_sprite_left', 'vn_sprite_right'] if scene.characters_present|length == 2 else ['vn_sprite_left', 'vn_sprite_center', 'vn_sprite_right'] %}
 {% for char_id in scene.characters_present %}
