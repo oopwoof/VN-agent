@@ -24,17 +24,12 @@ define gui.textbox_xpadding = 180
 define gui.textbox_ypadding_top = 70
 define gui.textbox_ypadding_bottom = 50
 
-## Textbox backdrop — a vertical gradient (transparent at top, ~85%
-## opaque at bottom). Built from a stack of two Solid layers inside a
-## Fixed so the alpha ramp is cheap to render. Ren'Py's im.MatrixColor
-## could do a true gradient but this two-step approximation is good
-## enough at 1920x1080 and avoids a runtime matrix multiply per frame.
-image textbox_bg = Composite(
-    (1920, 300),
-    (0, 0),   Solid("#0a0f1466", xsize=1920, ysize=80),
-    (0, 80),  Solid("#0a0f14b0", xsize=1920, ysize=80),
-    (0, 160), Solid("#0a0f14d8", xsize=1920, ysize=140),
-)
+## Textbox backdrop — single flat dark panel at ~80% alpha. Originally
+## this was a 3-band Composite for a gradient effect; in practice the
+## discrete alpha steps looked like two horizontal lines crossing the
+## panel rather than a smooth fade. One uniform Solid reads cleaner
+## and plays better with the sprite above (no visual interference).
+image textbox_bg = Solid("#0a0f14cc", xsize=1920, ysize=300)
 
 ## ── Dialogue body ──────────────────────────────────────────────────
 define gui.text_color = "#f2ecdc"
@@ -104,25 +99,25 @@ screen say(who, what):
             ypos 720  ## sits just above the 300px textbox at ypos 780
             text who id "who" style "nameplate_text"
 
-    ## Textbox panel — gradient backdrop + body text + CTC arrow.
-    ## IMPORTANT: `window` is anchored bottom-center of the screen.
-    ## xsize must be explicitly 1920 so the text xmaximum inside stays
-    ## within the visible frame; without it, window's default width is
-    ## 'fill' which nests weirdly and lets text overflow the right edge.
+    ## Textbox panel — flat backdrop + body text + CTC arrow.
+    ## Using explicit xpos/ypos (not xalign) because xalign on a
+    ## screen-width window nested under the stock `say` layout
+    ## confused the layout engine — text was getting rendered
+    ## starting from a negative x so the first 200px of every line
+    ## fell off the left edge.
     window:
         id "window"
         background "textbox_bg"
+        xpos 0
+        ypos 780
         xsize 1920
         ysize gui.textbox_height
-        xalign 0.5
-        yalign gui.textbox_yalign
 
         text what id "what":
+            ## xpos/ypos here are inside the window's local coord
+            ## system (0,0 = window's top-left = screen 0,780).
             xpos gui.textbox_xpadding
             ypos gui.textbox_ypadding_top
-            ## xmaximum is the wrap width (content is allowed to be
-            ## smaller); xsize forces a fixed width which can overflow.
-            ## Use xmaximum and trust word-wrap.
             xmaximum 1920 - 2 * gui.textbox_xpadding
             size gui.text_size
             color gui.text_color
@@ -130,8 +125,8 @@ screen say(who, what):
             outlines gui.text_outlines
 
         add "ctc":
-            xalign 0.98
-            yalign 0.92
+            xpos 1860
+            ypos 240
 
 ## ── Custom choice screen ───────────────────────────────────────────
 ## Player-facing branches render as floating buttons stacked in the
