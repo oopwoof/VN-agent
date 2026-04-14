@@ -106,14 +106,20 @@ def estimate_cost(
     Token budgets chosen from historical trace.json samples on COLX_523
     runs — these are medians, not contracts. Real cost will vary ±30%.
     """
-    # Median token budgets per LLM call (input, output)
+    # Median token budgets per LLM call (input, output). Re-calibrated
+    # against real Sonnet 4.6 runs on 2026-04-13:
+    #   director_step1:   in≈1400 out≈3700  (thinking blocks inflate output)
+    #   director_step2:   in≈900  out≈7200  (entry_context + exit_hook + branches)
+    #   writer (×6):      in≈1100 out≈3250  (max_dialogue_lines=20 usually filled)
+    #   reviewer (Haiku): in≈5300 out≈1300  (now reads FULL dialogue post-6-9c)
+    # Previous values under-estimated total spend by ~3x.
     MEDIAN_TOK = {
-        "director_step1": (800, 1500),
-        "director_step2": (1200, 1800),
-        "writer": (2500, 800),       # per scene
-        "reviewer": (3000, 300),
-        "character_designer": (400, 300),  # per character
-        "scene_artist": (500, 400),        # per unique background
+        "director_step1": (1400, 3700),
+        "director_step2": (900, 7200),
+        "writer": (1100, 3250),            # per scene
+        "reviewer": (5300, 1300),
+        "character_designer": (500, 400),  # per character — unchanged, needs calibration
+        "scene_artist": (500, 400),        # per unique background — unchanged
     }
 
     # Per-model rates $/M tokens (input, output)

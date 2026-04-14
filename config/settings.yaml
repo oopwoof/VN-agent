@@ -41,4 +41,5 @@ generation:
   max_dialogue_lines: 20
   reviewer_skip_llm: false
 
-corpus_path: "data\final_annotations.csv"
+corpus_path: "data/final_annotations.csv"
+few_shot_k: 2
