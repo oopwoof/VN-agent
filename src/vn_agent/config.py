@@ -101,6 +101,14 @@ class Settings(BaseSettings):
     # or missing OpenAI key → secondary judge skipped (Sonnet-only mode).
     llm_judge_model_secondary: str = "gpt-4o"
 
+    # Sprint 8-4: Anthropic prompt caching. When True and provider=anthropic,
+    # system prompts ≥1500 chars are tagged with cache_control={"type":
+    # "ephemeral"}. First call of a job pays 1.25× input cost; subsequent
+    # calls within 5 minutes pay 0.1× — huge wins for Writer (6-18 identical
+    # system-prompt calls per run) and DialogueReviewer (revision rounds).
+    # No-op for OpenAI / Ollama / other providers.
+    enable_prompt_caching: bool = True
+
     # Embedding RAG (requires [rag] extras: sentence-transformers + faiss-cpu)
     use_semantic_retrieval: bool = True  # use embedding similarity; False = label filter
     rag_pre_filter_strategy: bool = True  # strategy hard-constraint before vector rank

@@ -132,6 +132,38 @@ def _log_stop_reason(result: Any, caller: str) -> None:
         )
 
 
+def _build_system_message(system_prompt: str, provider: str, enable_cache: bool):
+    """Sprint 8-4: wrap SystemMessage content to enable Anthropic prompt caching.
+
+    Anthropic's ephemeral cache cuts cached-read input cost to ~10% of base
+    for a 5-min TTL. Activated only for the Anthropic provider and only when
+    the system prompt is long enough to be worth caching (the marker itself
+    has a small overhead — minimum-supported blocks are ~1024 tokens but
+    caching small blocks is lossy).
+
+    Short prompts or non-Anthropic providers fall back to plain string
+    content so no provider-specific feature leaks.
+    """
+    from langchain_core.messages import SystemMessage
+
+    if (
+        enable_cache
+        and provider == "anthropic"
+        and system_prompt
+        and len(system_prompt) >= 1500  # heuristic: only cache substantial prompts
+    ):
+        return SystemMessage(
+            content=[
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        )
+    return SystemMessage(content=system_prompt)
+
+
 async def ainvoke_llm(
     system_prompt: str,
     user_prompt: str,
@@ -139,18 +171,26 @@ async def ainvoke_llm(
     model: str | None = None,
     caller: str = "llm",
 ) -> T | str:
-    """Invoke LLM with system+user prompts, optionally with structured output."""
-    from langchain_core.messages import HumanMessage, SystemMessage
+    """Invoke LLM with system+user prompts, optionally with structured output.
+
+    Sprint 8-4: system prompts ≥1500 chars are tagged for Anthropic
+    prompt caching when the Anthropic provider is in use. Cached blocks
+    amortize across the 5-minute TTL so agents that fire many calls with
+    the same system prompt (Writer across 6-18 scenes, DialogueReviewer
+    across revision rounds) pay the input-tokens cost only once.
+    """
+    from langchain_core.messages import HumanMessage
 
     settings = get_settings()
     retrier = _make_retry_decorator(settings.llm_max_retries)
+    enable_cache = getattr(settings, "enable_prompt_caching", True)
 
     @retrier
     async def _call():
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt),
-        ]
+        sys_msg = _build_system_message(
+            system_prompt, settings.llm_provider, enable_cache,
+        )
+        messages = [sys_msg, HumanMessage(content=user_prompt)]
         if schema is not None:
             llm = get_structured_llm(schema, model)
         else:
@@ -169,18 +209,19 @@ def invoke_llm(
     model: str | None = None,
     caller: str = "llm",
 ) -> T | str:
-    """Synchronous LLM invocation."""
-    from langchain_core.messages import HumanMessage, SystemMessage
+    """Synchronous LLM invocation (same prompt-caching behavior as async)."""
+    from langchain_core.messages import HumanMessage
 
     settings = get_settings()
     retrier = _make_retry_decorator(settings.llm_max_retries)
+    enable_cache = getattr(settings, "enable_prompt_caching", True)
 
     @retrier
     def _call():
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt),
-        ]
+        sys_msg = _build_system_message(
+            system_prompt, settings.llm_provider, enable_cache,
+        )
+        messages = [sys_msg, HumanMessage(content=user_prompt)]
         if schema is not None:
             llm = get_structured_llm(schema, model)
         else:
