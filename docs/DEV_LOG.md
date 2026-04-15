@@ -118,6 +118,31 @@ Creator-edited dialogue 引入 cast 外 character_id 时，reviewer 在 `unknown
 2. **血肉（通道 A）** — 引入脱水"叙事节奏骨架"，提升对话文学质量
 3. **皮相 + 底座（通道 C + D）** — 系统稳定后引入高级 ATL 镜头 + 全局架构参考，完成"全栈游戏生成引擎"进化
 
+#### Lore-RAG 子优化：entity scope（always / chapter / scene）
+
+当前 `src/vn_agent/eval/lore.py:60-71` 把 Premise、character、location、world_var 全部放进同一个 FAISS top-k 池。结果：cosine 不利的场景（比如 premise 是"灯塔守夜人"但当前场景写争吵），premise card 会被从 top-k 中踢掉，Writer 失去故事罗盘。
+
+改法：给 `AnnotatedSession`（lore entity）加 `scope` 字段：
+
+| Scope | 包含什么 | 注入方式 |
+|---|---|---|
+| `always` | Premise、theme、世界设定、主角阵容、`immutability_score=10` 核心属性 | 拼进 system prompt 顶部，包 `cache_control: ephemeral`（5 min TTL，~10× 便宜）。检索失败也不丢 |
+| `chapter` | 章节内反复出现的次要角色、当前章节 world_state 演化 | 章节内固定 prefix，跨章重检索 |
+| `scene` | 仅本场景的 location、callback hook、world_var detail | 当前 top-k 行为不变 |
+
+**实现要点**：
+- `lore.py::extract_lore_entities` 在构造 entity 时按规则打 scope
+- `LoreIndex.retrieve` 只对 scope=`scene` 跑 FAISS top-k；scope=`always` 直接返回
+- Writer prompt 模板分两段：`{always_lore_block}{retrieved_lore_block}`
+- always 段开 prompt caching（Sprint 8-4 已经在 system prompt 上启用，新逻辑只是延伸）
+
+**收益**：
+- top-k budget 释放给真正动态的 location / callback，召回质量升
+- premise 永驻 context，长篇生成防跑题
+- 缓存命中后 always 段近乎零成本
+
+**和四通道 RAG 关系**：scope 字段是通道 A 内部的细分（"骨架级 always" vs "动态 scene 级"），也可以横跨通道 — 通道 D（编译架构）天然全是 always-on 类。
+
 ### 路线二：自我进化 Agent — 经验沉淀与反向传播
 
 当前系统"写完就忘"：失败场景被 Reviewer 打回，修改记录丢失。下一步建三层架构，按 ROI 递增：
