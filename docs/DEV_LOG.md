@@ -143,6 +143,33 @@ Creator-edited dialogue 引入 cast 外 character_id 时，reviewer 在 `unknown
 
 **和四通道 RAG 关系**：scope 字段是通道 A 内部的细分（"骨架级 always" vs "动态 scene 级"），也可以横跨通道 — 通道 D（编译架构）天然全是 always-on 类。
 
+#### 截断逻辑也要顺手修
+
+`src/vn_agent/eval/lore.py` 里有 4 处截断，都是 Sprint 7 时期 8K context 的历史包袱：
+
+| 行 | 截断点 | 问题 |
+|---|---|---|
+| `lore.py:104` | `(first.description or 'no description')[:240]` 单 location 描述 240 字符 | 240 字符 < 一个完整句 |
+| `lore.py:162` | `format_lore_block(max_chars: int = 1500)` 整块上限 | 1500 char ≈ 400 token，对 Sonnet 200K 来说毫无意义 |
+| `lore.py:183` | `(getattr(ex, "text", "") or "")[:300]` 每 entity text 300 字符 | 同上，腰斩富文本人物档案 |
+| `lore.py:185` | `running > max_chars` 直接 break + `"..."` 占位 | 硬截断，没优先级 |
+
+**3 个真问题**：
+
+1. **没优先级** — 先到先服。`extract_lore_entities` append 顺序是 premise → characters → locations → world_vars，但 retrieve top-k 后按 cosine score 重排，premise 可能不在前面，硬截断时直接被 `...` 吃掉
+2. **暴力 `[:N]` 切到字符中间** — 不按句号/逗号断。`Premise: A lighthouse keeper must` ← 原文 `must save a ship or abandon her post` 被腰斩。Writer 看到半句话理解偏差
+3. **历史数字** — 1500 char cap 是 Sonnet 8K context 时代设的。现在 Sonnet 200K + prompt caching 5min TTL（Sprint 8-4 已启），预算根本不紧
+
+**配合 scope 改造一起修**：
+
+- `scope=always` 实体（premise/世界观/主角阵容）→ **完全不截断**，全文进 system prompt prefix，靠 `cache_control: ephemeral` 摊薄成本
+- `scope=chapter` 实体 → max_chars per-entity 提到 800（够装一个 ≤500-word chapter summary）
+- `scope=scene` 实体（location/callback hooks）→ 保留 300 char per-entity cap（retrieved，本身 noisy，无所谓）
+- `format_lore_block` 总 cap 默认提到 4000-6000 char（~1500 token），且按句号 / 段落断而非字符截
+- 按 scope 优先级 fold：always 永不被裁，chapter 次之，scene 最后填空
+
+简单实现：`format_lore_block` 改签名收 `entities: list[AnnotatedSession]` + `scope_caps: dict[str, int]`，分组按 priority 输出。
+
 ### 路线二：自我进化 Agent — 经验沉淀与反向传播
 
 当前系统"写完就忘"：失败场景被 Reviewer 打回，修改记录丢失。下一步建三层架构，按 ROI 递增：
