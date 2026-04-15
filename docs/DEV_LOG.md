@@ -177,6 +177,30 @@ Creator-edited dialogue 引入 cast 外 character_id 时，reviewer 在 `unknown
 
 打补丁式进化，小规模能让创作者觉得 AI **"教得会"**。
 
+### world_variables 状态记录的缺口（2026-04-14 收官审计）
+
+下次接手前需要知道的真相：state IS recorded，但分散在多个文件里，且**没有 top-level time series、没有分支感知**。
+
+**已记录** ✓
+- `vn_script.json::world_variables` — 初始值（每个 var 的 name/type/initial_value/description）
+- `vn_script.json::scenes[].state_writes` — 每场景的**增量** delta（`{var: new_value}`）
+- `<output>/snapshots/<scene_id>.json` — Sprint 11-4 per-scene `world_state_after` 快照，best-effort（写失败只 log 不抛）
+- `outline_checkpoint.json` — creator pause 时刻的 `world_state` 全量快照
+- Ren'Py 编译产物 — `init.rpy` 的 `default var = X` + scene label 内 `$ var = X`，Ren'Py 运行时正确追踪 live state
+
+**没记录** ✗
+1. `vn_script.json` 本身没有 time series 字段。想知道"第 5 场结束时 affinity 多少"必须从 initial_value 顺序 fold 所有 `state_writes`。
+2. **分支感知完全缺失**。`local_regen.py:80-88` 线性 walk `script.scenes[:idx]` 重建 world_state，假设场景按顺序执行 — 真实玩家可能从不同分支到达同一场景，state 取决于路径。当前系统把 VNScript 当线性时间线处理，忽略 branch DAG。
+3. State orchestrator 编译的 `state_constraints` 文本 ephemeral — 只在 AgentState 中存在，run 完丢失。outline_checkpoint 保留了 pause 时刻的一次，但**每场景 Writer 实际看到的 constraint 文本没存盘**，debug 时无法回溯"当时 Writer 看到了什么"。
+4. 没有 Web API 暴露状态时间线 — 前端无法显示"state 演化"。
+5. snapshots 目录写失败时无 fallback — Writer.py:159+ best-effort，灾难时静默丢失。
+
+**修复建议（按 ROI 排）**：
+
+- **快胜（30 min）**：vn_script.json 顶部加 `state_timeline: list[dict]` 字段，每条 entry `{scene_id, state_after}`。Writer 在 fold 时 append。冗余但不需重建，前端直接展示。
+- **中等（2h）**：scene-level snapshot 加 `state_constraints_seen` 字段（state_orchestrator 给本场景生成的 constraint 文本），让 debug 知道 Writer 当时的"指令书"。
+- **真长（4h+）**：分支感知 state — 每条 path 一个 timeline；local_regen 时根据玩家路径重建。需要把 VNScript 看成 DAG 而非 list，state walker 改写。建议放进 Sprint 11+ 的长篇/分支章节再做，6-scene demo 暂时不刚需。
+
 ### 其他未收的尾巴（之前的 roadmap）
 
 - **Sprint 12-1 流式 pipeline**（player mode JIT delivery）— 重写 `graph.astream` 为 segmented streaming，`pipeline_lookahead=2`，首场景 TTFS 从 5 min 降到 ~60s
