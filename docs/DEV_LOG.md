@@ -201,6 +201,37 @@ Creator-edited dialogue 引入 cast 外 character_id 时，reviewer 在 `unknown
 - **中等（2h）**：scene-level snapshot 加 `state_constraints_seen` 字段（state_orchestrator 给本场景生成的 constraint 文本），让 debug 知道 Writer 当时的"指令书"。
 - **真长（4h+）**：分支感知 state — 每条 path 一个 timeline；local_regen 时根据玩家路径重建。需要把 VNScript 看成 DAG 而非 list，state walker 改写。建议放进 Sprint 11+ 的长篇/分支章节再做，6-scene demo 暂时不刚需。
 
+### Recursive Summarization 重复 + chapter rollup 缺失（2026-04-14 收官审计）
+
+Sprint 11-1 的 per-scene Haiku summary 有两个 bug 类问题，外加一个未实现的 deferred 项：
+
+**问题 1：修订循环里每场重复 summarize**
+`writer.py:140-157` 的 summary 块在 `for idx, scene in enumerate(script.scenes)` 循环内，没有 `if not updated_scene.summary` 守卫。Reviewer FAIL → run_writer 从头跑 → 全场重写 → summary 也跟着每场重 fire。
+- 6 scenes × 3 revisions = 18 次 Haiku call（应该 6 次）
+- 单价 ~$0.002，每 run 浪费 ~$0.024。规模化后累积明显（且 Haiku QPS 也被吃掉）
+
+**问题 2：local_regen 后 summary stale**
+`local_regen.regenerate_scene` 直接调用 `_write_scene` 单场景 helper，**绕过 run_writer 外层 loop body 里的 summary 块**。
+- 重写场景的 `scene.summary` 仍是旧 dialogue 的 summary
+- 下游场景 fold `older_summaries`（writer.py:104-108）时拿到错的提要
+- Writer 看到的"前情提要" ≠ 实际 dialogue → 长篇生成会逐渐漂
+
+**问题 3：chapter-level rollup 完全没实现**
+`summarizer.py:14` 的 docstring 列了"Chapter-level rollups every N scene summaries (500-word meta-summary)"作为 Deferred。当前**实际只有 per-scene summary，没有跨章压缩**。
+- 50 scenes × 100 words = 5000 words / ~6500 tokens 全部塞进 Writer prompt
+- 真正长篇 (50+ scenes) 跑起来 context 必爆
+
+**修复方案（按 ROI）**：
+
+| ROI | 改动 | 收益 |
+|---|---|---|
+| 30 sec | writer.py:140 加 `if not updated_scene.summary` 守卫 + revision 入口处清空 stale summary（dialogue 改了 summary 必须无效） | 修订循环不再 18× call |
+| 2 min | summary 字段含 `dialogue_hash`，next pass 比对，hash 同则跳过 | 正确性更强，不依赖"清空"动作 |
+| 5 min | local_regen.py:130 splice 后 conditional summary refire（gated by `enable_scene_summarization`） | 修复 stale summary |
+| 1.5 h | 实现 chapter rollup：每 10 个 scene summary fold 一次，得 ≤500-word chapter summary，存到 `Chapter` 模型（要新建）；Writer prompt 改成 `recent_full + recent_chapter_summaries + older_chapter_summaries` 三段 | 真正解锁 50+ scene 长篇生成 |
+
+最后一项最大改动，但也是 Sprint 11+ "长篇 VN 阶段"的硬前置 — 没它当前的 per-scene summary 只是个**伪长篇**方案。
+
 ### 其他未收的尾巴（之前的 roadmap）
 
 - **Sprint 12-1 流式 pipeline**（player mode JIT delivery）— 重写 `graph.astream` 为 segmented streaming，`pipeline_lookahead=2`，首场景 TTFS 从 5 min 降到 ~60s
