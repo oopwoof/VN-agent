@@ -161,6 +161,50 @@ Creator-edited dialogue 引入 cast 外 character_id 时，reviewer 在 `unknown
 - **CharacterDesigner 额外 emotion**（thoughtful/angry 等独立 PNG）— 已 filesystem-aware，只要生成就自动生效
 - **Suno API 音乐生成** — 待 API 公开
 
+### 前端 / Web API 同步缺口（Phase 9 之后全部没跟进）
+
+后端 Sprint 9-12 大量 feature 没有在 FastAPI (`src/vn_agent/web/app.py`) 和 React 前端 (`frontend/src/`) 暴露。目前两端停留在 Phase 9 的"生成 + 分步编辑 + 资产管理"三件套。
+
+需要补的 **Web 端点**（~6 个）：
+
+| 端点 | 对应后端能力 | 备注 |
+|---|---|---|
+| `POST /api/projects/{id}/pause-outline` | Sprint 12-3 `--pause-after outline` | 运行到 state_orchestrator 后中断，dump sidecar |
+| `POST /api/projects/{id}/continue-outline` | Sprint 12-3 continue-outline CLI | 读 edited vn_script + sidecar，跑 writer-only graph |
+| `POST /api/projects/{id}/regen-scene` | Sprint 12-4 local regen CLI | body: `{scene_id, feedback}`，重写单场景 |
+| `GET /api/projects/{id}/unknown-characters` | Sprint 12-5 resolver payload | 读 state 的 `unknown_characters` 列表 |
+| `POST /api/projects/{id}/resolve-unknown-character` | creator consent gate | body: `{character_id, action: "auto-fill"\|"open-editor", profile_stub?}` |
+| `GET /api/projects/{id}/eval-metrics` | Sprint 8-1/8-2 judge + rule metrics | 读 `scored.json` 返回 per-scene Sonnet/GPT-4o/rule 三元数据 |
+| `GET /api/projects/{id}/diagnostics` | Sprint 12-6 | 聚合 trace.json + 各种 warnings 返回单页诊断 |
+
+需要补的 **前端组件**（~5 个）：
+
+| 组件 | 职责 |
+|---|---|
+| `CreatorPausePanel` | 触发 `--pause-after outline`，显示 Director 的 outline + StructureReviewer issues，允许内联编辑后点击"继续" |
+| `RegenSceneButton` | 每个 scene 旁边加重写按钮，弹窗收 `feedback` 字段，触发 regen-scene |
+| `UnknownCharacterResolverModal` | 当 reviewer 返回 unknown_characters ≠ []，弹出 modal 展示 profile_stub + 样本对话，让 creator 选 auto-fill / open editor |
+| `WorldStatePanel` | 显示并允许编辑 `VNScript.world_variables`（name / type / initial_value / description），pause-after-outline 时尤其重要 |
+| `DiagnosticsSidebar` | creator-mode only，聚合显示：per-scene 判分、rule-based signals、persona drift warnings、StructureReviewer issues。可手动触发 eval（花钱） |
+
+前端 `types.ts` **数据模型同步**：
+- `CharacterProfile` 补 `immutability_score`、`speech_fingerprint` 字段（Sprint 9/11 schema 增强）
+- `Scene` 补 `summary`、`state_reads`、`state_writes`、`narrative_strategy`、`emotional_arc`、`entry_context`、`exit_hook` 字段（Sprint 6/9/11 累加）
+- `VNScript` 补 `world_variables` 数组
+- 情感词表改为从 `/api/constants/emotions` 拉，不要前端硬编码（对齐 `src/vn_agent/schema/emotions.py` 单源）
+- `BranchOption` 补 `requires: Record<string, any>` 字段（Sprint 9 symbolic guard）
+
+前端 **视觉呈现** 需同步：
+- `VNPreview.tsx` 预览时 sprite 3:4 + zoom 0.45、BG 1920×1080 的新尺寸；此前可能按旧 1:1 假设布局
+- `AssetPanel.tsx` 显示每个 sprite 的 3 个生成版 + 6 个 alias 来源（让 creator 看到 `thoughtful` 当前别名到 `sad`，点"生成真实表情"可触发补图）
+
+实施建议顺序：
+1. `types.ts` 先同步（前端其他组件都依赖它）— 纯增量，不破坏现有 UI
+2. `unknown-characters` + resolver modal — 小闭环，阻塞最少
+3. `regen-scene` 按钮 — 复用已存在的 script panel
+4. `pause-outline` + `continue-outline` 成对做 — 是 creator mode 的门面
+5. `WorldStatePanel` + `DiagnosticsSidebar` — 大块 UI，最后做
+
 ---
 
 ## 开发记录
