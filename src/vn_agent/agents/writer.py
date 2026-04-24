@@ -354,6 +354,55 @@ async def _rollup_task(
         return None
 
 
+def _format_thinking_block(thinking: Any) -> str:
+    """Phase 13-2 Step 4a: render SceneThinking as Writer's own briefing.
+
+    Called only when settings.writer_consume_thinking is True and
+    scene.thinking is populated. The block is the Writer's "final
+    briefing" — positioned immediately before the "write N dialogue
+    lines" instruction, so it's the last thing the model sees.
+
+    Structure is flat + labeled (no nested JSON dumps) because it's the
+    Writer's own thinking phase output being fed back as guidance. Heavy
+    visual separators ("--- ... ---") help Sonnet treat this as a
+    load-bearing section rather than background context.
+
+    Layout rationale:
+      - Intent first: orient the whole scene before beats
+      - Opening hook → beats → closing beat: temporal order
+      - Callbacks injected with the 'what_lands' angle
+      - Voice notes per-character (mid-scene reminders override anything
+        in macro_reference.character_voice_charter)
+      - Risks last — directional "don't do X" guardrails
+    """
+    parts = ["\n--- Your scene plan (from thinking phase) — use this ---"]
+    if thinking.writing_intent:
+        parts.append(f"Intent: {thinking.writing_intent}")
+    if thinking.opening_hook:
+        parts.append(f"Opening hook: {thinking.opening_hook}")
+    if thinking.key_beats_expanded:
+        parts.append("Beats (inflate into dialogue, in order):")
+        for i, beat in enumerate(thinking.key_beats_expanded, 1):
+            parts.append(f"  {i}. {beat}")
+    if thinking.callback_plan:
+        parts.append("Callbacks landing this scene:")
+        for cb in thinking.callback_plan:
+            angle = cb.what_lands.strip() or "(no angle note)"
+            parts.append(f"  → [{cb.ref_scene_id}] {angle}")
+    if thinking.voice_notes:
+        parts.append("Voice notes (scene-specific, override global charter):")
+        for cid, note in thinking.voice_notes.items():
+            parts.append(f"  {cid}: {note}")
+    if thinking.closing_beat:
+        parts.append(f"Closing beat: {thinking.closing_beat}")
+    if thinking.risks:
+        parts.append("Avoid:")
+        for risk in thinking.risks:
+            parts.append(f"  × {risk}")
+    parts.append("--- End plan ---\n")
+    return "\n".join(parts)
+
+
 def _format_graph_context(
     scene: Scene,
     script: VNScript,
@@ -817,6 +866,20 @@ async def _write_scene(
             f"{state_constraints}\n"
         )
 
+    # Phase 13-2 Step 4a: consume scene.thinking when flag is on.
+    # Renders the Writer's OWN plan from the thinking phase as the final
+    # briefing — immediately before the "write dialogue now" instruction,
+    # so it's the last signal Writer sees. Gated by writer_consume_thinking
+    # so the default path is unchanged (and so we can A/B validate whether
+    # thinking injection actually helps dialogue quality before Step 4b
+    # invests in parallel writing infrastructure).
+    thinking_block = ""
+    if (
+        getattr(settings, "writer_consume_thinking", False)
+        and scene.thinking is not None
+    ):
+        thinking_block = _format_thinking_block(scene.thinking)
+
     user_prompt = f"""Write dialogue for this scene:
 
 Scene ID: {scene.id}
@@ -831,7 +894,7 @@ Music mood: {scene.music.mood.value if scene.music else 'none'}
 
 Story context: {script.description}
 {older_summaries_block}{prior_context_block}
-
+{thinking_block}
 Write {settings.min_dialogue_lines}-{settings.max_dialogue_lines} dialogue/narration lines.
 Return JSON array:
 [

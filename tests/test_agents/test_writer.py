@@ -258,3 +258,192 @@ class TestStateConstraintsSnapshot:
 
         result = await run_writer(state)
         assert result["vn_script"].scenes[0].state_constraints_seen is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 13-2 Step 4a: Writer consumes scene.thinking as its final briefing.
+# Flag-gated — default OFF keeps existing path unchanged.
+# ---------------------------------------------------------------------------
+
+
+class TestWriterConsumesThinking:
+    def _thinking(self):
+        from vn_agent.schema.script import CallbackItem, SceneThinking
+        return SceneThinking(
+            writing_intent="resolve the watch callback with restraint",
+            opening_hook="waves hitting the lantern room — slow rhythm",
+            key_beats_expanded=[
+                "yui notices the watch",
+                "ren speaks — says only her name",
+                "she answers without turning",
+            ],
+            callback_plan=[
+                CallbackItem(
+                    ref_scene_id="s01",
+                    what_lands="reveal the watch stopped the night he died",
+                ),
+            ],
+            voice_notes={"yui": "tighter cadence — guarding"},
+            closing_beat="cut to black as yui pockets the watch",
+            risks=[
+                "no melodrama on the reveal",
+                "avoid naming the father explicitly",
+            ],
+        )
+
+    def test_format_thinking_block_contains_all_fields(self):
+        """Unit on the helper — every populated field must surface."""
+        from vn_agent.agents.writer import _format_thinking_block
+        block = _format_thinking_block(self._thinking())
+        # Key markers from each section
+        assert "Intent: resolve the watch callback" in block
+        assert "Opening hook: waves hitting" in block
+        assert "1. yui notices the watch" in block
+        assert "[s01] reveal the watch stopped" in block
+        assert "yui: tighter cadence" in block
+        assert "Closing beat: cut to black" in block
+        assert "× no melodrama" in block
+        assert "--- End plan ---" in block
+
+    def test_format_thinking_block_skips_empty_fields(self):
+        """Minimal SceneThinking should produce a block without empty sections."""
+        from vn_agent.agents.writer import _format_thinking_block
+        from vn_agent.schema.script import SceneThinking
+        t = SceneThinking(writing_intent="just this")
+        block = _format_thinking_block(t)
+        assert "Intent: just this" in block
+        # No beats / callbacks / voice / risks sections since they're empty
+        assert "Beats" not in block
+        assert "Callbacks" not in block
+        assert "Voice notes" not in block
+        assert "Avoid" not in block
+
+    @pytest.mark.asyncio
+    async def test_thinking_in_prompt_when_flag_on(self, mocker, tmp_path):
+        """With writer_consume_thinking=True AND scene.thinking present,
+        the rendered block must appear in Writer's user prompt."""
+        from vn_agent.agents.state import initial_state
+        from vn_agent.agents.writer import run_writer
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import Scene, VNScript
+
+        captured_prompts: list[str] = []
+
+        async def _capture(system, user_prompt, *args, **kwargs):
+            captured_prompts.append(user_prompt)
+            from vn_agent.schema.script import DialogueLine
+            return scene_with_thinking.model_copy(update={
+                "dialogue": [DialogueLine(
+                    character_id="alice", text="line", emotion="neutral",
+                )],
+            })
+
+        # Build a scene with thinking
+        scene_with_thinking = Scene(
+            id="s1", title="S", description="x", background_id="bg",
+            characters_present=["alice"],
+            thinking=self._thinking(),
+        )
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s1", scenes=[scene_with_thinking],
+            world_variables=[],
+        )
+        chars = {"alice": CharacterProfile(
+            id="alice", name="A", role="p", personality="", background="",
+        )}
+
+        mocker.patch("vn_agent.agents.writer._write_scene", side_effect=_capture)
+        mocker.patch("vn_agent.agents.writer._write_scene_snapshot")
+        mock_s = mocker.patch("vn_agent.agents.writer.get_settings")
+        # Need real-ish settings — patch only the thinking flag
+        from vn_agent.config import get_settings as _real_get_settings
+        real_s = _real_get_settings()
+        # Copy every attr so the rest of Writer init still works, flip the one flag
+        mock_s.return_value = real_s
+        real_s.writer_consume_thinking = True
+
+        state = initial_state(theme="th", output_dir=str(tmp_path),
+                              max_scenes=1, num_characters=1)
+        state["vn_script"] = script
+        state["characters"] = chars
+        state["output_dir"] = str(tmp_path)
+
+        # NOTE: _write_scene is mocked so captured_prompts here WON'T receive
+        # the actual Writer user_prompt. We need to exercise _write_scene's
+        # internal prompt assembly. Switch to a direct _write_scene test.
+        # Leaving run_writer here as a smoke that the flag-plumbing doesn't
+        # crash the pipeline.
+        await run_writer(state)
+        # Sanity: no crash, at least one _write_scene call.
+
+    @pytest.mark.asyncio
+    async def test_thinking_block_spliced_into_write_scene_prompt(self, mocker, tmp_path):
+        """Unit on _write_scene's prompt assembly: thinking_block shows up
+        in the user prompt iff flag on + scene.thinking present."""
+        from vn_agent.agents.writer import _write_scene
+        from vn_agent.schema.script import Scene, VNScript
+
+        # Capture the user_prompt passed to ainvoke_llm inside _write_scene
+        captured: dict = {}
+
+        class _FakeResp:
+            def __init__(self):
+                self.content = "[]"  # empty dialogue array, caller handles
+
+        async def _fake_ainvoke(system, user, *args, **kwargs):
+            captured["system"] = system
+            captured["user"] = user
+            return _FakeResp()
+
+        mocker.patch("vn_agent.agents.writer.ainvoke_llm", side_effect=_fake_ainvoke)
+        # Skip rag record append + inner _regenerate_short_dialogue path
+        mocker.patch("vn_agent.agents.writer._append_rag_record")
+
+        scene = Scene(
+            id="s1", title="S", description="desc", background_id="bg",
+            characters_present=["alice"],
+            thinking=self._thinking(),
+        )
+        script = VNScript(
+            title="T", description="premise", theme="th",
+            start_scene_id="s1", scenes=[scene], world_variables=[],
+        )
+
+        # Flag ON: block must appear
+        mock_s = mocker.patch("vn_agent.agents.writer.get_settings")
+        from vn_agent.config import get_settings as _real_get_settings
+        s = _real_get_settings()
+        s.writer_consume_thinking = True
+        s.min_dialogue_lines = 1
+        s.max_dialogue_lines = 5
+        mock_s.return_value = s
+
+        await _write_scene(
+            scene, script, char_descriptions="",
+            revision_feedback="", output_dir=str(tmp_path),
+            system_prompt="writer system",
+        )
+        assert "Your scene plan (from thinking phase)" in captured["user"]
+        assert "resolve the watch callback" in captured["user"]
+
+        # Flag OFF: block must NOT appear
+        captured.clear()
+        s.writer_consume_thinking = False
+        await _write_scene(
+            scene, script, char_descriptions="",
+            revision_feedback="", output_dir=str(tmp_path),
+            system_prompt="writer system",
+        )
+        assert "Your scene plan (from thinking phase)" not in captured["user"]
+
+        # Flag ON but thinking=None: block must NOT appear
+        captured.clear()
+        s.writer_consume_thinking = True
+        scene_no_thinking = scene.model_copy(update={"thinking": None})
+        await _write_scene(
+            scene_no_thinking, script, char_descriptions="",
+            revision_feedback="", output_dir=str(tmp_path),
+            system_prompt="writer system",
+        )
+        assert "Your scene plan (from thinking phase)" not in captured["user"]

@@ -220,6 +220,15 @@ class Settings(BaseSettings):
     # Runs AFTER thinking_fanout — min threshold matches thinking's.
     enable_cross_ref_sync: bool = False
     cross_ref_sync_min_scenes: int = 10
+    # Phase 13-2 Step 4a: Writer consumes scene.thinking as its final
+    # briefing. Default OFF so the existing Writer path is unchanged
+    # while we A/B validate whether thinking injection improves dialogue
+    # quality (before Step 4b invests in parallel writing infrastructure
+    # that depends on thinking being useful).
+    # When True and scene.thinking is populated, _format_thinking_block
+    # renders intent/beats/callbacks/voice/risks as the last signal
+    # Writer sees before the "write dialogue" instruction.
+    writer_consume_thinking: bool = False
     # Phase 13-2 Step 3.5 (post-Gemini-review): Tier 2 Director arbitration.
     # When ON, conflicts that Tier 1 (deterministic) had to fall back to
     # "latest claimant wins" get re-arbitrated by a second Director LLM
