@@ -528,3 +528,416 @@ class TestWriterConsumesThinking:
             system_prompt="writer system",
         )
         assert "Your scene plan (from thinking phase)" not in captured["user"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 13-2 Step 4b-4: Parallel Writer path.
+# Routes on settings.writer_max_concurrent > 1. Processes chapters in order
+# (chapter barrier), waves within a chapter in topological order (wave
+# barrier), and scenes within a wave concurrently under Semaphore.
+# ---------------------------------------------------------------------------
+
+
+class TestParallelWriterPath:
+    """Parallel path invariants that 4b-4 must hold."""
+
+    def _scene(self, sid: str, deps=None, state_writes=None, state_reads=None):
+        from vn_agent.schema.script import Scene, SceneContextRef
+        refs = []
+        for ref_type, ref_id in deps or []:
+            refs.append(SceneContextRef(
+                ref_type=ref_type, ref_id=ref_id,
+                link_type="callback", reason="test",
+            ))
+        return Scene(
+            id=sid, title=sid.upper(), description=f"desc {sid}",
+            background_id="bg", characters_present=["a"],
+            context_deps=refs,
+            state_writes=state_writes or {},
+            state_reads=state_reads or [],
+        )
+
+    def _parallel_settings(self, max_concurrent: int = 3):
+        """Fresh Settings instance with parallel flags ON — bypasses
+        the get_settings lru_cache singleton which other tests mutate."""
+        from vn_agent.config import Settings
+        return Settings(
+            writer_max_concurrent=max_concurrent,
+            enable_thinking_fanout=True,
+            writer_consume_thinking=True,
+            enable_scene_summarization=False,  # skip Haiku calls
+            enable_chapter_rollup=False,  # 4b-4 tests don't exercise rollup
+            writer_context_window=0,  # simplify — no prior_scenes wiring
+        )
+
+    @pytest.mark.asyncio
+    async def test_parallel_path_runs_when_max_concurrent_gt_1(
+        self, mocker, tmp_path,
+    ):
+        """writer_max_concurrent>1 must dispatch to _run_scenes_parallel."""
+        from vn_agent.agents.state import initial_state
+        from vn_agent.agents.writer import run_writer
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import VNScript
+
+        async def _fake_write(scene, *args, **kwargs):
+            return scene
+
+        mocker.patch("vn_agent.agents.writer._write_scene", side_effect=_fake_write)
+        mocker.patch("vn_agent.agents.writer._write_scene_snapshot")
+        mocker.patch(
+            "vn_agent.agents.writer.get_settings",
+            return_value=self._parallel_settings(max_concurrent=3),
+        )
+        parallel_spy = mocker.spy(
+            __import__("vn_agent.agents.writer", fromlist=["_run_scenes_parallel"]),
+            "_run_scenes_parallel",
+        )
+        sequential_spy = mocker.spy(
+            __import__("vn_agent.agents.writer", fromlist=["_run_scenes_sequential"]),
+            "_run_scenes_sequential",
+        )
+
+        scenes = [self._scene(f"s{i}") for i in range(3)]
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s0", scenes=scenes, world_variables=[],
+        )
+        chars = {"a": CharacterProfile(id="a", name="A", role="p",
+                                       personality="", background="")}
+
+        state = initial_state(theme="th", output_dir=str(tmp_path),
+                              max_scenes=3, num_characters=1)
+        state["vn_script"] = script
+        state["characters"] = chars
+        state["output_dir"] = str(tmp_path)
+
+        await run_writer(state)
+        assert parallel_spy.call_count == 1
+        assert sequential_spy.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_sequential_path_still_default(self, mocker, tmp_path):
+        """writer_max_concurrent=1 default keeps using sequential path
+        (regression guard so 4b-4 doesn't change default behavior)."""
+        from vn_agent.agents.state import initial_state
+        from vn_agent.agents.writer import run_writer
+        from vn_agent.config import Settings
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import VNScript
+
+        async def _fake_write(scene, *args, **kwargs):
+            return scene
+
+        mocker.patch("vn_agent.agents.writer._write_scene", side_effect=_fake_write)
+        mocker.patch("vn_agent.agents.writer._write_scene_snapshot")
+        mocker.patch(
+            "vn_agent.agents.writer.get_settings",
+            return_value=Settings(
+                writer_max_concurrent=1,
+                enable_scene_summarization=False,
+                enable_chapter_rollup=False,
+            ),
+        )
+        parallel_spy = mocker.spy(
+            __import__("vn_agent.agents.writer", fromlist=["_run_scenes_parallel"]),
+            "_run_scenes_parallel",
+        )
+        sequential_spy = mocker.spy(
+            __import__("vn_agent.agents.writer", fromlist=["_run_scenes_sequential"]),
+            "_run_scenes_sequential",
+        )
+
+        scenes = [self._scene(f"s{i}") for i in range(2)]
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s0", scenes=scenes, world_variables=[],
+        )
+        chars = {"a": CharacterProfile(id="a", name="A", role="p",
+                                       personality="", background="")}
+
+        state = initial_state(theme="th", output_dir=str(tmp_path),
+                              max_scenes=2, num_characters=1)
+        state["vn_script"] = script
+        state["characters"] = chars
+        state["output_dir"] = str(tmp_path)
+
+        await run_writer(state)
+        assert sequential_spy.call_count == 1
+        assert parallel_spy.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_within_wave_peers_see_same_state_snapshot(
+        self, mocker, tmp_path,
+    ):
+        """Within one wave, every scene sees the pre-wave world_state —
+        siblings are INVISIBLE to each other (coordination signal must
+        come from thinking_fanout upstream, never from peer state_writes).
+
+        Setup: 3 scenes in wave 0 (no deps); scene 0 state_writes x=1
+        but scenes 1 & 2 must NOT see that write during their own call.
+        """
+        from vn_agent.agents.state import initial_state
+        from vn_agent.agents.writer import run_writer
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import VNScript, WorldVariable
+
+        seen: list[tuple[str, dict]] = []
+
+        async def _fake_write(scene, *args, **kwargs):
+            seen.append((scene.id, dict(kwargs["world_state"])))
+            return scene
+
+        mocker.patch("vn_agent.agents.writer._write_scene", side_effect=_fake_write)
+        mocker.patch("vn_agent.agents.writer._write_scene_snapshot")
+        mocker.patch(
+            "vn_agent.agents.writer.get_settings",
+            return_value=self._parallel_settings(max_concurrent=3),
+        )
+
+        scenes = [
+            self._scene("s0", state_writes={"x": 1}),
+            self._scene("s1", state_writes={"y": 2}),
+            self._scene("s2", state_writes={"z": 3}),
+        ]
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s0", scenes=scenes,
+            world_variables=[
+                WorldVariable(name="x", type="int", initial_value=0, description="x"),
+                WorldVariable(name="y", type="int", initial_value=0, description="y"),
+                WorldVariable(name="z", type="int", initial_value=0, description="z"),
+            ],
+        )
+        chars = {"a": CharacterProfile(id="a", name="A", role="p",
+                                       personality="", background="")}
+
+        state = initial_state(theme="th", output_dir=str(tmp_path),
+                              max_scenes=3, num_characters=1)
+        state["vn_script"] = script
+        state["characters"] = chars
+        state["output_dir"] = str(tmp_path)
+
+        await run_writer(state)
+
+        # All 3 scenes ran in wave 0 and saw the same INITIAL state —
+        # none of them saw each other's state_writes.
+        initial = {"x": 0, "y": 0, "z": 0}
+        snapshots_by_id = {sid: snap for sid, snap in seen}
+        assert snapshots_by_id["s0"] == initial
+        assert snapshots_by_id["s1"] == initial
+        assert snapshots_by_id["s2"] == initial
+
+    @pytest.mark.asyncio
+    async def test_cross_wave_state_writes_visible_to_next_wave(
+        self, mocker, tmp_path,
+    ):
+        """Diamond DAG s00 → {s01, s02} → s03:
+          wave 0 = [s00], wave 1 = [s01, s02], wave 2 = [s03].
+
+        After wave 0, s00's state_writes must land in world_state so
+        wave 1's scenes see them. After wave 1, both s01's and s02's
+        state_writes must merge (in script order) before wave 2 runs.
+        """
+        from vn_agent.agents.state import initial_state
+        from vn_agent.agents.writer import run_writer
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import VNScript, WorldVariable
+
+        seen: dict[str, dict] = {}
+
+        async def _fake_write(scene, *args, **kwargs):
+            seen[scene.id] = dict(kwargs["world_state"])
+            return scene
+
+        mocker.patch("vn_agent.agents.writer._write_scene", side_effect=_fake_write)
+        mocker.patch("vn_agent.agents.writer._write_scene_snapshot")
+        mocker.patch(
+            "vn_agent.agents.writer.get_settings",
+            return_value=self._parallel_settings(max_concurrent=5),
+        )
+
+        scenes = [
+            self._scene("s00", state_writes={"a": 1}),
+            self._scene("s01", deps=[("scene", "s00")], state_writes={"b": 2}),
+            self._scene("s02", deps=[("scene", "s00")], state_writes={"c": 3}),
+            self._scene("s03", deps=[("scene", "s01"), ("scene", "s02")]),
+        ]
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s00", scenes=scenes,
+            world_variables=[
+                WorldVariable(name="a", type="int", initial_value=0, description=""),
+                WorldVariable(name="b", type="int", initial_value=0, description=""),
+                WorldVariable(name="c", type="int", initial_value=0, description=""),
+            ],
+        )
+        chars = {"a": CharacterProfile(id="a", name="A", role="p",
+                                       personality="", background="")}
+
+        state = initial_state(theme="th", output_dir=str(tmp_path),
+                              max_scenes=4, num_characters=1)
+        state["vn_script"] = script
+        state["characters"] = chars
+        state["output_dir"] = str(tmp_path)
+
+        await run_writer(state)
+
+        # Wave 0: s00 sees fresh initial state.
+        assert seen["s00"] == {"a": 0, "b": 0, "c": 0}
+        # Wave 1: s01 + s02 both see s00's write (a=1) — wave barrier.
+        # Neither yet sees the other (siblings invisible in same wave).
+        assert seen["s01"] == {"a": 1, "b": 0, "c": 0}
+        assert seen["s02"] == {"a": 1, "b": 0, "c": 0}
+        # Wave 2: s03 sees ALL prior writes merged.
+        assert seen["s03"] == {"a": 1, "b": 2, "c": 3}
+
+    @pytest.mark.asyncio
+    async def test_updated_scenes_in_script_order_despite_out_of_order_completion(
+        self, mocker, tmp_path,
+    ):
+        """Tasks within a wave may complete in any order; the merged
+        output MUST be in script.scenes positional order for determinism."""
+        import asyncio as _asyncio
+
+        from vn_agent.agents.state import initial_state
+        from vn_agent.agents.writer import run_writer
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import VNScript
+
+        async def _fake_write(scene, *args, **kwargs):
+            # Later scenes finish FIRST (reverse completion order)
+            # → exactly the case where a naive append would reorder.
+            delay_map = {"s0": 0.03, "s1": 0.02, "s2": 0.01}
+            await _asyncio.sleep(delay_map.get(scene.id, 0))
+            return scene
+
+        mocker.patch("vn_agent.agents.writer._write_scene", side_effect=_fake_write)
+        mocker.patch("vn_agent.agents.writer._write_scene_snapshot")
+        mocker.patch(
+            "vn_agent.agents.writer.get_settings",
+            return_value=self._parallel_settings(max_concurrent=3),
+        )
+
+        scenes = [self._scene(f"s{i}") for i in range(3)]  # no deps → wave 0
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s0", scenes=scenes, world_variables=[],
+        )
+        chars = {"a": CharacterProfile(id="a", name="A", role="p",
+                                       personality="", background="")}
+
+        state = initial_state(theme="th", output_dir=str(tmp_path),
+                              max_scenes=3, num_characters=1)
+        state["vn_script"] = script
+        state["characters"] = chars
+        state["output_dir"] = str(tmp_path)
+
+        result = await run_writer(state)
+        # Output order matches script order, NOT completion order.
+        assert [s.id for s in result["vn_script"].scenes] == ["s0", "s1", "s2"]
+        # state_timeline also in script order.
+        assert [e.scene_id for e in result["vn_script"].state_timeline] == \
+            ["s0", "s1", "s2"]
+
+    @pytest.mark.asyncio
+    async def test_failed_scene_does_not_block_wave_peers(
+        self, mocker, tmp_path,
+    ):
+        """One scene's LLM failure in a wave must not cancel its siblings.
+        Failed scene surfaces as input scene (no dialogue); others succeed.
+        """
+        from vn_agent.agents.state import initial_state
+        from vn_agent.agents.writer import run_writer
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import DialogueLine, VNScript
+
+        async def _fake_write(scene, *args, **kwargs):
+            if scene.id == "s1":
+                raise RuntimeError("simulated API failure on s1")
+            return scene.model_copy(update={
+                "dialogue": [DialogueLine(
+                    character_id="a", text=f"line-{scene.id}", emotion="neutral",
+                )],
+            })
+
+        mocker.patch("vn_agent.agents.writer._write_scene", side_effect=_fake_write)
+        mocker.patch("vn_agent.agents.writer._write_scene_snapshot")
+        mocker.patch(
+            "vn_agent.agents.writer.get_settings",
+            return_value=self._parallel_settings(max_concurrent=3),
+        )
+
+        scenes = [self._scene(f"s{i}") for i in range(3)]
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s0", scenes=scenes, world_variables=[],
+        )
+        chars = {"a": CharacterProfile(id="a", name="A", role="p",
+                                       personality="", background="")}
+
+        state = initial_state(theme="th", output_dir=str(tmp_path),
+                              max_scenes=3, num_characters=1)
+        state["vn_script"] = script
+        state["characters"] = chars
+        state["output_dir"] = str(tmp_path)
+
+        result = await run_writer(state)
+        out_scenes = {s.id: s for s in result["vn_script"].scenes}
+        # s0 and s2 got dialogue; s1 (failed) is preserved with no dialogue.
+        assert len(out_scenes["s0"].dialogue) == 1
+        assert len(out_scenes["s2"].dialogue) == 1
+        assert len(out_scenes["s1"].dialogue) == 0
+
+    @pytest.mark.asyncio
+    async def test_semaphore_bounds_concurrent_workers(self, mocker, tmp_path):
+        """At no point should more than writer_max_concurrent workers be
+        in-flight simultaneously. Probe the inside of _write_scene with
+        an active-counter + peak observer."""
+        import asyncio as _asyncio
+
+        from vn_agent.agents.state import initial_state
+        from vn_agent.agents.writer import run_writer
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import VNScript
+
+        active = 0
+        peak = 0
+        lock = _asyncio.Lock()
+
+        async def _fake_write(scene, *args, **kwargs):
+            nonlocal active, peak
+            async with lock:
+                active += 1
+                peak = max(peak, active)
+            # Hold the slot briefly so overlaps are measurable.
+            await _asyncio.sleep(0.01)
+            async with lock:
+                active -= 1
+            return scene
+
+        mocker.patch("vn_agent.agents.writer._write_scene", side_effect=_fake_write)
+        mocker.patch("vn_agent.agents.writer._write_scene_snapshot")
+        mocker.patch(
+            "vn_agent.agents.writer.get_settings",
+            return_value=self._parallel_settings(max_concurrent=2),
+        )
+
+        # 6 scenes, no deps → one wave of 6 under Semaphore(2).
+        scenes = [self._scene(f"s{i}") for i in range(6)]
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s0", scenes=scenes, world_variables=[],
+        )
+        chars = {"a": CharacterProfile(id="a", name="A", role="p",
+                                       personality="", background="")}
+
+        state = initial_state(theme="th", output_dir=str(tmp_path),
+                              max_scenes=6, num_characters=1)
+        state["vn_script"] = script
+        state["characters"] = chars
+        state["output_dir"] = str(tmp_path)
+
+        await run_writer(state)
+        assert peak <= 2, f"Semaphore bound violated: peak={peak}"
+        assert peak >= 2, f"Concurrency never materialized: peak={peak}"
