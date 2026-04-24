@@ -210,6 +210,16 @@ class Settings(BaseSettings):
     enable_thinking_fanout: bool = False
     thinking_fanout_min_scenes: int = 10
     llm_thinking_model: str = "claude-haiku-4-5-20251001"
+
+    # Phase 13-2 Step 3 (route 4): cross_ref_sync — one-shot revision pass
+    # where each scene sees its context_deps' SceneThinking and revises
+    # its own plan to resolve callback collisions / voice conflicts.
+    # Single round only (ARCHITECTURE.md 路线四 explicitly rules out
+    # fixed-point iteration). Default OFF until Step 4 proves it lifts
+    # quality; on by default only when thinking_fanout is on.
+    # Runs AFTER thinking_fanout — min threshold matches thinking's.
+    enable_cross_ref_sync: bool = False
+    cross_ref_sync_min_scenes: int = 10
     embedding_model: str = "all-MiniLM-L6-v2"
     embedding_index_path: str = ""  # pre-built index dir; empty = build on-the-fly
 
