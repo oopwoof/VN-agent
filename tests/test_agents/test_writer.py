@@ -227,6 +227,87 @@ class TestStateConstraintsSnapshot:
         assert result["vn_script"].scenes[0].state_writes == input_state_writes
 
     @pytest.mark.asyncio
+    async def test_sequential_state_writes_threaded_to_next_scene(
+        self, mocker, tmp_path,
+    ):
+        """Phase 13-2 Step 4b-3 regression guard: after refactoring run_writer
+        into orchestrator + _process_scene, scene N+1 must still see scene N's
+        state_writes in world_state.
+
+        The sequential path mutates world_state after each _process_scene
+        returns. This test captures the world_state snapshot each scene is
+        called with and asserts scene 1's world_state reflects scene 0's
+        state_writes, scene 2's reflects scene 0+1, etc.
+
+        4b-4's parallel path will need to preserve this property at the
+        wave-barrier granularity (not per-scene).
+        """
+        from vn_agent.agents.state import initial_state
+        from vn_agent.agents.writer import run_writer
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import Scene, VNScript, WorldVariable
+
+        seen_world_states: list[dict] = []
+
+        async def _fake_write(scene, script, char_desc, revision_feedback,
+                              output_dir, *args, **kwargs):
+            # Snapshot the world_state arg so we can verify threading
+            seen_world_states.append(dict(kwargs["world_state"]))
+            # Return the scene unchanged — state_writes already declared
+            # by Director are preserved via Pydantic copy semantics.
+            return scene
+
+        mocker.patch("vn_agent.agents.writer._write_scene", side_effect=_fake_write)
+        mocker.patch("vn_agent.agents.writer._write_scene_snapshot")
+
+        # 3 scenes, each declaring a different state_write.
+        scenes = [
+            Scene(
+                id="s0", title="S0", description="x", background_id="bg",
+                characters_present=["a"],
+                state_writes={"x": 1},
+            ),
+            Scene(
+                id="s1", title="S1", description="x", background_id="bg",
+                characters_present=["a"],
+                state_writes={"y": 2},
+            ),
+            Scene(
+                id="s2", title="S2", description="x", background_id="bg",
+                characters_present=["a"],
+                state_reads=["x", "y"],  # depends on both prior writes
+            ),
+        ]
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s0", scenes=scenes,
+            world_variables=[
+                WorldVariable(name="x", type="int", initial_value=0,
+                              description="x"),
+                WorldVariable(name="y", type="int", initial_value=0,
+                              description="y"),
+            ],
+        )
+        chars = {"a": CharacterProfile(id="a", name="A", role="p",
+                                       personality="", background="")}
+
+        state = initial_state(theme="th", output_dir=str(tmp_path),
+                              max_scenes=3, num_characters=1)
+        state["vn_script"] = script
+        state["characters"] = chars
+        state["output_dir"] = str(tmp_path)
+
+        await run_writer(state)
+
+        assert len(seen_world_states) == 3
+        # scene 0 sees initial values
+        assert seen_world_states[0] == {"x": 0, "y": 0}
+        # scene 1 sees scene 0's write applied
+        assert seen_world_states[1] == {"x": 1, "y": 0}
+        # scene 2 sees both scene 0 and scene 1 writes applied
+        assert seen_world_states[2] == {"x": 1, "y": 2}
+
+    @pytest.mark.asyncio
     async def test_empty_constraints_leaves_field_none(self, mocker, tmp_path):
         """When state_constraints is empty string (no orchestrator output),
         scene.state_constraints_seen must stay None — don't pollute with ""."""

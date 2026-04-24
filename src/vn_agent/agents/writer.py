@@ -161,9 +161,7 @@ async def run_writer(state: AgentState) -> dict:
             updated_scenes[max(0, idx - window) : idx] if window > 0 else []
         )
         # Sprint 11-1: long-form memory — scenes BEFORE the window get
-        # compressed to their per-scene summaries (from 11-1 post-scene
-        # Haiku). No summary → not passed. In short runs this list is
-        # always empty.
+        # compressed to their per-scene summaries. No summary → not passed.
         older_summaries: list[tuple[str, str]] = []
         if window > 0:
             older_summaries = [
@@ -171,46 +169,37 @@ async def run_writer(state: AgentState) -> dict:
                 for s in updated_scenes[: max(0, idx - window)]
                 if s.summary
             ]
-        # Phase 13-2 Step 1 (AUDITS §2 piggyback): snapshot the current
-        # state_orchestrator output onto the scene BEFORE calling Writer,
-        # so the persisted scene records what constraint text Writer saw.
-        # Empty state_constraints stays None (don't pollute with empty strings).
-        # Snapshot the INPUT scene; _write_scene internally does model_copy
-        # for dialogue, which preserves this field via Pydantic's default
-        # update semantics.
-        if state_constraints:
-            scene = scene.model_copy(
-                update={"state_constraints_seen": state_constraints},
-            )
-        updated_scene = await _write_scene(
-            scene, script, char_desc, revision_feedback, output_dir,
-            corpus=corpus, embedding_index=embedding_index,
-            prior_scenes=prior_scenes,
+
+        # Phase 13-2 Step 4b-3: per-scene work (state_constraints snapshot +
+        # _write_scene + summarization + scene snapshot) lives in
+        # _process_scene. Step 4b-4 will call the same worker concurrently
+        # under asyncio.Semaphore(settings.writer_max_concurrent).
+        updated_scene = await _process_scene(
+            scene=scene,
+            script=script,
+            char_desc=char_desc,
+            revision_feedback=revision_feedback,
             structure_issues=structure_issues,
-            world_state=world_state,
-            state_constraints=state_constraints,
-            lore_index=lore_index,
+            prior_scenes=prior_scenes,
             older_summaries=older_summaries,
+            world_state_snapshot=dict(world_state),
+            state_constraints=state_constraints,
+            output_dir=output_dir,
+            corpus=corpus,
+            embedding_index=embedding_index,
+            lore_index=lore_index,
             system_prompt=run_system_prompt,
-            force_cache=_enable_1h_cache,
-            cache_ttl="1h",
+            enable_1h_cache=_enable_1h_cache,
+            settings=settings,
         )
         updated_scenes.append(updated_scene)
 
         # Sprint 9-3: apply state_writes AFTER the scene is written so the
         # next scene sees the updated state. state_writes is DIRECTOR-owned
         # (declared in step2 via 9-2); Writer does NOT produce additional
-        # writes via its JSON output — _parse_dialogue only extracts
-        # DialogueLine, any "state_writes" key is silently dropped. This is
-        # intentional: authority boundary keeps Director responsible for
-        # state logic while Writer focuses on dialogue craft.
-        if updated_scene.state_writes:
-            for var, value in updated_scene.state_writes.items():
-                world_state[var] = value
-            logger.debug(
-                f"Writer[{updated_scene.id}] applied state_writes: "
-                f"{list(updated_scene.state_writes.keys())}"
-            )
+        # writes via its JSON output.
+        for var, value in updated_scene.state_writes.items():
+            world_state[var] = value
 
         # Phase 13-1 / Step 2: snapshot world_state AFTER state_writes applied.
         # Always append — one row per scene, no state_writes still means
@@ -220,70 +209,21 @@ async def run_writer(state: AgentState) -> dict:
             state_after=dict(world_state),
         ))
 
-        # Sprint 11-1: fire per-scene summarization (Haiku) for long-form runs.
-        # Gated by both config toggle and total-scene-count threshold so
-        # short demos don't pay the extra Haiku cost.
-        # Phase 13-1 / Step 4: skip if scene.summary_dialogue_hash matches
-        # current dialogue digest — the stored summary is still valid.
-        # Cuts 150+ redundant Haiku calls on a 50-scene × 3-revision run.
-        if (
-            settings.enable_scene_summarization
-            and len(script.scenes) >= settings.summarization_min_scenes
-        ):
-            try:
-                from vn_agent.agents.summarizer import dialogue_digest, summarize_scene
-                current_hash = dialogue_digest(updated_scene)
-                if (
-                    updated_scene.summary
-                    and updated_scene.summary_dialogue_hash == current_hash
-                ):
-                    logger.debug(
-                        f"Writer[{updated_scene.id}] summary: cache hit "
-                        f"(hash={current_hash})"
-                    )
-                else:
-                    summary = await summarize_scene(updated_scene)
-                    if summary:
-                        updated_scene = updated_scene.model_copy(update={
-                            "summary": summary,
-                            "summary_dialogue_hash": current_hash,
-                        })
-                        # Overwrite the scene we just appended so summary sticks
-                        updated_scenes[-1] = updated_scene
-                        logger.debug(
-                            f"Writer[{updated_scene.id}] summary: {summary[:60]}..."
-                        )
-            except Exception as e:  # noqa: BLE001
-                logger.debug(f"Summarization skipped for {updated_scene.id}: {e}")
-
-        # Sprint 11-4: per-scene snapshot (scene, state_after, optional
-        # summary). Foundation for Sprint 12-4 local regen. Best-effort.
-        _write_scene_snapshot(
-            output_dir,
-            scene=updated_scene,
-            world_state_after=world_state,
-            summary=updated_scene.summary,
-        )
-
         # Phase 13-1 / Step 6: chapter boundary? Kick off async rollup.
         # Fire-and-forget — the next iteration's loop-top gather() awaits it
-        # before the Writer call. So a chapter rollup adds latency to the
-        # NEXT scene's Writer call at most (typically overlaps with user's
-        # current scene wrap-up, costing 0 wall-clock time).
+        # before the Writer call.
         if rollup_enabled and (idx + 1) % settings.chapter_rollup_every == 0:
             chapter_start = idx + 1 - settings.chapter_rollup_every
             chapter_scenes = updated_scenes[chapter_start : idx + 1]
             chapter_id = f"ch{len(chapters_list) + len(pending_rollup_tasks) + 1:02d}"
             # Compute pinned_scene_ids: any scene in this chapter referenced
-            # by LATER scenes' context_deps (backward refs from later scenes
-            # pointing into this chapter).
+            # by LATER scenes' context_deps.
             chapter_scene_id_set = {s.id for s in chapter_scenes}
             pinned: set[str] = set()
             for future_scene in script.scenes[idx + 1 :]:
                 for dep in getattr(future_scene, "context_deps", None) or []:
                     if dep.ref_type == "scene" and dep.ref_id in chapter_scene_id_set:
                         pinned.add(dep.ref_id)
-            # Snapshot world_state at chapter end
             ch_state = dict(world_state)
             pending_rollup_tasks.append(asyncio.create_task(
                 _rollup_task(chapter_id, chapter_scenes, sorted(pinned),
@@ -352,6 +292,124 @@ async def _rollup_task(
     except Exception as e:  # noqa: BLE001
         logger.warning(f"Chapter rollup for {chapter_id} failed: {e}")
         return None
+
+
+async def _process_scene(
+    *,
+    scene: Scene,
+    script: VNScript,
+    char_desc: str,
+    revision_feedback: str,
+    structure_issues: list,
+    prior_scenes: list[Scene],
+    older_summaries: list[tuple[str, str]],
+    world_state_snapshot: dict,
+    state_constraints: str,
+    output_dir: str,
+    corpus: Any,
+    embedding_index: Any,
+    lore_index: Any,
+    system_prompt: str,
+    enable_1h_cache: bool,
+    settings: Any,
+) -> Scene:
+    """Phase 13-2 Step 4b-3: per-scene Writer worker.
+
+    Extracted from the original run_writer loop body so Step 4b-4 can
+    invoke it concurrently under asyncio.Semaphore(writer_max_concurrent).
+    Sequential (default) and parallel paths both call this.
+
+    Contract:
+      - Pure-ish: returns the new Scene; does NOT mutate world_state_snapshot,
+        state_timeline, chapters_list, pending_rollup_tasks, or any
+        other orchestrator-level state.
+      - File I/O to output_dir is per-scene (rag records keyed by
+        scene_id, scene snapshot keyed by scene_id) so concurrent calls
+        on different scenes don't collide — except shared rag_records.jsonl
+        which Step 4b-5 guards with a lock.
+      - LLM calls: Sonnet (_write_scene) and optionally Haiku
+        (summarize_scene). Failures in summarization are caught + logged;
+        the scene still returns with dialogue populated.
+
+    The orchestrator is responsible for:
+      - sliding-window prior_scenes / older_summaries computation
+      - world_state mutation (apply updated_scene.state_writes after return)
+      - state_timeline append
+      - chapter rollup triggering / awaiting
+    """
+    # 1. Snapshot state_constraints onto the scene (AUDITS §2).
+    if state_constraints:
+        scene = scene.model_copy(
+            update={"state_constraints_seen": state_constraints},
+        )
+
+    # 2. Write dialogue.
+    updated_scene = await _write_scene(
+        scene, script, char_desc, revision_feedback, output_dir,
+        corpus=corpus, embedding_index=embedding_index,
+        prior_scenes=prior_scenes,
+        structure_issues=structure_issues,
+        world_state=world_state_snapshot,
+        state_constraints=state_constraints,
+        lore_index=lore_index,
+        older_summaries=older_summaries,
+        system_prompt=system_prompt,
+        force_cache=enable_1h_cache,
+        cache_ttl="1h",
+    )
+
+    # 3. Compute world_state_after locally so the snapshot file records
+    # post-write state — without mutating the caller's snapshot dict.
+    world_state_after = dict(world_state_snapshot)
+    for k, v in updated_scene.state_writes.items():
+        world_state_after[k] = v
+
+    # Log state_writes application (original location; orchestrator still
+    # applies them separately to its authoritative world_state dict).
+    if updated_scene.state_writes:
+        logger.debug(
+            f"Writer[{updated_scene.id}] applied state_writes: "
+            f"{list(updated_scene.state_writes.keys())}"
+        )
+
+    # 4. Per-scene summarization (gated; cache-aware). Non-blocking.
+    if (
+        settings.enable_scene_summarization
+        and len(script.scenes) >= settings.summarization_min_scenes
+    ):
+        try:
+            from vn_agent.agents.summarizer import dialogue_digest, summarize_scene
+            current_hash = dialogue_digest(updated_scene)
+            if (
+                updated_scene.summary
+                and updated_scene.summary_dialogue_hash == current_hash
+            ):
+                logger.debug(
+                    f"Writer[{updated_scene.id}] summary: cache hit "
+                    f"(hash={current_hash})"
+                )
+            else:
+                summary = await summarize_scene(updated_scene)
+                if summary:
+                    updated_scene = updated_scene.model_copy(update={
+                        "summary": summary,
+                        "summary_dialogue_hash": current_hash,
+                    })
+                    logger.debug(
+                        f"Writer[{updated_scene.id}] summary: {summary[:60]}..."
+                    )
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Summarization skipped for {updated_scene.id}: {e}")
+
+    # 5. Scene snapshot (best-effort per-scene file write).
+    _write_scene_snapshot(
+        output_dir,
+        scene=updated_scene,
+        world_state_after=world_state_after,
+        summary=updated_scene.summary,
+    )
+
+    return updated_scene
 
 
 def _format_thinking_block(thinking: Any) -> str:
