@@ -1,6 +1,7 @@
 """Writer Agent: Creates dialogue for each scene."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -13,7 +14,13 @@ from vn_agent.agents.state import AgentState
 from vn_agent.config import get_settings
 from vn_agent.prompts.templates import WRITER_SYSTEM, strip_thinking
 from vn_agent.schema.character import CharacterProfile
-from vn_agent.schema.script import DialogueLine, Scene, StateTimelineEntry, VNScript
+from vn_agent.schema.script import (
+    Chapter,
+    DialogueLine,
+    Scene,
+    StateTimelineEntry,
+    VNScript,
+)
 from vn_agent.services.llm import ainvoke_llm
 from vn_agent.strategies.narrative import get_strategy
 
@@ -126,7 +133,29 @@ async def run_writer(state: AgentState) -> dict:
     # re-seed world_state from initial_values above, so timeline rebuild
     # matches that semantics.
     state_timeline: list[StateTimelineEntry] = []
+    # Phase 13-1 / Step 6: chapter rollups. Async fire-and-forget tasks
+    # kicked off every chapter_rollup_every scenes; awaited at the next
+    # chapter boundary before the next Writer prompt is assembled so the
+    # cached prefix can include the fresh chapter summary.
+    chapters_list: list[Chapter] = []
+    pending_rollup_tasks: list[asyncio.Task] = []
+
+    rollup_enabled = (
+        settings.enable_chapter_rollup
+        and len(script.scenes) >= settings.chapter_rollup_min_scenes
+    )
     for idx, scene in enumerate(script.scenes):
+        # Await any pending rollups from the previous chapter boundary
+        # before this scene's Writer call so the cached prefix (if any
+        # gets rebuilt in the future) sees the completed chapter.
+        if pending_rollup_tasks:
+            done = await asyncio.gather(*pending_rollup_tasks, return_exceptions=True)
+            for result in done:
+                if isinstance(result, Chapter):
+                    chapters_list.append(result)
+                elif isinstance(result, Exception):
+                    logger.debug(f"Chapter rollup task raised: {result}")
+            pending_rollup_tasks.clear()
         window = settings.writer_context_window
         prior_scenes = (
             updated_scenes[max(0, idx - window) : idx] if window > 0 else []
@@ -225,9 +254,46 @@ async def run_writer(state: AgentState) -> dict:
             summary=updated_scene.summary,
         )
 
+        # Phase 13-1 / Step 6: chapter boundary? Kick off async rollup.
+        # Fire-and-forget — the next iteration's loop-top gather() awaits it
+        # before the Writer call. So a chapter rollup adds latency to the
+        # NEXT scene's Writer call at most (typically overlaps with user's
+        # current scene wrap-up, costing 0 wall-clock time).
+        if rollup_enabled and (idx + 1) % settings.chapter_rollup_every == 0:
+            chapter_start = idx + 1 - settings.chapter_rollup_every
+            chapter_scenes = updated_scenes[chapter_start : idx + 1]
+            chapter_id = f"ch{len(chapters_list) + len(pending_rollup_tasks) + 1:02d}"
+            # Compute pinned_scene_ids: any scene in this chapter referenced
+            # by LATER scenes' context_deps (backward refs from later scenes
+            # pointing into this chapter).
+            chapter_scene_id_set = {s.id for s in chapter_scenes}
+            pinned: set[str] = set()
+            for future_scene in script.scenes[idx + 1 :]:
+                for dep in getattr(future_scene, "context_deps", None) or []:
+                    if dep.ref_type == "scene" and dep.ref_id in chapter_scene_id_set:
+                        pinned.add(dep.ref_id)
+            # Snapshot world_state at chapter end
+            ch_state = dict(world_state)
+            pending_rollup_tasks.append(asyncio.create_task(
+                _rollup_task(chapter_id, chapter_scenes, sorted(pinned),
+                             characters, ch_state, settings),
+            ))
+
+    # After final scene: await any pending rollup (e.g. if scene count
+    # is exact multiple of chapter_rollup_every).
+    if pending_rollup_tasks:
+        done = await asyncio.gather(*pending_rollup_tasks, return_exceptions=True)
+        for result in done:
+            if isinstance(result, Chapter):
+                chapters_list.append(result)
+            elif isinstance(result, Exception):
+                logger.debug(f"Final chapter rollup task raised: {result}")
+        pending_rollup_tasks.clear()
+
     updated_script = script.model_copy(update={
         "scenes": updated_scenes,
         "state_timeline": state_timeline,
+        "chapters": chapters_list,
     })
     logger.info(f"Writer completed: dialogue written for {len(updated_scenes)} scenes")
 
@@ -235,6 +301,46 @@ async def run_writer(state: AgentState) -> dict:
         "vn_script": updated_script,
         "world_state": world_state,
     }
+
+
+async def _rollup_task(
+    chapter_id: str,
+    chapter_scenes: list[Scene],
+    pinned_scene_ids: list[str],
+    characters: dict,
+    world_state_after: dict,
+    settings: Any,
+) -> Chapter | None:
+    """Phase 13-1 / Step 6: async chapter rollup task.
+
+    Returns a finalized Chapter (or None on Haiku failure — caller logs).
+    summary_scene_hashes captures the members' summary_dialogue_hash so
+    a future writer pass can detect "dialogue unchanged since rollup"
+    and skip re-firing.
+    """
+    try:
+        from vn_agent.agents.summarizer import dialogue_digest, rollup_chapter
+        summary = await rollup_chapter(
+            scenes=chapter_scenes,
+            pinned_scene_ids=pinned_scene_ids,
+            characters=characters,
+            target_min_words=settings.rollup_target_min_words,
+            target_max_words=settings.rollup_target_max_words,
+        )
+        return Chapter(
+            chapter_id=chapter_id,
+            scene_ids=[s.id for s in chapter_scenes],
+            summary=summary,
+            summary_scene_hashes=[
+                s.summary_dialogue_hash or dialogue_digest(s)
+                for s in chapter_scenes
+            ],
+            world_state_after=dict(world_state_after),
+            pinned_scene_ids=list(pinned_scene_ids),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Chapter rollup for {chapter_id} failed: {e}")
+        return None
 
 
 def _format_graph_context(

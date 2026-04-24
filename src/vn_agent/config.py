@@ -185,6 +185,19 @@ class Settings(BaseSettings):
     # alone doesn't carry enough prior context.
     enable_scene_summarization: bool = False
     summarization_min_scenes: int = 15  # below this, summarization is pointless
+
+    # Phase 13-1 / Step 6: chapter-level rollups. Default ON per product goal
+    # (50+ scene long-form VN is the north star; short demos stay unchanged
+    # because they don't meet the 10-scene min). Rollup fires async in
+    # background every chapter_rollup_every scenes; pending rollups are
+    # awaited at the next chapter boundary before Writer's prompt prefix
+    # is rebuilt. Dynamic-length 200-800 word summary (matches narrative
+    # density — high-tension chapters get 800, transitional get 200).
+    enable_chapter_rollup: bool = True
+    chapter_rollup_every: int = 10
+    chapter_rollup_min_scenes: int = 10   # below this, skip — short demos unaffected
+    rollup_target_min_words: int = 200
+    rollup_target_max_words: int = 800
     embedding_model: str = "all-MiniLM-L6-v2"
     embedding_index_path: str = ""  # pre-built index dir; empty = build on-the-fly
 

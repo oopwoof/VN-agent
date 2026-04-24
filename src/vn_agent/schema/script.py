@@ -170,6 +170,41 @@ class Scene(BaseModel):
         return list(v)[:5]
 
 
+class Chapter(BaseModel):
+    """Phase 13-1 / Step 6: chapter-level rollup for long-form VN memory.
+
+    Produced by summarizer.rollup_chapter after every N scenes
+    (chapter_rollup_every, default 10). The rollup is a FLAT-INDEX
+    summary computed directly from the raw scenes — NOT from prior
+    chapter summaries — to avoid "telephone-game" drift across 5+
+    chapter rollups (Gemini 3 Pro BLOCKER #2).
+
+    pinned_scene_ids carries the subset of this chapter's scenes that are
+    targets of graph context_deps from LATER scenes; the rollup prompt
+    instructs Haiku to preserve those scenes' dialogue excerpts verbatim
+    rather than compressing them (they have load-bearing narrative weight).
+    """
+    chapter_id: str = Field(description='Stable id, e.g. "ch01", "ch02"')
+    scene_ids: list[str] = Field(description="Member scene ids in order")
+    summary: str | None = Field(
+        default=None,
+        description="Haiku dynamic-length (200-800 word) rollup of the "
+                    "member scenes. Populated async after the chapter closes.",
+    )
+    # Cache keys: members' summary_dialogue_hash. If any member's hash
+    # changes (local_regen, revision splice), rollup is re-fired.
+    summary_scene_hashes: list[str] = Field(default_factory=list)
+    world_state_after: dict[str, Any] = Field(
+        default_factory=dict,
+        description="world_state snapshot at this chapter's end.",
+    )
+    pinned_scene_ids: list[str] = Field(
+        default_factory=list,
+        description="Member scenes referenced by later scenes via graph "
+                    "context_deps. Rollup preserves these verbatim.",
+    )
+
+
 class StateTimelineEntry(BaseModel):
     """One row in VNScript.state_timeline (Phase 13-1 Step 2).
 
@@ -218,4 +253,15 @@ class VNScript(BaseModel):
         default_factory=list,
         description="Per-scene world_state snapshots, post-state_writes. "
                     "Appended by Writer, hard-truncated by local_regen on splice.",
+    )
+    # Phase 13-1 / Step 6: chapter rollups. Populated by Writer after every
+    # `chapter_rollup_every` scenes (default 10, fires only when total
+    # scenes ≥ chapter_rollup_min_scenes so short demos stay unchanged).
+    # Rollup is async fire-and-forget; next chapter's Writer call awaits
+    # pending rollups before assembling its monolithic cache prefix.
+    chapters: list[Chapter] = Field(
+        default_factory=list,
+        description="Haiku chapter rollups (≤800 words each). Stable within "
+                    "a chapter, updated at chapter boundaries. Fed into the "
+                    "cached system prefix by the Writer prompt assembler.",
     )

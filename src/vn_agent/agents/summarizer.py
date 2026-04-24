@@ -76,6 +76,102 @@ language, no quotes from the dialogue — this is reference material, \
 not prose. Return ONLY the summary, no preamble, no <thinking> tags."""
 
 
+ROLLUP_SYSTEM = """You are a chapter summarizer for long-form visual novels.
+
+Given the RAW DIALOGUE of N consecutive scenes (a chapter), produce a \
+single flowing summary of dynamic length (200-800 words) that captures:
+
+1. Main narrative events in order
+2. Character arcs advanced within the chapter (who changed, how)
+3. Causal chain — how each scene's events set up the next
+4. State changes (new facts, items exchanged, variables that flipped)
+5. Unresolved tensions left for later chapters
+
+Length guidance:
+- High-density chapters (rupture, reveal, climax): use 600-800 words
+- Transitional chapters (drift, accumulate, setup): use 200-400 words
+- The goal is semantic density, not word count — don't pad or compress.
+
+PINNED SCENES (if any are flagged): preserve 1-2 key dialogue lines from \
+each pinned scene VERBATIM (quoted). Pinned scenes are load-bearing \
+narrative anchors that later scenes reference directly; losing their \
+exact language would break the callback.
+
+Write in present tense, third person, plain English. Return ONLY the \
+summary, no preamble, no <thinking> tags."""
+
+
+async def rollup_chapter(
+    scenes: list[Scene],
+    pinned_scene_ids: list[str] | None = None,
+    characters: dict | None = None,
+    target_min_words: int = 200,
+    target_max_words: int = 800,
+) -> str | None:
+    """Phase 13-1 / Step 6: fold N consecutive scenes into a dynamic-length
+    chapter summary.
+
+    EXPLICITLY takes NO prior_chapter_summary parameter — we don't recurse
+    over chapter summaries (that would accumulate loss across 5+ chapters,
+    aka the "telephone-game" problem Gemini 3 Pro flagged as BLOCKER #2).
+    Every chapter rollup reads its RAW scene dialogue directly.
+
+    pinned_scene_ids: subset of member scene ids that later scenes depend on
+    via context_deps. The prompt tells Haiku to preserve those scenes'
+    dialogue excerpts verbatim rather than compressing them.
+
+    Non-blocking — returns None on any Haiku error; Writer just keeps the
+    scene-level summaries as fallback.
+    """
+    if not scenes:
+        return None
+
+    pinned_set = set(pinned_scene_ids or [])
+    settings = get_settings()
+
+    scene_blocks: list[str] = []
+    for scene in scenes:
+        is_pinned = scene.id in pinned_set
+        dialogue_text = "\n".join(
+            f"  {d.character_id or 'NARRATION'} ({d.emotion}): {d.text}"
+            for d in scene.dialogue
+        )
+        state_note = ""
+        if scene.state_writes:
+            state_note = f"\n  state_writes: {scene.state_writes}"
+        marker = " [PINNED — preserve key lines verbatim]" if is_pinned else ""
+        scene_blocks.append(
+            f"=== Scene {scene.id}: {scene.title}{marker} ===\n"
+            f"Strategy: {scene.narrative_strategy or 'unspecified'}\n"
+            f"Characters: {scene.characters_present}\n"
+            f"Dialogue:\n{dialogue_text}"
+            f"{state_note}"
+        )
+
+    user_prompt = (
+        f"Chapter has {len(scenes)} scenes. Target length: "
+        f"{target_min_words}-{target_max_words} words (pick based on density).\n\n"
+        + "\n\n".join(scene_blocks)
+        + f"\n\nWrite the chapter summary in {target_min_words}-"
+        f"{target_max_words} words."
+    )
+
+    try:
+        response = await ainvoke_llm(
+            ROLLUP_SYSTEM,
+            user_prompt,
+            model=settings.llm_summarizer_model,
+            caller=f"rollup_chapter/ch_{scenes[0].id}-{scenes[-1].id}",
+        )
+        content = (
+            response.content if hasattr(response, "content") else str(response)
+        ).strip()
+        return content or None
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Chapter rollup failed: {e}")
+        return None
+
+
 async def summarize_scene(scene: Scene) -> str | None:
     """Return a ≤100-word summary of the scene, or None on error.
 

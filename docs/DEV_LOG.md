@@ -490,6 +490,32 @@ def npc_chat(character_id, player_input):
 
 ## 开发记录
 
+### 2026-04-23 | 实现 - 2026-04-23 18:51
+
+**变更文件** (5 个):
+**源码变更** (4 文件):
+  - `src/vn_agent/agents/summarizer.py`
+  - `src/vn_agent/agents/writer.py`
+  - `src/vn_agent/config.py`
+  - `src/vn_agent/schema/script.py`
+
+**测试变更** (1 文件):
+  - `tests/test_agents/test_chapter_rollup.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/summarizer.py        |  96 +++++++++++++++++
+ src/vn_agent/agents/writer.py            | 108 +++++++++++++++++++-
+ src/vn_agent/config.py                   |  13 +++
+ src/vn_agent/schema/script.py            |  46 +++++++++
+ tests/test_agents/test_chapter_rollup.py | 170 +++++++++++++++++++++++++++++++
+ 5 files changed, 432 insertions(+), 1 deletion(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-23 | 实现 - 2026-04-23 18:42
 
 **变更文件** (5 个):
