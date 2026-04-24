@@ -11,9 +11,14 @@ Sits between state_orchestrator and writer. Two-node sequence:
     └→ writer
 
 Core observation: naive parallel writing breaks because workers have no
-visibility into peers. Thinking is cheap (Haiku × N), structured
-(SceneThinking), and shared — the sync pass is where "two scenes planting
-the same callback beat" gets detected and resolved.
+visibility into peers. Thinking is a structured planning artifact
+(SceneThinking) shared across workers — the sync pass is where "two
+scenes planting the same callback beat" gets detected and resolved.
+
+Model: Sonnet. Thinking is narrative/structural reasoning (cross-scene
+callback planning, voice charter application, foreshadow tracking) and
+is the single source of truth every parallel Writer consumes. Cheap
+Haiku drafts here would be amplified by N Writers — GIGO floor.
 
 Step 3.5 (post-Gemini-review 2026-04-24): replaced the default path from
 "symmetric Haiku revision + difflib conflict detection" with "Tier-1
@@ -31,7 +36,7 @@ Step 4: parallel fanout.
 
 Non-blocking throughout: per-scene failures log and skip; pipeline never
 blocks on thinking/sync. Gated by settings so short demos don't pay the
-Haiku cost.
+thinking LLM cost.
 """
 from __future__ import annotations
 
@@ -94,7 +99,7 @@ async def run_thinking_fanout(state: AgentState) -> dict:
     """Graph node: populate SceneThinking for every scene.
 
     Sequential today (Step 2); parallel in Step 4. Non-blocking: per-scene
-    Haiku failure leaves scene.thinking=None and logs at DEBUG.
+    thinking LLM failure leaves scene.thinking=None and logs at DEBUG.
 
     Gating:
       - settings.enable_thinking_fanout must be True
@@ -118,7 +123,7 @@ async def run_thinking_fanout(state: AgentState) -> dict:
         logger.info(
             f"thinking_fanout: {len(script.scenes)} scenes < "
             f"{settings.thinking_fanout_min_scenes} min, skipping "
-            f"(short demos don't pay Haiku cost)"
+            f"(short demos don't pay thinking LLM cost)"
         )
         return {}
 
@@ -144,8 +149,8 @@ async def run_thinking_fanout(state: AgentState) -> dict:
             scene = scene.model_copy(update={"thinking": thinking})
             filled += 1
         updated_scenes.append(scene)
-        # Walk world_state forward so the next scene's Haiku sees the
-        # correct effective state at its own start.
+        # Walk world_state forward so the next scene's thinking call sees
+        # the correct effective state at its own start.
         for var, val in scene.state_writes.items():
             world_state_trail[var] = val
 
@@ -165,7 +170,7 @@ async def _think_scene(
     world_state_at_entry: dict,
     settings,
 ) -> SceneThinking | None:
-    """Single-scene Haiku thinking call. Returns None on any failure —
+    """Single-scene thinking LLM call. Returns None on any failure —
     caller keeps the original scene unchanged (thinking stays None)."""
     try:
         user_prompt = _build_thinking_prompt(
@@ -201,7 +206,7 @@ def _build_thinking_prompt(
     prior_scenes: list[Scene],
     world_state_at_entry: dict,
 ) -> str:
-    """Assemble the per-scene user prompt for the Haiku thinking call."""
+    """Assemble the per-scene user prompt for the thinking LLM call."""
     parts: list[str] = []
 
     parts.append(f"## Scene being planned: {scene.id} — {scene.title}")
@@ -269,8 +274,8 @@ def _build_thinking_prompt(
 
 
 def _parse_thinking_json(content: str) -> dict | None:
-    """Extract a JSON object from the Haiku response. Tolerates stray
-    code fences / prose because Haiku occasionally decorates."""
+    """Extract a JSON object from the thinking LLM response. Tolerates
+    stray code fences / prose because the model occasionally decorates."""
     # Strip common fences
     stripped = content.strip()
     if stripped.startswith("```"):

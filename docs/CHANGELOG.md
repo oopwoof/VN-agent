@@ -15,6 +15,28 @@
 
 ## [Unreleased]
 
+### 2026-04-24 | 实现 - 2026-04-24 10:54
+
+**变更文件** (3 个):
+**源码变更** (2 文件):
+  - `src/vn_agent/agents/thinking.py`
+  - `src/vn_agent/config.py`
+
+**测试变更** (1 文件):
+  - `tests/test_agents/test_thinking.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/thinking.py    | 29 +++++++++++++++++------------
+ src/vn_agent/config.py             | 22 ++++++++++++++--------
+ tests/test_agents/test_thinking.py | 26 +++++++++++++-------------
+ 3 files changed, 44 insertions(+), 33 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-24 | 实现 - 2026-04-24 02:12
 
 **变更文件** (3 个):

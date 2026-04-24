@@ -3,8 +3,8 @@
 Covers:
 - Disabled config → no-op pass-through (no scene.thinking populated)
 - Below min_scenes → skipped (short-demo cost guard)
-- Happy path with mocked Haiku → every scene gets a SceneThinking
-- Haiku failure on one scene → that scene.thinking stays None,
+- Happy path with mocked thinking LLM → every scene gets a SceneThinking
+- Thinking LLM failure on one scene → that scene.thinking stays None,
   others still succeed (non-blocking)
 - _parse_thinking_json tolerates code-fence-wrapped JSON
 - Prompt includes scene_brief + macro_reference + context_deps
@@ -168,7 +168,7 @@ class TestThinkingFanoutExecution:
              patch("vn_agent.agents.thinking.ainvoke_llm", mock_ainvoke):
             mock_s.return_value.enable_thinking_fanout = True
             mock_s.return_value.thinking_fanout_min_scenes = 1
-            mock_s.return_value.llm_thinking_model = "claude-haiku-4-5-20251001"
+            mock_s.return_value.llm_thinking_model = "claude-sonnet-4-6"
 
             result = await run_thinking_fanout(_state(script))
 
@@ -179,13 +179,13 @@ class TestThinkingFanoutExecution:
             assert isinstance(scene.thinking, SceneThinking)
             assert scene.thinking.writing_intent == "resolve callback with restraint"
 
-        # Haiku called once per scene
+        # thinking LLM called once per scene
         assert mock_ainvoke.call_count == 3
 
     @pytest.mark.asyncio
-    async def test_single_haiku_failure_non_blocking(self):
-        """Haiku failing on scene 2 must leave scene 2.thinking=None but
-        still produce thinking for scenes 1 and 3."""
+    async def test_single_thinking_failure_non_blocking(self):
+        """thinking LLM failing on scene 2 must leave scene 2.thinking=None
+        but still produce thinking for scenes 1 and 3."""
         scenes = [_scene(f"s{i:02d}") for i in range(3)]
         script = _script(scenes)
 
@@ -194,14 +194,14 @@ class TestThinkingFanoutExecution:
         async def _side_effect(*args, **kwargs):
             call_count["n"] += 1
             if call_count["n"] == 2:
-                raise RuntimeError("Haiku is cranky today")
+                raise RuntimeError("thinking LLM is cranky today")
             return _FakeResponse(_VALID_THINKING_JSON)
 
         with patch("vn_agent.agents.thinking.get_settings") as mock_s, \
              patch("vn_agent.agents.thinking.ainvoke_llm", side_effect=_side_effect):
             mock_s.return_value.enable_thinking_fanout = True
             mock_s.return_value.thinking_fanout_min_scenes = 1
-            mock_s.return_value.llm_thinking_model = "claude-haiku-4-5-20251001"
+            mock_s.return_value.llm_thinking_model = "claude-sonnet-4-6"
 
             result = await run_thinking_fanout(_state(script))
 
@@ -212,7 +212,7 @@ class TestThinkingFanoutExecution:
 
     @pytest.mark.asyncio
     async def test_garbage_response_non_blocking(self):
-        """Non-JSON Haiku output → scene.thinking stays None (pipeline continues)."""
+        """Non-JSON thinking output → scene.thinking stays None (pipeline continues)."""
         scenes = [_scene("s01")]
         script = _script(scenes)
 
@@ -222,7 +222,7 @@ class TestThinkingFanoutExecution:
              patch("vn_agent.agents.thinking.ainvoke_llm", mock_ainvoke):
             mock_s.return_value.enable_thinking_fanout = True
             mock_s.return_value.thinking_fanout_min_scenes = 1
-            mock_s.return_value.llm_thinking_model = "claude-haiku-4-5-20251001"
+            mock_s.return_value.llm_thinking_model = "claude-sonnet-4-6"
 
             result = await run_thinking_fanout(_state(script))
 
@@ -240,7 +240,7 @@ class TestParseThinkingJson:
         assert data == {"writing_intent": "x"}
 
     def test_fenced_json(self):
-        """Haiku often wraps in ```json ... ```"""
+        """Models often wrap in ```json ... ```"""
         raw = '```json\n{"writing_intent": "x"}\n```'
         data = _parse_thinking_json(raw)
         assert data == {"writing_intent": "x"}
@@ -356,7 +356,7 @@ class TestWorldStateThreading:
              patch("vn_agent.agents.thinking.ainvoke_llm", side_effect=_capture):
             mock_s.return_value.enable_thinking_fanout = True
             mock_s.return_value.thinking_fanout_min_scenes = 1
-            mock_s.return_value.llm_thinking_model = "claude-haiku-4-5-20251001"
+            mock_s.return_value.llm_thinking_model = "claude-sonnet-4-6"
 
             await run_thinking_fanout(_state(script))
 

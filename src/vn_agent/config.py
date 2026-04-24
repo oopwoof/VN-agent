@@ -199,17 +199,23 @@ class Settings(BaseSettings):
     rollup_target_min_words: int = 200
     rollup_target_max_words: int = 800
 
-    # Phase 13-2 Step 2 (route 4): thinking_fanout — per-scene Haiku
-    # planning pass between state_orchestrator and writer. Produces
-    # structured SceneThinking artifacts that Step 4 will hand to
-    # parallel Writer workers for coordination. Default OFF because
-    # Step 2 is validating thinking quality before turning it on by
-    # default; flip to True when Step 4 parallel writing lands.
-    # min_scenes gate keeps 6-scene demos from paying Haiku cost they
+    # Phase 13-2 Step 2 (route 4): thinking_fanout — per-scene planning
+    # pass between state_orchestrator and writer. Produces structured
+    # SceneThinking artifacts that Step 4 hands to parallel Writer workers
+    # for cross-scene coordination (callbacks, voice charter, opening/
+    # closing beats). Default OFF until Step 4 parallel writing lands.
+    # min_scenes gate keeps ≤10-scene demos from paying LLM cost they
     # don't benefit from (thinking matters most for 10+ scene runs).
+    #
+    # Model = Sonnet (NOT Haiku). Thinking is narrative/structural reasoning
+    # (cross-scene callback planning, voice charter application, foreshadow
+    # tracking) — exactly what feedback_model_selection says Sonnet owns.
+    # GIGO applies: if thinking is shallow, 50 parallel Writers amplify
+    # shallowness. Cost delta on 50 scenes: ~$1.25 extra; trivial vs ~$15
+    # total run. Haiku path documented under Tier 3 (legacy, research).
     enable_thinking_fanout: bool = False
     thinking_fanout_min_scenes: int = 10
-    llm_thinking_model: str = "claude-haiku-4-5-20251001"
+    llm_thinking_model: str = "claude-sonnet-4-6"
 
     # Phase 13-2 Step 3 (route 4): cross_ref_sync — one-shot revision pass
     # where each scene sees its context_deps' SceneThinking and revises
