@@ -5,6 +5,7 @@ import csv
 import json
 import logging
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -29,7 +30,13 @@ STRATEGY_MAP: dict[str, str | None] = {
 
 
 class AnnotatedSession(BaseModel):
-    """A single annotated VN dialogue session from the COLX_523 corpus."""
+    """A single annotated VN dialogue session from the COLX_523 corpus.
+
+    Phase 13-1 / Step 3: also used as a lore entity carrier (see eval/lore.py)
+    where `scope` tags whether the entity is premise-class (always in prompt
+    prefix), chapter-wide (changes at chapter boundaries), or scene-local
+    (dynamically retrieved via cosine top-k).
+    """
 
     id: str
     title: str
@@ -37,6 +44,15 @@ class AnnotatedSession(BaseModel):
     strategy: str | None  # normalized VN-Agent strategy name (None for unmapped)
     pivot_line_idx: int | None = None
     pacing: str | None = None  # slow / medium / fast
+    # Phase 13-1 / Step 3: lore-entity scope. "scene" is the default so existing
+    # corpus sessions (which are dialogue few-shots, not lore) stay unchanged.
+    #   always   → premise, immutability_score≥8 characters. Bypass FAISS,
+    #              inject in cached system-prompt prefix with cache_control.
+    #   chapter  → story-wide world_vars + secondary characters. In retrieved
+    #              pool but cap raised (800 char).
+    #   scene    → locations, callback hooks, noisy retrieval context. Cap
+    #              stays at 300 char.
+    scope: Literal["always", "chapter", "scene"] = "scene"
 
 
 def load_corpus(csv_path: Path) -> list[AnnotatedSession]:

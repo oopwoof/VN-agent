@@ -312,6 +312,7 @@ async def mock_ainvoke(
     schema=None,
     model: str | None = None,
     caller: str = "llm",
+    **kwargs,  # absorb Phase 13-1 kwargs (cache_ttl, force_cache) without caring
 ) -> _MockMessage:
     """Drop-in replacement for ainvoke_llm that returns canned responses."""
     sys_lower = system_prompt.lower()

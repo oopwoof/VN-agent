@@ -490,6 +490,40 @@ def npc_chat(character_id, player_input):
 
 ## 开发记录
 
+### 2026-04-23 | 实现 - 2026-04-23 18:22
+
+**变更文件** (9 个):
+**源码变更** (6 文件):
+  - `src/vn_agent/agents/writer.py`
+  - `src/vn_agent/eval/corpus.py`
+  - `src/vn_agent/eval/lore.py`
+  - `src/vn_agent/prompts/cached_prefix.py`
+  - `src/vn_agent/services/llm.py`
+  - `src/vn_agent/services/mock_llm.py`
+
+**测试变更** (3 文件):
+  - `tests/test_eval/test_lore.py`
+  - `tests/test_integration/test_pipeline.py`
+  - `tests/test_prompts/test_cached_prefix.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/writer.py            |  69 +++++--
+ src/vn_agent/eval/corpus.py              |  18 +-
+ src/vn_agent/eval/lore.py                | 307 ++++++++++++++++++++++---------
+ src/vn_agent/prompts/cached_prefix.py    | 129 +++++++++++++
+ src/vn_agent/services/llm.py             |  70 +++++--
+ src/vn_agent/services/mock_llm.py        |   1 +
+ tests/test_eval/test_lore.py             | 189 +++++++++++++------
+ tests/test_integration/test_pipeline.py  |   2 +-
+ tests/test_prompts/test_cached_prefix.py |  69 +++++++
+ 9 files changed, 671 insertions(+), 183 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-23 | 实现 - 2026-04-23 18:05
 
 **变更文件** (4 个):

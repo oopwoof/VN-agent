@@ -100,7 +100,7 @@ class MockMessage:
 def mock_ainvoke(mocker):
     from vn_agent.services.mock_llm import _dispatch
 
-    async def side_effect(system, user, schema=None, model=None, caller="llm"):
+    async def side_effect(system, user, schema=None, model=None, caller="llm", **kwargs):
         system_lower = system.lower()
 
         # For non-Chinese English tests, keep the original inline fixtures for backward compat

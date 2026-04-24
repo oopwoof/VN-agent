@@ -354,32 +354,49 @@ def _log_stop_reason(result: Any, caller: str) -> None:
         )
 
 
-def _build_system_message(system_prompt: str, provider: str, enable_cache: bool):
-    """Sprint 8-4: wrap SystemMessage content to enable Anthropic prompt caching.
+def _build_system_message(
+    system_prompt: str,
+    provider: str,
+    enable_cache: bool,
+    *,
+    cache_ttl: str = "5m",
+    force_cache: bool = False,
+):
+    """Sprint 8-4 + Phase 13-1 Step 3: wrap SystemMessage for Anthropic caching.
 
-    Anthropic's ephemeral cache cuts cached-read input cost to ~10% of base
-    for a 5-min TTL. Activated only for the Anthropic provider and only when
-    the system prompt is long enough to be worth caching (the marker itself
-    has a small overhead — minimum-supported blocks are ~1024 tokens but
-    caching small blocks is lossy).
+    Anthropic's ephemeral cache cuts cached-read input cost to ~10% of
+    base. TTL options: "5m" (default, Sprint 8-4) or "1h" (Step 3, for
+    long-form runs where gaps between Writer calls exceed 5 min due to
+    image/BGM generation).
+
+    Activated when:
+      - provider is anthropic, AND
+      - enable_cache is True, AND
+      - either force_cache=True (caller guarantees prefix meets threshold —
+        see prompts/cached_prefix.build_monolithic_prefix) OR the legacy
+        len≥1500-char heuristic passes.
 
     Short prompts or non-Anthropic providers fall back to plain string
     content so no provider-specific feature leaks.
     """
     from langchain_core.messages import SystemMessage
 
-    if (
+    should_cache = (
         enable_cache
         and provider == "anthropic"
         and system_prompt
-        and len(system_prompt) >= 1500  # heuristic: only cache substantial prompts
-    ):
+        and (force_cache or len(system_prompt) >= 1500)
+    )
+    if should_cache:
+        cache_block: dict = {"type": "ephemeral"}
+        if cache_ttl and cache_ttl != "5m":
+            cache_block["ttl"] = cache_ttl
         return SystemMessage(
             content=[
                 {
                     "type": "text",
                     "text": system_prompt,
-                    "cache_control": {"type": "ephemeral"},
+                    "cache_control": cache_block,
                 }
             ]
         )
@@ -393,6 +410,8 @@ async def _invoke_once_async(
     model: str | None,
     caller: str,
     api_key_override: str | None,
+    cache_ttl: str = "5m",
+    force_cache: bool = False,
 ) -> T | str:
     """Single invocation attempt with inner tenacity retry (conn errors / 5xx).
     RateLimitError is NOT caught here — the outer pool-rotation loop owns it.
@@ -407,6 +426,7 @@ async def _invoke_once_async(
     async def _call():
         sys_msg = _build_system_message(
             system_prompt, settings.llm_provider, enable_cache,
+            cache_ttl=cache_ttl, force_cache=force_cache,
         )
         messages = [sys_msg, HumanMessage(content=user_prompt)]
         if schema is not None:
@@ -427,6 +447,8 @@ def _invoke_once_sync(
     model: str | None,
     caller: str,
     api_key_override: str | None,
+    cache_ttl: str = "5m",
+    force_cache: bool = False,
 ) -> T | str:
     """Sync counterpart to _invoke_once_async."""
     from langchain_core.messages import HumanMessage
@@ -439,6 +461,7 @@ def _invoke_once_sync(
     def _call():
         sys_msg = _build_system_message(
             system_prompt, settings.llm_provider, enable_cache,
+            cache_ttl=cache_ttl, force_cache=force_cache,
         )
         messages = [sys_msg, HumanMessage(content=user_prompt)]
         if schema is not None:
@@ -458,17 +481,23 @@ async def ainvoke_llm(
     schema: type[T] | None = None,
     model: str | None = None,
     caller: str = "llm",
+    *,
+    cache_ttl: str = "5m",
+    force_cache: bool = False,
 ) -> T | str:
     """Invoke LLM with system+user prompts, optionally with structured output.
 
-    Sprint 8-4: system prompts ≥1500 chars are tagged for Anthropic
-    prompt caching when the Anthropic provider is in use.
+    Sprint 8-4: system prompts ≥1500 chars are auto-tagged for Anthropic
+    prompt caching (5-min ephemeral).
 
     Phase 13-1 / Step 1: when a key pool is configured (any of the
     anthropic_api_keys_* settings set), each attempt picks a fresh key;
-    RateLimitError triggers exp backoff + key rotation. Single-key
-    deployments keep the old behavior (rate-limit still retried via the
-    outer loop, but against the same key).
+    RateLimitError triggers exp backoff + key rotation.
+
+    Phase 13-1 / Step 3: callers supplying a monolithic prefix (see
+    prompts/cached_prefix.build_monolithic_prefix) pass force_cache=True
+    and cache_ttl="1h" to enable the 1-hour cache tier with the caller's
+    own threshold decision (not the legacy 1500-char heuristic).
     """
     settings = get_settings()
     resolved_model = model or settings.llm_model
@@ -482,7 +511,7 @@ async def ainvoke_llm(
         try:
             return await _invoke_once_async(
                 system_prompt, user_prompt, schema, resolved_model,
-                caller, key_override,
+                caller, key_override, cache_ttl, force_cache,
             )
         except _RATE_LIMIT_TYPES as e:
             last_err = e
@@ -506,8 +535,11 @@ def invoke_llm(
     schema: type[T] | None = None,
     model: str | None = None,
     caller: str = "llm",
+    *,
+    cache_ttl: str = "5m",
+    force_cache: bool = False,
 ) -> T | str:
-    """Synchronous LLM invocation. Same pool + backoff semantics as async."""
+    """Synchronous LLM invocation. Same pool + backoff + cache semantics as async."""
     settings = get_settings()
     resolved_model = model or settings.llm_model
     pool = _pool_for(resolved_model)
@@ -520,7 +552,7 @@ def invoke_llm(
         try:
             return _invoke_once_sync(
                 system_prompt, user_prompt, schema, resolved_model,
-                caller, key_override,
+                caller, key_override, cache_ttl, force_cache,
             )
         except _RATE_LIMIT_TYPES as e:
             last_err = e

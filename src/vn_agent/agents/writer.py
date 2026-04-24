@@ -76,15 +76,45 @@ async def run_writer(state: AgentState) -> dict:
 
     # Sprint 10-2: lore retrieval index — per-run, in-memory, extracted
     # from Director outputs (chars + locations + world_vars + premise).
-    # Orthogonal to dialogue RAG: runs in BOTH literary and action modes
-    # because factual context doesn't style-contaminate.
+    # Phase 13-1 / Step 3: index now also carries always_entities (premise +
+    # main characters) and chapter_entities (world_vars + secondaries)
+    # separately so Writer can place them in the cached system prefix
+    # instead of competing for scene-level top-k slots.
     lore_index = None
+    always_lore_block = ""
+    chapter_lore_block = ""
     if settings.use_lore_retrieval:
         try:
-            from vn_agent.eval.lore import build_lore_index
+            from vn_agent.eval.lore import build_lore_index, format_lore_block
             lore_index = build_lore_index(script, characters)
+            if lore_index is not None:
+                # Render the stable always + chapter blocks once per run.
+                # Retrieved scene block is rendered per-scene in _write_scene.
+                always_lore_block, chapter_lore_block, _ = format_lore_block(
+                    retrieved=[],
+                    always_entities=getattr(lore_index, "always_entities", []),
+                    chapter_entities=getattr(lore_index, "chapter_entities", []),
+                )
         except Exception as e:  # noqa: BLE001
             logger.debug(f"Lore index build failed: {e}")
+
+    # Phase 13-1 / Step 3: assemble the monolithic cache prefix.
+    # system prompt + character bible + always-scope lore + chapter-scope
+    # lore. Meets Anthropic's 1024-token cache-write threshold (enforced
+    # in build_monolithic_prefix; falls back to no-cache on short runs
+    # to avoid paying 1.25× write cost with no payoff).
+    from vn_agent.prompts.cached_prefix import build_monolithic_prefix
+
+    cached_prefix_text, _enable_1h_cache = build_monolithic_prefix(
+        system_prompt=run_system_prompt,
+        always_lore=always_lore_block,
+        chapter_lore=chapter_lore_block,
+        finalized_chapters=None,  # Step 6 will populate
+    )
+    # Overwrite run_system_prompt with the monolithic prefix so all Writer
+    # calls downstream (_write_scene, _regenerate_short_dialogue) see the
+    # same text. Whether it actually caches is governed by _enable_1h_cache.
+    run_system_prompt = cached_prefix_text
 
     # Write dialogue for each scene. Sprint 7-2: pass prior_scenes for
     # long-context coherence — Writer can reference previous scenes' actual
@@ -121,6 +151,8 @@ async def run_writer(state: AgentState) -> dict:
             lore_index=lore_index,
             older_summaries=older_summaries,
             system_prompt=run_system_prompt,
+            force_cache=_enable_1h_cache,
+            cache_ttl="1h",
         )
         updated_scenes.append(updated_scene)
 
@@ -365,6 +397,9 @@ async def _write_scene(
     lore_index=None,
     older_summaries: list[tuple[str, str]] | None = None,
     system_prompt: str | None = None,
+    *,
+    force_cache: bool = False,
+    cache_ttl: str = "5m",
 ) -> Scene:
     """Write dialogue for a single scene."""
     settings = get_settings()
@@ -446,30 +481,33 @@ async def _write_scene(
     if transition_block:
         transition_block = f"\n--- Transition Guidance ---\n{transition_block}\n"
 
-    # Sprint 10-2: lore retrieval block — per-scene top-k facts from the
-    # Director-extracted lore index. Runs in BOTH writer modes because
-    # facts (character backgrounds, location descriptions, world vars)
-    # don't contaminate literary style the way raw VN dialogue few-shot
-    # does. Absent lore index / index build failure → empty string, no-op.
+    # Sprint 10-2 + Phase 13-1 Step 3: lore retrieval block — per-scene
+    # top-k SCENE-scope facts. Always-scope (premise + main chars) and
+    # chapter-scope (world_vars + secondary chars) are already inlined
+    # into the cached system prefix at run_writer init; this block only
+    # carries scene-local retrievals so the user message stays small.
     lore_block = ""
     if lore_index is not None:
         try:
             from vn_agent.eval.lore import format_lore_block
 
             query = scene.description or scene.title or scene.id
-            # Plain .search without strategy pre-filter (entities have
-            # strategy=None), hybrid FAISS+BM25 top-k.
             hits = lore_index.search(
                 query=query,
                 k=settings.lore_k,
                 strategy=None,
                 pre_filter_strategy=False,
             )
-            lore_block = format_lore_block(hits)
+            # Only render the retrieved (scene-scope) block — always +
+            # chapter are already in system prefix, rendering them here
+            # would duplicate content (violates Writer prompt dedup rule).
+            _, _, lore_block = format_lore_block(
+                retrieved=hits,
+                always_entities=[],
+                chapter_entities=[],
+            )
             if lore_block:
                 lore_block = f"\n{lore_block}\n"
-                # Persist to rag_retrievals.jsonl with __lore__ sentinel
-                # so audit can distinguish from dialogue RAG
                 _append_rag_record(
                     output_dir,
                     scene_id=scene.id,
@@ -608,11 +646,16 @@ After dialogue, if branches exist, the player will choose:
     # Character Bible) so prompt caching amortizes the Bible cost across
     # all scenes in a run. Fall back to the static SYSTEM_PROMPT when
     # called outside the run_writer entry (legacy tests).
+    # Phase 13-1 / Step 3: caller (run_writer) passes force_cache=True and
+    # cache_ttl="1h" when the monolithic prefix meets the 1024-token
+    # threshold (see prompts/cached_prefix.build_monolithic_prefix).
     effective_system = system_prompt if system_prompt else SYSTEM_PROMPT
     response = await ainvoke_llm(
         effective_system, user_prompt,
         model=settings.llm_writer_model,
         caller=f"writer/{scene.id}",
+        cache_ttl=cache_ttl,
+        force_cache=force_cache,
     )
     content = response.content if hasattr(response, 'content') else str(response)
 
