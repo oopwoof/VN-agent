@@ -32,6 +32,26 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = WRITER_SYSTEM
 
+# Phase 13-2 Step 4b-5: shared-state concurrency guard.
+# rag_retrievals.jsonl is the only file written by more than one
+# coroutine within a Writer run (per-scene snapshots / debug raw
+# files / scene_*.json are keyed by scene_id and never collide).
+# Parallel waves call _append_rag_record concurrently — without a
+# lock, simultaneous f.write() calls in TEXT mode can interleave
+# at the encoder boundary for >PIPE_BUF UTF-8 payloads (Chinese
+# themes regularly produce ~700-byte records). Lazy-init so we
+# don't bind the lock to a loop that doesn't exist yet at import.
+_rag_lock: asyncio.Lock | None = None
+
+
+def _get_rag_lock() -> asyncio.Lock:
+    """Return the module-level rag_records.jsonl lock, creating it
+    on first call (after the event loop is running)."""
+    global _rag_lock
+    if _rag_lock is None:
+        _rag_lock = asyncio.Lock()
+    return _rag_lock
+
 
 async def run_writer(state: AgentState) -> dict:
     """Writer node: fills in dialogue for all scenes."""
@@ -899,7 +919,7 @@ def _write_scene_snapshot(
         logger.debug(f"Scene snapshot failed for {scene.id}: {e}")
 
 
-def _append_rag_record(
+async def _append_rag_record(
     output_dir: str,
     scene_id: str,
     strategy: str,
@@ -911,33 +931,40 @@ def _append_rag_record(
     Each line is a self-contained JSON object. Future-you can grep any past
     run to audit which corpus sessions were shown to Writer for which scene
     — no re-run needed.
-    """
-    import json
-    from pathlib import Path
 
-    try:
-        record = {
-            "scene_id": scene_id,
-            "strategy": strategy,
-            "query": query,
-            "retrieved": [
-                {
-                    "id": getattr(ex, "id", "") or None,
-                    "title": getattr(ex, "title", ""),
-                    "strategy": getattr(ex, "strategy", None),
-                    "pivot_line_idx": getattr(ex, "pivot_line_idx", None),
-                    "pacing": getattr(ex, "pacing", None),
-                    "text_preview": (getattr(ex, "text", "") or "")[:400],
-                }
-                for ex in examples
-            ],
-        }
-        path = Path(output_dir) / "rag_retrievals.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except Exception as e:  # noqa: BLE001 — debug artifact is best-effort
-        logger.debug(f"Failed to persist RAG record for {scene_id}: {e}")
+    Phase 13-2 Step 4b-5: async + module-level lock. The parallel Writer
+    path may invoke this from N coroutines in the same wave; without
+    serialization, large UTF-8 payloads (Chinese themes commonly hit
+    ~700 bytes per record) can fragment when text-mode write() splits
+    on encoder boundaries. The lock keeps the encode + write atomic.
+    The actual file I/O remains sync inside the locked region — fast
+    enough that swapping to aiofiles wouldn't pay back the dependency.
+    """
+    record = {
+        "scene_id": scene_id,
+        "strategy": strategy,
+        "query": query,
+        "retrieved": [
+            {
+                "id": getattr(ex, "id", "") or None,
+                "title": getattr(ex, "title", ""),
+                "strategy": getattr(ex, "strategy", None),
+                "pivot_line_idx": getattr(ex, "pivot_line_idx", None),
+                "pacing": getattr(ex, "pacing", None),
+                "text_preview": (getattr(ex, "text", "") or "")[:400],
+            }
+            for ex in examples
+        ],
+    }
+    line = json.dumps(record, ensure_ascii=False) + "\n"
+    async with _get_rag_lock():
+        try:
+            path = Path(output_dir) / "rag_retrievals.jsonl"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception as e:  # noqa: BLE001 — debug artifact is best-effort
+            logger.debug(f"Failed to persist RAG record for {scene_id}: {e}")
 
 
 def _build_or_load_embedding_index(corpus, settings):
@@ -1111,7 +1138,7 @@ async def _write_scene(
             )
             if lore_block:
                 lore_block = f"\n{lore_block}\n"
-                _append_rag_record(
+                await _append_rag_record(
                     output_dir,
                     scene_id=scene.id,
                     strategy="__lore__",
@@ -1217,7 +1244,7 @@ After dialogue, if branches exist, the player will choose:
                 # Persist retrieval record regardless of injection — RAG is
                 # always auditable even when Writer won't actually see the
                 # examples (literary mode).
-                _append_rag_record(
+                await _append_rag_record(
                     output_dir,
                     scene_id=scene.id,
                     strategy=strategy_label,

@@ -478,8 +478,11 @@ class TestWriterConsumesThinking:
             return _FakeResp()
 
         mocker.patch("vn_agent.agents.writer.ainvoke_llm", side_effect=_fake_ainvoke)
-        # Skip rag record append + inner _regenerate_short_dialogue path
-        mocker.patch("vn_agent.agents.writer._append_rag_record")
+        # Skip rag record append (now async; AsyncMock so the await works).
+        from unittest.mock import AsyncMock
+        mocker.patch(
+            "vn_agent.agents.writer._append_rag_record", new=AsyncMock(),
+        )
 
         scene = Scene(
             id="s1", title="S", description="desc", background_id="bg",
@@ -941,3 +944,186 @@ class TestParallelWriterPath:
         await run_writer(state)
         assert peak <= 2, f"Semaphore bound violated: peak={peak}"
         assert peak >= 2, f"Concurrency never materialized: peak={peak}"
+
+
+# ---------------------------------------------------------------------------
+# Phase 13-2 Step 4b-5: concurrent-safe shared state.
+#   - rag_retrievals.jsonl: lock-protected so parallel waves can't
+#     interleave UTF-8 line writes.
+#   - state_timeline: parallel path merges per-wave at the barrier in
+#     script-positional order; this regression test pins that invariant
+#     across multi-wave runs.
+# ---------------------------------------------------------------------------
+
+
+class TestRagRecordsLock:
+    """Lock-protected concurrent appends to rag_retrievals.jsonl."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_appends_produce_one_line_per_call(self, tmp_path):
+        """50 coroutines hammering _append_rag_record concurrently.
+        Result file must have exactly 50 lines, each a complete parseable
+        JSON object — no truncation, no interleaved characters."""
+        import asyncio as _asyncio
+        import json as _json
+
+        from vn_agent.agents.writer import _append_rag_record
+
+        # Each "example" carries a long Chinese-ish payload to push the
+        # encoded record above PIPE_BUF (4KB) where text-mode writes
+        # could fragment without serialization.
+        class _Ex:
+            def __init__(self, idx: int):
+                self.id = f"ex_{idx}"
+                self.title = "锚点" * 200  # ~600 bytes encoded
+                self.strategy = "literary"
+                self.pivot_line_idx = idx
+                self.pacing = "medium"
+                self.text = ("窗外的雨声渐密，灯塔的光圈在浓雾里弯曲。" * 50)
+
+        async def _one(i: int):
+            await _append_rag_record(
+                output_dir=str(tmp_path),
+                scene_id=f"s{i:02d}",
+                strategy="literary",
+                query=f"q-{i}",
+                examples=[_Ex(i)],
+            )
+
+        await _asyncio.gather(*(_one(i) for i in range(50)))
+
+        path = tmp_path / "rag_retrievals.jsonl"
+        assert path.exists()
+        lines = path.read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 50, (
+            f"Expected 50 lines (one per call); got {len(lines)} — "
+            f"interleaved writes would either pack multiple records on "
+            f"one line or split a record across lines."
+        )
+        # Every line parses as one complete JSON object with our schema.
+        seen_ids = set()
+        for line in lines:
+            obj = _json.loads(line)
+            assert "scene_id" in obj
+            assert "retrieved" in obj
+            seen_ids.add(obj["scene_id"])
+        assert seen_ids == {f"s{i:02d}" for i in range(50)}
+
+    @pytest.mark.asyncio
+    async def test_lock_is_singleton_across_calls(self):
+        """_get_rag_lock returns the same Lock instance — not a fresh
+        one per call (which would defeat serialization)."""
+        from vn_agent.agents.writer import _get_rag_lock
+        a = _get_rag_lock()
+        b = _get_rag_lock()
+        assert a is b
+
+
+class TestStateTimelineOrderingParallel:
+    """4b-4 invariant pinned: state_timeline must be in script.scenes
+    positional order even when waves complete out of order."""
+
+    def _scene_with_dep(self, sid: str, deps=None, state_writes=None):
+        from vn_agent.schema.script import Scene, SceneContextRef
+        refs = []
+        for ref_type, ref_id in deps or []:
+            refs.append(SceneContextRef(
+                ref_type=ref_type, ref_id=ref_id,
+                link_type="callback", reason="t",
+            ))
+        return Scene(
+            id=sid, title=sid.upper(), description="d",
+            background_id="bg", characters_present=["a"],
+            context_deps=refs, state_writes=state_writes or {},
+        )
+
+    def _settings(self, max_concurrent: int = 4):
+        from vn_agent.config import Settings
+        return Settings(
+            writer_max_concurrent=max_concurrent,
+            enable_thinking_fanout=True,
+            writer_consume_thinking=True,
+            enable_scene_summarization=False,
+            enable_chapter_rollup=False,
+            writer_context_window=0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_state_timeline_in_script_order_across_waves(
+        self, mocker, tmp_path,
+    ):
+        """Diamond DAG with deliberate latency inversion:
+          - wave 0: s00 (slow)
+          - wave 1: s01, s02 — but s02 finishes BEFORE s01 (faster fake)
+          - wave 2: s03
+
+        state_timeline must record [s00, s01, s02, s03] in that order,
+        NOT completion order [s00, s02, s01, s03].
+        """
+        import asyncio as _asyncio
+
+        from vn_agent.agents.state import initial_state
+        from vn_agent.agents.writer import run_writer
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import VNScript, WorldVariable
+
+        delay_map = {"s00": 0.02, "s01": 0.04, "s02": 0.01, "s03": 0.0}
+
+        async def _fake_write(scene, *args, **kwargs):
+            await _asyncio.sleep(delay_map.get(scene.id, 0))
+            return scene
+
+        mocker.patch("vn_agent.agents.writer._write_scene", side_effect=_fake_write)
+        mocker.patch("vn_agent.agents.writer._write_scene_snapshot")
+        mocker.patch(
+            "vn_agent.agents.writer.get_settings",
+            return_value=self._settings(max_concurrent=4),
+        )
+
+        scenes = [
+            self._scene_with_dep("s00", state_writes={"a": 1}),
+            self._scene_with_dep("s01", deps=[("scene", "s00")],
+                                 state_writes={"b": 2}),
+            self._scene_with_dep("s02", deps=[("scene", "s00")],
+                                 state_writes={"c": 3}),
+            self._scene_with_dep("s03",
+                                 deps=[("scene", "s01"), ("scene", "s02")]),
+        ]
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s00", scenes=scenes,
+            world_variables=[
+                WorldVariable(name="a", type="int", initial_value=0,
+                              description=""),
+                WorldVariable(name="b", type="int", initial_value=0,
+                              description=""),
+                WorldVariable(name="c", type="int", initial_value=0,
+                              description=""),
+            ],
+        )
+        chars = {"a": CharacterProfile(id="a", name="A", role="p",
+                                       personality="", background="")}
+
+        state = initial_state(theme="th", output_dir=str(tmp_path),
+                              max_scenes=4, num_characters=1)
+        state["vn_script"] = script
+        state["characters"] = chars
+        state["output_dir"] = str(tmp_path)
+
+        result = await run_writer(state)
+        timeline = result["vn_script"].state_timeline
+        assert [e.scene_id for e in timeline] == ["s00", "s01", "s02", "s03"]
+
+        # state_after for s01 must reflect ONLY s00's write (peer s02
+        # is invisible within wave 1); state_after for s02 likewise
+        # sees only s00. After wave 1 barrier, s03 sees all three.
+        ts = {e.scene_id: e.state_after for e in timeline}
+        assert ts["s00"] == {"a": 1, "b": 0, "c": 0}
+        # s01 and s02's state_after are recorded post-merge (after the
+        # barrier applies BOTH writes in script order); both reflect
+        # the cumulative state at their position. By the time we're
+        # writing the timeline entry for s01, we've already applied
+        # s01's write. For s02 we then apply s02's write too. So:
+        assert ts["s01"] == {"a": 1, "b": 2, "c": 0}
+        assert ts["s02"] == {"a": 1, "b": 2, "c": 3}
+        assert ts["s03"] == {"a": 1, "b": 2, "c": 3}
