@@ -255,7 +255,97 @@ def _local_structural_audit(
             f"strategies (no corpus few-shot): {gen_only}"
         )
 
+    # 5. Phase 13-1 / Step 5: narrative graph validation.
+    issues.extend(_check_context_deps(script, characters))
+
     return issues
+
+
+def _check_context_deps(script: VNScript, characters: dict) -> list[str]:
+    """Phase 13-1 / Step 5: validate Director-emitted SceneContextRef entries.
+
+    Rules (all violations emit non-fatal structure_feedback, consistent with
+    the agent's non-blocking philosophy — errors flow to Writer prompt so
+    it can be cautious, not reject the script outright):
+      - ref_id must point to an existing entity (scene / character / world_var /
+        location / motif)
+      - Scene refs are BACKWARD-only: scene_5 → scene_1..4 OK, → scene_5 or
+        scene_6+ rejected. Prevents forward-looking deps that would make the
+        dependency graph contain cycles or future-knowledge leakage.
+      - state_dependency link_type requires that ref_id (a world_var name
+        without the "world_var:" prefix) also appears in the scene's
+        state_reads list. Keeps symbolic-state semantics coherent with graph
+        semantics.
+    """
+    errors: list[str] = []
+
+    scene_id_to_index: dict[str, int] = {
+        s.id: i for i, s in enumerate(script.scenes)
+    }
+    valid_character_ids = set((characters or {}).keys())
+    valid_world_var_names = {v.name for v in (script.world_variables or [])}
+    valid_location_ids = {
+        s.background_id for s in script.scenes if s.background_id
+    }
+
+    for scene_idx, scene in enumerate(script.scenes):
+        deps = getattr(scene, "context_deps", None) or []
+        for dep in deps:
+            # Self-ref check (scene → itself)
+            if dep.ref_type == "scene" and dep.ref_id == scene.id:
+                errors.append(
+                    f"scene '{scene.id}': context_dep ref_id='{dep.ref_id}' "
+                    f"self-references — backward-only graph forbids self-loops"
+                )
+                continue
+
+            # ref_id existence + backward-only enforcement by ref_type
+            if dep.ref_type == "scene":
+                target_idx = scene_id_to_index.get(dep.ref_id)
+                if target_idx is None:
+                    errors.append(
+                        f"scene '{scene.id}': context_dep ref_id='{dep.ref_id}' "
+                        f"points to unknown scene"
+                    )
+                elif target_idx >= scene_idx:
+                    errors.append(
+                        f"scene '{scene.id}': context_dep ref_id='{dep.ref_id}' "
+                        f"is forward/same-scene (target idx {target_idx} ≥ "
+                        f"current {scene_idx}) — graph must be backward-only"
+                    )
+            elif dep.ref_type == "character_arc":
+                # Strip "character:" prefix per schema doc
+                cid = dep.ref_id.split(":", 1)[1] if ":" in dep.ref_id else dep.ref_id
+                if cid not in valid_character_ids:
+                    errors.append(
+                        f"scene '{scene.id}': context_dep ref_id='{dep.ref_id}' "
+                        f"points to unknown character"
+                    )
+            elif dep.ref_type == "world_var":
+                var_name = dep.ref_id.split(":", 1)[1] if ":" in dep.ref_id else dep.ref_id
+                if var_name not in valid_world_var_names:
+                    errors.append(
+                        f"scene '{scene.id}': context_dep ref_id='{dep.ref_id}' "
+                        f"points to unknown world_variable"
+                    )
+                # state_dependency must also be in state_reads
+                if dep.link_type == "state_dependency" and var_name not in (scene.state_reads or []):
+                    errors.append(
+                        f"scene '{scene.id}': context_dep link_type="
+                        f"'state_dependency' for '{var_name}' but it is not "
+                        f"in scene.state_reads — symbolic state must agree "
+                        f"with graph declaration"
+                    )
+            elif dep.ref_type == "location":
+                bg_id = dep.ref_id.split(":", 1)[1] if ":" in dep.ref_id else dep.ref_id
+                if bg_id not in valid_location_ids:
+                    errors.append(
+                        f"scene '{scene.id}': context_dep ref_id='{dep.ref_id}' "
+                        f"points to unknown location/background_id"
+                    )
+            # motif has no registry yet — Director invents them; accept any id
+
+    return errors
 
 
 def _build_audit_prompt(script: VNScript, characters: dict) -> str:

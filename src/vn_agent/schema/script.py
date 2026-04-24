@@ -1,7 +1,7 @@
 """Core VN script schema models."""
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .music import MusicCue
 
@@ -36,6 +36,42 @@ class WorldVariable(BaseModel):
         default=None,
         description="For type='enum', the allowed values. Ignored otherwise.",
     )
+
+
+class SceneContextRef(BaseModel):
+    """Phase 13-1 / Step 5: Director-declared narrative dependency on a
+    prior entity. Used to give Writer deterministic context pulls instead
+    of relying on cosine top-k lottery (which can evict premise / callback
+    scenes under long-run drift).
+
+    Emitted by Director at planning time (step-2). Validated by
+    StructureReviewer for consistency (no forward refs, no self-loops,
+    state_dependency refs must appear in state_reads, ref_id must exist).
+    Consumed by Writer via _format_graph_context + canonical dedup.
+
+    ref_id format by ref_type:
+      scene         → "s03" (bare scene.id)
+      character_arc → "character:{id}"
+      world_var     → "world_var:{name}"
+      motif         → "motif:{tag}"
+      location      → "location:{bg_id}"
+    """
+    ref_type: Literal["scene", "character_arc", "world_var", "motif", "location"]
+    ref_id: str = Field(
+        description="Backward reference. Format depends on ref_type — see class doc.",
+    )
+    link_type: Literal[
+        "callback", "foreshadow_payoff", "arc_beat",
+        "state_dependency", "motif_recurrence",
+    ]
+    reason: str = Field(
+        ..., max_length=200,
+        description="One sentence explaining why this dep exists. "
+                    "Lets Writer prefix each injected block with a header.",
+    )
+    inject_as: Literal[
+        "full_dialogue", "summary", "state_snapshot", "character_arc_so_far",
+    ] = "summary"
 
 
 class BranchOption(BaseModel):
@@ -114,6 +150,24 @@ class Scene(BaseModel):
                     "this scene's dialogue. Cache key for summarize_scene "
                     "re-use across revision loops.",
     )
+    # Phase 13-1 / Step 5: Director-declared narrative deps. Up to 5 strong
+    # dependencies (≥0.7 confidence) — prior scenes this scene calls back
+    # to, character arcs it advances, world_vars it reads, motifs it invokes.
+    # StructureReviewer validates: no forward refs, no self-loops, ref must
+    # exist, state_dependency refs must also appear in state_reads.
+    context_deps: list[SceneContextRef] = Field(
+        default_factory=list, max_length=5,
+        description="Director-declared narrative dependencies. Writer pulls "
+                    "these into prompt BEFORE cosine retrieval; chapter rollup "
+                    "preserves graph-pinned scenes verbatim.",
+    )
+
+    @field_validator("context_deps")
+    @classmethod
+    def _cap_context_deps(cls, v: list) -> list:
+        """Safety cap in case Pydantic's max_length isn't enforced by a
+        specific version — 5 is a firm ceiling (budget design)."""
+        return list(v)[:5]
 
 
 class StateTimelineEntry(BaseModel):

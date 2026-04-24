@@ -6,6 +6,7 @@ import logging
 import re
 from datetime import UTC
 from pathlib import Path
+from typing import Any
 
 from vn_agent.agents.director import _save_debug_raw
 from vn_agent.agents.state import AgentState
@@ -236,6 +237,122 @@ async def run_writer(state: AgentState) -> dict:
     }
 
 
+def _format_graph_context(
+    scene: Scene,
+    script: VNScript,
+    emitted_scene_ids: set[str],
+    emitted_character_ids: set[str],
+) -> str:
+    """Phase 13-1 / Step 5: render Director-declared context_deps as a
+    prompt block. Adds to emitted_*_ids sets so downstream blocks (recent
+    window, cosine lore) can skip duplicates (canonical dedup).
+
+    Empty deps list → returns "". Invalid deps (dangling refs) are silently
+    skipped — StructureReviewer will have already flagged them in
+    structure_feedback where they belong.
+    """
+    deps = getattr(scene, "context_deps", None) or []
+    if not deps:
+        return ""
+
+    scene_by_id = {s.id: s for s in script.scenes}
+    blocks: list[str] = []
+
+    for dep in deps:
+        header = f"=== [{dep.link_type}] {dep.reason} ==="
+
+        if dep.ref_type == "scene":
+            target = scene_by_id.get(dep.ref_id)
+            if target is None:
+                continue
+            emitted_scene_ids.add(target.id)
+            if dep.inject_as == "full_dialogue" and target.dialogue:
+                lines = [
+                    f"  {d.character_id or 'NARR'} ({d.emotion}): {d.text}"
+                    for d in target.dialogue
+                ]
+                blocks.append(
+                    f"{header}\n"
+                    f"Previous scene [{target.id}] — {target.title}:\n"
+                    + "\n".join(lines)
+                )
+            elif target.summary:
+                blocks.append(f"{header}\n[{target.id}] {target.summary}")
+            else:
+                # No summary available — fall back to scene title + description
+                blocks.append(
+                    f"{header}\n[{target.id}] {target.title}: {target.description}"
+                )
+
+        elif dep.ref_type == "character_arc":
+            cid = dep.ref_id.split(":", 1)[1] if ":" in dep.ref_id else dep.ref_id
+            emitted_character_ids.add(cid)
+            # "arc so far" = titles + summaries of prior scenes featuring the
+            # character. Cheap to assemble from script; avoids re-querying RAG.
+            arc_scenes = [
+                s for s in script.scenes
+                if cid in (s.characters_present or []) and s.id in {
+                    scene_by_id[sid].id for sid in scene_by_id
+                    if scene_by_id[sid].id != scene.id
+                }
+            ]
+            # Keep only scenes before the current one
+            scene_idx_map = {s.id: i for i, s in enumerate(script.scenes)}
+            cur_idx = scene_idx_map.get(scene.id, len(script.scenes))
+            arc_scenes = [s for s in arc_scenes if scene_idx_map.get(s.id, 99) < cur_idx]
+            if arc_scenes:
+                arc_lines = [
+                    f"  [{s.id}] {s.title}: " + (s.summary or s.description)[:150]
+                    for s in arc_scenes
+                ]
+                blocks.append(
+                    f"{header}\n{cid}'s arc so far:\n" + "\n".join(arc_lines)
+                )
+
+        elif dep.ref_type == "world_var":
+            var_name = dep.ref_id.split(":", 1)[1] if ":" in dep.ref_id else dep.ref_id
+            # Pull current value from state_timeline
+            timeline = getattr(script, "state_timeline", []) or []
+            current_value: Any = None
+            for entry in timeline:
+                if var_name in entry.state_after:
+                    current_value = entry.state_after[var_name]
+            # Fallback to initial value if timeline hasn't touched it yet
+            if current_value is None:
+                for wv in script.world_variables:
+                    if wv.name == var_name:
+                        current_value = wv.initial_value
+                        break
+            blocks.append(
+                f"{header}\nWorld variable [{var_name}] = {current_value!r}"
+            )
+
+        elif dep.ref_type == "location":
+            bg_id = dep.ref_id.split(":", 1)[1] if ":" in dep.ref_id else dep.ref_id
+            # Find first scene using this background — its description is location's
+            loc_scene = next(
+                (s for s in script.scenes if s.background_id == bg_id), None,
+            )
+            if loc_scene:
+                blocks.append(
+                    f"{header}\nLocation [{bg_id}]: {loc_scene.description}"
+                )
+
+        elif dep.ref_type == "motif":
+            motif = dep.ref_id.split(":", 1)[1] if ":" in dep.ref_id else dep.ref_id
+            # No registry — just surface Director's reason as the motif reminder
+            blocks.append(f"{header}\nMotif [{motif}]: {dep.reason}")
+
+    if not blocks:
+        return ""
+    return (
+        "\n--- Narrative dependencies (Director-declared, "
+        "≥0.7-confidence callbacks / arcs / state / motifs) ---\n"
+        + "\n\n".join(blocks)
+        + "\n--- End dependencies ---\n"
+    )
+
+
 def _build_char_descriptions(characters: dict[str, CharacterProfile]) -> str:
     """Writer needs personality + backstory to give characters distinct voice.
 
@@ -460,13 +577,31 @@ async def _write_scene(
             + "\n--- End earlier scenes ---\n"
         )
 
+    # Phase 13-1 / Step 5: narrative graph — Director-declared context_deps
+    # pulled in BEFORE the recent window and cosine-retrieved blocks, because
+    # the Director had whole-outline visibility when declaring these and they
+    # carry explicit narrative intent (reasons). Canonical dedup: any scene
+    # pulled here is tracked in `emitted_scene_ids` so the recent-window
+    # block can skip it (Writer prompt must never carry the same scene twice).
+    emitted_scene_ids: set[str] = set()
+    emitted_character_ids: set[str] = set()
+    graph_block = _format_graph_context(
+        scene, script,
+        emitted_scene_ids=emitted_scene_ids,
+        emitted_character_ids=emitted_character_ids,
+    )
+
     # Sprint 7-2: long-context — inject prior scenes' actual dialogue so
     # Writer can keep character voice coherent across scene boundaries. Only
     # populated when writer_context_window > 0.
+    # Phase 13-1 / Step 5 dedup: scenes already pulled via graph above are
+    # skipped here.
     prior_context_block = ""
     if prior_scenes:
         prior_blocks = []
         for ps in prior_scenes:
+            if ps.id in emitted_scene_ids:
+                continue  # already emitted via graph block (full_dialogue)
             dialog_lines = [
                 f"  {d.character_id or 'NARR'} ({d.emotion}): {d.text}"
                 for d in ps.dialogue
@@ -476,12 +611,14 @@ async def _write_scene(
                 f"=== Previous scene: {ps.id} — {ps.title} "
                 f"(strategy: {strat}) ===\n" + "\n".join(dialog_lines)
             )
-        prior_context_block = (
-            "\n\n--- Recent story context (prior scene dialogue, "
-            "for voice + continuity; do NOT copy lines) ---\n"
-            + "\n\n".join(prior_blocks)
-            + "\n--- End of prior context ---\n"
-        )
+            emitted_scene_ids.add(ps.id)
+        if prior_blocks:
+            prior_context_block = (
+                "\n\n--- Recent story context (prior scene dialogue, "
+                "for voice + continuity; do NOT copy lines) ---\n"
+                + "\n\n".join(prior_blocks)
+                + "\n--- End of prior context ---\n"
+            )
 
     # Transition cards for cross-scene coherence (Sprint 6-1)
     transition_lines: list[str] = []
@@ -569,7 +706,7 @@ Scene ID: {scene.id}
 Title: {scene.title}
 Description: {scene.description}
 {strategy_guidance}
-{feedback_note}{structure_note}{transition_block}{lore_block}{state_block}
+{feedback_note}{structure_note}{transition_block}{graph_block}{lore_block}{state_block}
 Characters present: {', '.join(scene.characters_present)}
 Music mood: {scene.music.mood.value if scene.music else 'none'}
 

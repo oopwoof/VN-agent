@@ -323,7 +323,8 @@ For EACH scene, specify navigation, music, transition cards, AND state I/O. Retu
       "entry_context": "What the player just experienced (for non-start scenes)",
       "exit_hook": "How this scene should end to set up the next",
       "state_reads": [],
-      "state_writes": {{}}
+      "state_writes": {{}},
+      "context_deps": []
     }}
   ]
 }}
@@ -342,7 +343,31 @@ dialogue depends on (empty [] if none). state_writes maps variable → new value
 for changes made by this scene (empty {{}} if none). branch.requires maps \
 variable → expected value as a symbolic visibility guard (empty {{}} = always \
 visible). Only reference variables from the declared list above. If no \
-world_variables were declared, all three stay empty."""
+world_variables were declared, all three stay empty.
+- **Narrative dependency graph (Phase 13-1 Step 5)**: for each scene, \
+declare up to 5 `context_deps` entries — prior scenes this scene strongly \
+depends on, character arcs it advances, world variables it requires, or \
+motifs it invokes. **Be sparing** — list only dependencies you are \
+≥0.7 confident about (explicit callbacks, arc beats, real state reads, \
+motif recurrences). Do NOT list incidental mentions. Early scenes \
+(especially the start scene) typically have context_deps=[]. \
+Each dep has: \
+`ref_type` (one of "scene", "character_arc", "world_var", "motif", "location"), \
+`ref_id` (the target — bare scene id for "scene", "character:{{id}}" for \
+"character_arc", "world_var:{{name}}" for "world_var", "motif:{{tag}}" for \
+"motif", "location:{{bg_id}}" for "location"), \
+`link_type` (one of "callback", "foreshadow_payoff", "arc_beat", \
+"state_dependency", "motif_recurrence"), \
+`reason` (one sentence explaining the dep), \
+`inject_as` (one of "full_dialogue", "summary", "state_snapshot", \
+"character_arc_so_far"). \
+**Backward-only**: scene refs must point to EARLIER scenes in the list, \
+never forward, never self. **state_dependency** refs MUST also appear in \
+that scene's state_reads.
+  Example context_deps for a scene that resolves an earlier confession: \
+`[{{"ref_type": "scene", "ref_id": "s02", "link_type": "callback", \
+"reason": "A's confession in s02 is directly recalled and resolved here", \
+"inject_as": "full_dialogue"}}]`."""
 
     response = await ainvoke_llm(
         system, user_prompt, model=settings.llm_director_model, caller="director/step2",
@@ -376,6 +401,11 @@ def _merge_outline_details(outline: dict, details: dict) -> dict:
         # Sprint 9-2: state I/O from step2
         merged["state_reads"] = d.get("state_reads") or []
         merged["state_writes"] = d.get("state_writes") or {}
+        # Phase 13-1 / Step 5: narrative graph context_deps. Validation
+        # (backward-only, existing refs, state_dependency in state_reads)
+        # happens in StructureReviewer — merge step just carries the raw
+        # list through. Defaults to [] if Director didn't emit.
+        merged["context_deps"] = d.get("context_deps") or []
         merged_scenes.append(merged)
     # Filter out invalid branch/next_scene_id references from step2
     valid_ids = {s["id"] for s in merged_scenes}
