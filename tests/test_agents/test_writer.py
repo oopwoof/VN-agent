@@ -168,6 +168,65 @@ class TestStateConstraintsSnapshot:
                 "CONSTRAINT: x==1 ⇒ hesitate. x==0 ⇒ push."
 
     @pytest.mark.asyncio
+    async def test_writer_does_not_mutate_state_writes(self, mocker, tmp_path):
+        """Phase 13-2 Step 3.5 (Gemini BLOCKER 2 regression guard): Writer
+        must never modify Director-declared state_writes. This contract
+        is load-bearing for parallel Writer mode (route-4 Step 4): if
+        parallel workers mutated state_writes, concurrent scenes couldn't
+        see each other's changes, fragmenting narrative state.
+
+        The existing design already delegates state_writes to Director
+        (writer.py comments: "Writer does NOT produce additional writes
+        via its JSON output — _parse_dialogue only extracts DialogueLine").
+        This test is the regression guard that keeps it that way.
+        """
+        from vn_agent.agents.state import initial_state
+        from vn_agent.agents.writer import run_writer
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import Scene, VNScript
+
+        async def _fake_write(scene, *args, **kwargs):
+            # Simulate a Writer that (incorrectly) tried to add dialogue
+            # but honors the state_writes contract — returns scene with
+            # dialogue populated, state_writes UNCHANGED.
+            from vn_agent.schema.script import DialogueLine
+            return scene.model_copy(update={
+                "dialogue": [
+                    DialogueLine(
+                        character_id="alice", text="line", emotion="neutral",
+                    ),
+                ],
+            })
+
+        mocker.patch("vn_agent.agents.writer._write_scene", side_effect=_fake_write)
+        mocker.patch("vn_agent.agents.writer._write_scene_snapshot")
+
+        input_state_writes = {"affinity": 5, "flag": True}
+        scene = Scene(
+            id="s0", title="S", description="x", background_id="bg",
+            characters_present=["alice"],
+            state_writes=dict(input_state_writes),
+        )
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s0", scenes=[scene], world_variables=[],
+        )
+        chars = {"alice": CharacterProfile(
+            id="alice", name="A", role="p", personality="", background="",
+        )}
+
+        state = initial_state(theme="th", output_dir=str(tmp_path),
+                              max_scenes=1, num_characters=1)
+        state["vn_script"] = script
+        state["characters"] = chars
+        state["output_dir"] = str(tmp_path)
+
+        result = await run_writer(state)
+
+        # Bit-for-bit equal — Writer preserved state_writes
+        assert result["vn_script"].scenes[0].state_writes == input_state_writes
+
+    @pytest.mark.asyncio
     async def test_empty_constraints_leaves_field_none(self, mocker, tmp_path):
         """When state_constraints is empty string (no orchestrator output),
         scene.state_constraints_seen must stay None — don't pollute with ""."""

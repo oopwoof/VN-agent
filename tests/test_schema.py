@@ -5,6 +5,7 @@ from pydantic import ValidationError
 from vn_agent.schema.character import CharacterProfile
 from vn_agent.schema.music import Mood, MusicCue
 from vn_agent.schema.script import (
+    CallbackItem,
     MacroReference,
     Scene,
     SceneBrief,
@@ -269,6 +270,22 @@ class TestVNScriptMacroReference:
 # ---------------------------------------------------------------------------
 
 
+class TestCallbackItem:
+    """Phase 13-2 Step 3.5: strict schema replaces list[dict] + loose keys."""
+
+    def test_required_ref_scene_id(self):
+        with pytest.raises(ValidationError):
+            CallbackItem()  # type: ignore[call-arg]
+
+    def test_default_what_lands_empty(self):
+        item = CallbackItem(ref_scene_id="s01")
+        assert item.what_lands == ""
+
+    def test_what_lands_max_length(self):
+        with pytest.raises(ValidationError):
+            CallbackItem(ref_scene_id="s01", what_lands="x" * 400)
+
+
 class TestSceneThinking:
     def test_all_defaults_empty_valid(self):
         t = SceneThinking()
@@ -298,7 +315,16 @@ class TestSceneThinking:
         )
         assert t.writing_intent.startswith("resolve")
         assert len(t.key_beats_expanded) == 3
-        assert t.callback_plan[0]["ref_scene_id"] == "s01"
+        # callback_plan now hydrates to CallbackItem (not raw dict)
+        assert isinstance(t.callback_plan[0], CallbackItem)
+        assert t.callback_plan[0].ref_scene_id == "s01"
+
+    def test_malformed_callback_plan_rejected(self):
+        """Haiku returning bad keys (e.g. 'target_scene' instead of
+        'ref_scene_id') must fail validation — non-blocking drop path
+        in thinking.py keeps scene.thinking=None."""
+        with pytest.raises(ValidationError):
+            SceneThinking(callback_plan=[{"target_scene": "s01"}])  # wrong key
 
     def test_key_beats_expanded_capped_at_8(self):
         t = SceneThinking(key_beats_expanded=[f"beat {i}" for i in range(15)])

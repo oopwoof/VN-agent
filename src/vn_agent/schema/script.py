@@ -129,6 +129,31 @@ class SceneBrief(BaseModel):
         return list(v)[:5]
 
 
+class CallbackItem(BaseModel):
+    """Phase 13-2 Step 3.5 (post-Gemini-review): strict schema for a single
+    callback plan entry inside SceneThinking.callback_plan.
+
+    Was previously `list[dict]` with loose Haiku-emitted keys. Gemini
+    BLOCKER-level review flagged that conflict detection would silently
+    KeyError or miss collisions when Haiku varied the key names. Strict
+    Pydantic shape rejects malformed entries at validation time, which
+    non-blockingly drops the whole scene.thinking (schema fail → log +
+    drop, pipeline continues with original draft).
+
+    ref_scene_id is the canonical conflict key — when two scenes share
+    the same ref_scene_id, the deterministic resolver claims collision.
+    """
+    ref_scene_id: str = Field(
+        description="Scene id this callback points back to. Must appear "
+                    "in the script's scenes list (validated downstream).",
+    )
+    what_lands: str = Field(
+        default="", max_length=300,
+        description="One-line description of how the callback lands in "
+                    "THIS scene (what the payoff angle is).",
+    )
+
+
 class SceneThinking(BaseModel):
     """Phase 13-2 Step 2 (路线四): per-scene creative planning artifact.
 
@@ -156,12 +181,13 @@ class SceneThinking(BaseModel):
         description="Expanded beat descriptions (≤120 chars each). Adds "
                     "subtext / causality beyond scene_brief.beats shorthand.",
     )
-    callback_plan: list[dict] = Field(
+    callback_plan: list[CallbackItem] = Field(
         default_factory=list,
-        description="Explicit callback slots {ref_scene_id: str, "
-                    "what_lands: str}. Must match scene.context_deps "
-                    "(StructureReviewer-validated at plan time); thinking "
-                    "phase just plans HOW each callback will land.",
+        description="Explicit callback slots — each MUST be a CallbackItem "
+                    "(ref_scene_id + what_lands). Strict schema prevents "
+                    "Haiku from drifting key names like 'target_scene'. "
+                    "Must match scene.context_deps (StructureReviewer-"
+                    "validated); thinking phase plans HOW each callback lands.",
     )
     opening_hook: str = Field(
         default="", max_length=200,

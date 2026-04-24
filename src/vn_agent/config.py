@@ -220,6 +220,17 @@ class Settings(BaseSettings):
     # Runs AFTER thinking_fanout — min threshold matches thinking's.
     enable_cross_ref_sync: bool = False
     cross_ref_sync_min_scenes: int = 10
+    # Phase 13-2 Step 3.5 (post-Gemini-review): Tier 2 Director arbitration.
+    # When ON, conflicts that Tier 1 (deterministic) had to fall back to
+    # "latest claimant wins" get re-arbitrated by a second Director LLM
+    # call. Not a new agent — reuses llm_director_model. Default OFF
+    # because Tier 1 is already production-safe; Tier 2 is opt-in quality.
+    enable_director_arbitration: bool = False
+    # Phase 13-2 Step 3.5: legacy LLM self-revision path. Kept behind a
+    # flag because symmetric Haiku revision can erase callbacks via a
+    # logic race (both scenes delete given peer's plan). OFF by default;
+    # research use only.
+    enable_cross_ref_sync_llm_revise: bool = False
     embedding_model: str = "all-MiniLM-L6-v2"
     embedding_index_path: str = ""  # pre-built index dir; empty = build on-the-fly
 

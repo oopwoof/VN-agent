@@ -1,33 +1,40 @@
-"""Phase 13-2 Steps 2-3 (路线四): thinking_fanout + cross_ref_sync nodes.
+"""Phase 13-2 Steps 2-3 + 3.5 (路线四): thinking_fanout + cross_ref_sync nodes.
 
 Sits between state_orchestrator and writer. Two-node sequence:
 
   state_orchestrator
     └→ thinking_fanout   — Step 2: each scene gets a draft SceneThinking
-    └→ cross_ref_sync    — Step 3: each scene revises after seeing its
-                                    context_deps' thinking; conflicts logged
+    └→ cross_ref_sync    — Steps 3 + 3.5: callback conflicts resolved
+                           DETERMINISTICALLY (Director authority → latest
+                           fallback); Director arbitration and Haiku
+                           re-revision available as opt-in flags
     └→ writer
 
-The core observation: naive parallel writing breaks because workers have
-no visibility into peers. Thinking + sync is cheap (Haiku × N per step),
-structured (SceneThinking), and shared — the sync pass is where "two
-scenes planting the same callback beat" gets detected and resolved.
+Core observation: naive parallel writing breaks because workers have no
+visibility into peers. Thinking is cheap (Haiku × N), structured
+(SceneThinking), and shared — the sync pass is where "two scenes planting
+the same callback beat" gets detected and resolved.
 
-Step 2 (thinking_fanout): draft thinking, sequential today.
-Step 3 (cross_ref_sync): one-shot revision + conflict detection. NOT an
-  iterative fixed-point — explicit non-goal per ARCHITECTURE.md 路线四
-  ("1 轮固定 + 冲突检测, 不追不动点"). If a revision creates a new
-  conflict downstream, it survives as a logged warning and Reviewer
-  catches it later — cheaper than iterating to convergence.
+Step 3.5 (post-Gemini-review 2026-04-24): replaced the default path from
+"symmetric Haiku revision + difflib conflict detection" with "Tier-1
+deterministic resolver + optional Tier-2 Director arbitration". Reasons:
+- Symmetric Haiku revision was a logic race: both scenes could delete
+  their claim to the same callback, erasing the payoff entirely.
+- difflib.SequenceMatcher was character-level, not semantic. Now that
+  callback_plan is a strict `list[CallbackItem]`, same `ref_scene_id`
+  is itself the canonical collision signal — no text similarity needed.
+- Conflict resolution is Director's job description (macro_reference.
+  foreshadow_plan already declares payoff ownership). No new agent —
+  Tier 2 reuses the Director model in a narrow arbitration call.
+
 Step 4: parallel fanout.
 
-Non-blocking all the way: per-scene failures log and skip; pipeline never
+Non-blocking throughout: per-scene failures log and skip; pipeline never
 blocks on thinking/sync. Gated by settings so short demos don't pay the
 Haiku cost.
 """
 from __future__ import annotations
 
-import difflib
 import json
 import logging
 from datetime import UTC, datetime
@@ -36,7 +43,7 @@ from pathlib import Path
 from vn_agent.agents.state import AgentState
 from vn_agent.config import get_settings
 from vn_agent.prompts.templates import strip_thinking
-from vn_agent.schema.script import Scene, SceneThinking, VNScript
+from vn_agent.schema.script import CallbackItem, Scene, SceneThinking, VNScript
 from vn_agent.services.llm import ainvoke_llm
 
 logger = logging.getLogger(__name__)
@@ -444,83 +451,284 @@ async def _resync_scene(
 
 
 def detect_cross_ref_conflicts(scenes: list[Scene]) -> list[dict]:
-    """Find callback collisions across scenes' thinking plans.
+    """Phase 13-2 Step 3.5: callback collision detection, ID-only.
 
-    A conflict = two scenes' callback_plan entries reference the SAME
-    upstream scene_id AND describe overlapping what_lands text (≥ 70%
-    similarity via difflib.SequenceMatcher). That's the "both workers
-    planted the same callback beat" problem we're trying to surface.
+    Step 3.5 reasoning: callback_plan is now a strict `list[CallbackItem]`
+    (Pydantic-enforced). Two scenes claiming the same `ref_scene_id` is
+    the canonical collision signal — no text similarity needed. This was
+    Gemini MAJOR-level feedback: difflib was character-level, paraphrases
+    below 0.7 ratio would silently pass even when semantically identical.
 
-    Returns list of conflict dicts; empty list means clean plans.
-    Step 3 logs but does NOT block on conflicts — Reviewer catches
-    the concrete dialogue-level outcome after Writer runs.
+    Returns one conflict dict per colliding ref_scene_id, listing ALL
+    claimants (not pairwise). Empty list means clean plans.
+
+    Resolution is caller's responsibility (resolve_callback_conflicts
+    below). This function just surfaces the collisions.
     """
-    # Collect (scene_id, callback_entry) pairs for every scene with thinking.
-    by_ref: dict[str, list[tuple[str, dict]]] = {}
+    by_ref: dict[str, list[tuple[str, CallbackItem]]] = {}
     for scene in scenes:
         if scene.thinking is None:
             continue
-        for callback in scene.thinking.callback_plan or []:
-            ref_id = callback.get("ref_scene_id")
-            if not ref_id:
+        for cb in scene.thinking.callback_plan or []:
+            if not cb.ref_scene_id:
                 continue
-            by_ref.setdefault(ref_id, []).append((scene.id, callback))
+            by_ref.setdefault(cb.ref_scene_id, []).append((scene.id, cb))
 
     conflicts: list[dict] = []
     for ref_id, claims in by_ref.items():
         if len(claims) < 2:
             continue
-        # Pairwise similarity check on what_lands
-        for i in range(len(claims)):
-            for j in range(i + 1, len(claims)):
-                scene_i, cb_i = claims[i]
-                scene_j, cb_j = claims[j]
-                text_i = (cb_i.get("what_lands") or "").strip().lower()
-                text_j = (cb_j.get("what_lands") or "").strip().lower()
-                if not text_i or not text_j:
-                    continue
-                ratio = difflib.SequenceMatcher(None, text_i, text_j).ratio()
-                if ratio >= 0.7:
-                    conflicts.append({
-                        "ref_scene_id": ref_id,
-                        "scene_a": scene_i,
-                        "scene_b": scene_j,
-                        "similarity": round(ratio, 3),
-                        "what_lands_a": cb_i.get("what_lands"),
-                        "what_lands_b": cb_j.get("what_lands"),
-                    })
+        conflicts.append({
+            "ref_scene_id": ref_id,
+            "claimants": [sid for sid, _ in claims],
+            "what_lands_by_scene": {
+                sid: cb.what_lands for sid, cb in claims
+            },
+        })
     return conflicts
 
 
-def _persist_conflicts(conflicts: list[dict], output_dir: str) -> None:
-    """Append conflict entries to <output_dir>/cross_ref_conflicts.jsonl.
-    Best-effort: directory-missing / permission errors log at debug only."""
-    if not conflicts or not output_dir:
+def _build_director_authority_map(script: VNScript) -> dict[str, str]:
+    """Extract Director's declared payoff ownership from foreshadow_plan.
+
+    Returns {planted_in_scene_id: payoff_in_scene_id}. Used by the Tier-1
+    resolver as the canonical source of truth for who owns callbacks to
+    the declared planting scene.
+    """
+    owners: dict[str, str] = {}
+    mr = getattr(script, "macro_reference", None)
+    if mr is None:
+        return owners
+    for fp in mr.foreshadow_plan or []:
+        planted = fp.get("planted_in")
+        payoff = fp.get("payoff_in")
+        if isinstance(planted, str) and isinstance(payoff, str):
+            owners[planted] = payoff
+    return owners
+
+
+def resolve_callback_conflicts(
+    scenes: list[Scene],
+    script: VNScript,
+) -> tuple[list[Scene], list[dict]]:
+    """Phase 13-2 Step 3.5: Tier-1 deterministic callback conflict resolver.
+
+    Rule stack:
+      1. If Director's macro_reference.foreshadow_plan declares a payoff_in
+         for this ref_scene_id → that scene owns the callback. Others drop.
+         Authority label: "director_foreshadow".
+      2. Else the LATEST claimant (largest scene index) owns — payoffs
+         land in the later segment of the arc. (Gemini's "earliest wins"
+         was backwards for narrative payoff semantics.)
+         Authority label: "fallback_latest".
+
+    Returns (scenes_with_cleaned_callback_plans, resolution_log_entries).
+    The log records each resolved conflict with authority + winner + losers
+    so debug/creator-pause can audit the decision chain.
+    """
+    conflicts = detect_cross_ref_conflicts(scenes)
+    if not conflicts:
+        return scenes, []
+
+    scene_order: dict[str, int] = {s.id: i for i, s in enumerate(scenes)}
+    authority_map = _build_director_authority_map(script)
+
+    # Build a per-scene "callback to drop" set keyed by ref_scene_id.
+    # Mutating scenes' callback_plan in place is fine here — we're
+    # returning a new list of model_copy'd scenes.
+    drop_targets: dict[str, set[str]] = {}  # {scene_id: {ref_id_to_drop, ...}}
+    resolution_log: list[dict] = []
+
+    for conflict in conflicts:
+        ref_id: str = conflict["ref_scene_id"]
+        claimants: list[str] = conflict["claimants"]
+
+        if ref_id in authority_map:
+            winner = authority_map[ref_id]
+            authority = "director_foreshadow"
+            # If Director's declared payoff_in isn't even in the claimants
+            # list, we STILL honor Director's intent — the whole claimant
+            # set gets dropped (they all misread the pacing). The Director-
+            # declared scene might not have a callback_plan entry yet; that
+            # it has the authority to own the callback is unchanged.
+        else:
+            # Narrative fallback: latest claimant wins.
+            winner = max(claimants, key=lambda sid: scene_order.get(sid, -1))
+            authority = "fallback_latest"
+
+        losers = [sid for sid in claimants if sid != winner]
+        resolution_log.append({
+            "ref_scene_id": ref_id,
+            "claimants": claimants,
+            "winner": winner,
+            "losers": losers,
+            "authority": authority,
+            "what_lands_by_scene": conflict["what_lands_by_scene"],
+        })
+
+        for sid in losers:
+            drop_targets.setdefault(sid, set()).add(ref_id)
+
+    # Apply drops via model_copy (Scene is immutable-ish via Pydantic)
+    updated: list[Scene] = []
+    for scene in scenes:
+        drops = drop_targets.get(scene.id)
+        if not drops or scene.thinking is None:
+            updated.append(scene)
+            continue
+        new_cb_plan = [
+            cb for cb in scene.thinking.callback_plan
+            if cb.ref_scene_id not in drops
+        ]
+        new_thinking = scene.thinking.model_copy(
+            update={"callback_plan": new_cb_plan},
+        )
+        updated.append(scene.model_copy(update={"thinking": new_thinking}))
+
+    return updated, resolution_log
+
+
+# ---------------------------------------------------------------------------
+# Tier 2: opt-in Director arbitration (not a new agent — reuses Director model)
+# ---------------------------------------------------------------------------
+
+
+DIRECTOR_ARBITRATE_SYSTEM = """You are the Director of this visual novel. \
+Downstream scene planners (thinking phase) produced conflicts where \
+multiple scenes claim the same callback. Your narrative judgment overrides \
+theirs — decide which scene SHOULD own each callback, and optionally \
+refine the story's foreshadow_plan so such conflicts don't recur.
+
+Rules:
+- One scene wins each conflict. Others drop the callback silently.
+- Your decision reflects narrative weight: which scene has the \
+higher-stakes payoff moment, earns the emotional beat, or completes a \
+character arc.
+- Do not introduce new callbacks or rename scenes. Work with what's given.
+
+Output ONE JSON object:
+{
+  "decisions": [
+    {"ref_scene_id": "s01", "winner": "s08", "reason": "s08 is the climactic moment where the watch's origin lands"}
+  ]
+}
+
+No commentary, no code fences."""
+
+
+async def _director_arbitrate(
+    unresolved_conflicts: list[dict],
+    script: VNScript,
+    settings,
+) -> dict[str, str]:
+    """Opt-in Tier-2 arbitration. Returns {ref_scene_id: winner_scene_id}
+    for conflicts Director provided judgment on. Any unresolved keys are
+    silently dropped — caller proceeds without forced decisions.
+
+    Reuses `settings.llm_director_model` (Sonnet) — not a new agent, just
+    a second narrow call against the existing Director LLM. Labels
+    decisions with authority='director_arbitration' in the caller's log.
+    """
+    if not unresolved_conflicts:
+        return {}
+
+    # Compact prompt — conflicts only, not the whole script
+    brief_scenes = [
+        {"id": s.id, "title": s.title,
+         "strategy": s.narrative_strategy,
+         "description": s.description[:200]}
+        for s in script.scenes
+    ]
+    existing_foreshadow = (
+        script.macro_reference.foreshadow_plan
+        if script.macro_reference is not None else []
+    )
+    user_prompt = (
+        f"Scene roster (brief):\n"
+        f"{json.dumps(brief_scenes, ensure_ascii=False, indent=2)}\n\n"
+        f"Existing macro_reference.foreshadow_plan:\n"
+        f"{json.dumps(existing_foreshadow, ensure_ascii=False, indent=2)}\n\n"
+        f"Unresolved callback conflicts to arbitrate:\n"
+        f"{json.dumps(unresolved_conflicts, ensure_ascii=False, indent=2)}\n\n"
+        "Return JSON with decisions[]."
+    )
+    try:
+        response = await ainvoke_llm(
+            DIRECTOR_ARBITRATE_SYSTEM,
+            user_prompt,
+            model=settings.llm_director_model,
+            caller="director_arbitrate",
+        )
+        content = (
+            response.content if hasattr(response, "content") else str(response)
+        )
+        content = strip_thinking(content).strip()
+        data = _parse_thinking_json(content)
+        if not isinstance(data, dict):
+            return {}
+        decisions = data.get("decisions") or []
+        result: dict[str, str] = {}
+        for d in decisions:
+            ref_id = d.get("ref_scene_id")
+            winner = d.get("winner")
+            if isinstance(ref_id, str) and isinstance(winner, str):
+                result[ref_id] = winner
+        return result
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Director arbitration failed (non-fatal): {e}")
+        return {}
+
+
+def _persist_conflicts(log_entries: list[dict], output_dir: str) -> None:
+    """Append resolution log entries to <output_dir>/cross_ref_conflicts.jsonl.
+
+    Each entry includes 'authority' so creator-pause debug can trace which
+    rule tier made the decision: "director_foreshadow" (macro_reference
+    authority), "fallback_latest" (narrative heuristic), or
+    "director_arbitration" (opt-in Tier 2). Best-effort: filesystem errors
+    log at debug only.
+    """
+    if not log_entries or not output_dir:
         return
     try:
         path = Path(output_dir) / "cross_ref_conflicts.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             ts = datetime.now(UTC).isoformat()
-            for c in conflicts:
-                row = {"ts": ts, **c}
+            for entry in log_entries:
+                row = {"ts": ts, **entry}
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
     except Exception as e:  # noqa: BLE001 — observability best-effort
         logger.debug(f"Failed to persist cross_ref conflicts: {e}")
 
 
 async def run_cross_ref_sync(state: AgentState) -> dict:
-    """Graph node: single-round revision of scene thinking after peer visibility.
+    """Graph node: resolve callback collisions after thinking_fanout.
 
-    Runs AFTER thinking_fanout. Skipped when:
+    Phase 13-2 Step 3.5 (post-Gemini-review) flow:
+
+      1. Tier 1 (deterministic, always runs):
+         - Detect collisions via shared ref_scene_id (strict schema —
+           no difflib).
+         - Apply Director foreshadow_plan → latest-fallback ownership.
+         - Drop losers' callback entries; log with authority label.
+
+      2. Tier 2 (opt-in, settings.enable_director_arbitration):
+         - For conflicts Tier 1 had to fall back to "latest", re-ask the
+           Director model (not a new agent) which scene should own.
+         - Apply decisions; re-log with authority="director_arbitration".
+
+      3. Tier 3 (opt-in, settings.enable_cross_ref_sync_llm_revise):
+         - Legacy path. Each scene's Haiku-level self-revision given peer
+           thinking. Kept behind a flag for research purposes (symmetric
+           revision is a logic race — two scenes can both delete the
+           same callback). OFF by default.
+
+    Skipped when:
       - settings.enable_cross_ref_sync is False
-      - fewer than settings.cross_ref_sync_min_scenes scenes (short demos)
-      - no scene has context_deps (nothing to sync against)
+      - fewer than settings.cross_ref_sync_min_scenes scenes
+      - no scene has context_deps (nothing to sync)
       - no scene has thinking populated (thinking_fanout didn't run)
-
-    Returns the updated vn_script (with revised thinking per scene) and
-    logs any detected conflicts. Non-blocking: per-scene failures keep
-    the original draft thinking.
     """
     settings = get_settings()
     script: VNScript | None = state.get("vn_script")
@@ -539,53 +747,161 @@ async def run_cross_ref_sync(state: AgentState) -> dict:
         )
         return {}
 
-    # Pre-check: any scene with both context_deps AND a thinking draft?
-    has_work = any(
-        s.thinking is not None and any(
-            dep.ref_type == "scene" for dep in s.context_deps
-        )
-        for s in script.scenes
-    )
-    if not has_work:
+    has_thinking = any(s.thinking is not None for s in script.scenes)
+    if not has_thinking:
         logger.info(
-            "cross_ref_sync: no scene has (thinking + scene-type context_deps), "
-            "skipping — thinking_fanout likely didn't run or context_deps empty"
+            "cross_ref_sync: no scene has thinking populated "
+            "(thinking_fanout didn't run), skipping"
         )
         return {}
 
-    logger.info(f"cross_ref_sync: revising {len(script.scenes)} scenes (one pass)")
+    all_log: list[dict] = []
 
-    updated_scenes: list[Scene] = []
-    revised = 0
-    for scene in script.scenes:
-        peers = _cross_ref_peer_subset(scene, script.scenes)
-        if not peers or scene.thinking is None:
-            updated_scenes.append(scene)
-            continue
-        new_thinking = await _resync_scene(
-            scene=scene,
-            script=script,
-            peers=peers,
-            settings=settings,
+    # ---- Tier 3 (opt-in, legacy): Haiku self-revision ----
+    if getattr(settings, "enable_cross_ref_sync_llm_revise", False):
+        logger.info(
+            "cross_ref_sync: Tier 3 (LLM self-revision) enabled — running "
+            "Haiku revision per scene with deps (research-only path)"
         )
-        if new_thinking is not None:
-            scene = scene.model_copy(update={"thinking": new_thinking})
-            revised += 1
-        updated_scenes.append(scene)
+        revised_scenes: list[Scene] = []
+        revised = 0
+        for scene in script.scenes:
+            peers = _cross_ref_peer_subset(scene, script.scenes)
+            if not peers or scene.thinking is None:
+                revised_scenes.append(scene)
+                continue
+            new_thinking = await _resync_scene(
+                scene=scene, script=script, peers=peers, settings=settings,
+            )
+            if new_thinking is not None:
+                scene = scene.model_copy(update={"thinking": new_thinking})
+                revised += 1
+            revised_scenes.append(scene)
+        logger.info(f"cross_ref_sync: Tier 3 revised {revised}/{len(script.scenes)}")
+        working_scenes = revised_scenes
+    else:
+        working_scenes = list(script.scenes)
 
-    logger.info(f"cross_ref_sync: revised {revised}/{len(script.scenes)} scenes")
+    # ---- Tier 1 (always): deterministic resolver ----
+    resolved_scenes, tier1_log = resolve_callback_conflicts(working_scenes, script)
+    all_log.extend(tier1_log)
+    logger.info(
+        f"cross_ref_sync: Tier 1 resolved {len(tier1_log)} callback conflict(s) "
+        f"deterministically"
+    )
 
-    # Conflict detection runs AFTER revision — we want to flag what's
-    # left over post-sync, not what existed pre-sync.
-    conflicts = detect_cross_ref_conflicts(updated_scenes)
-    if conflicts:
+    # ---- Tier 2 (opt-in): Director arbitration for fallback cases ----
+    if getattr(settings, "enable_director_arbitration", False):
+        # Re-arbitrate the "fallback_latest" decisions — these are the
+        # ones Director's foreshadow_plan didn't cover. Keep
+        # "director_foreshadow" decisions intact; they're already
+        # Director-declared.
+        fallback_entries = [
+            e for e in tier1_log if e["authority"] == "fallback_latest"
+        ]
+        if fallback_entries:
+            logger.info(
+                f"cross_ref_sync: Tier 2 (Director arbitration) — re-arbitrating "
+                f"{len(fallback_entries)} fallback decision(s)"
+            )
+            overrides = await _director_arbitrate(
+                unresolved_conflicts=fallback_entries,
+                script=script,
+                settings=settings,
+            )
+            # Apply Director's decisions by revising the previous drops.
+            # If Director changed the winner, we need to: (a) put the
+            # callback back on the new winner (if it was originally dropped),
+            # (b) drop it from the old winner.
+            if overrides:
+                # Re-derive full claimant sets from the pre-Tier-1 scenes.
+                pre_claimants_by_ref: dict[str, list[str]] = {}
+                for scene in working_scenes:
+                    if scene.thinking is None:
+                        continue
+                    for cb in scene.thinking.callback_plan:
+                        pre_claimants_by_ref.setdefault(
+                            cb.ref_scene_id, []).append(scene.id)
+
+                scene_by_id = {s.id: s for s in resolved_scenes}
+                # Map entry by ref_scene_id for easier update
+                entries_by_ref = {e["ref_scene_id"]: e for e in all_log}
+
+                for ref_id, director_winner in overrides.items():
+                    if ref_id not in entries_by_ref:
+                        continue
+                    entry = entries_by_ref[ref_id]
+                    old_winner = entry["winner"]
+                    if director_winner == old_winner:
+                        entry["authority"] = "director_arbitration"  # confirmed
+                        continue
+                    # Director chose a different scene. Apply the swap.
+                    # Find the original CallbackItem from working_scenes:
+                    original_cb: CallbackItem | None = None
+                    for s in working_scenes:
+                        if s.id == director_winner and s.thinking is not None:
+                            for cb in s.thinking.callback_plan:
+                                if cb.ref_scene_id == ref_id:
+                                    original_cb = cb
+                                    break
+                    if original_cb is None:
+                        # Director picked a scene that didn't even claim the
+                        # callback originally. Create a minimal CallbackItem
+                        # so the callback actually lands somewhere.
+                        original_cb = CallbackItem(
+                            ref_scene_id=ref_id,
+                            what_lands="(Director-assigned payoff)",
+                        )
+
+                    # Add to director's winner
+                    winner_scene = scene_by_id.get(director_winner)
+                    if winner_scene is not None and winner_scene.thinking is not None:
+                        new_cbs = list(winner_scene.thinking.callback_plan)
+                        if not any(
+                            cb.ref_scene_id == ref_id for cb in new_cbs
+                        ):
+                            new_cbs.append(original_cb)
+                            new_thinking = winner_scene.thinking.model_copy(
+                                update={"callback_plan": new_cbs},
+                            )
+                            scene_by_id[director_winner] = winner_scene.model_copy(
+                                update={"thinking": new_thinking},
+                            )
+
+                    # Remove from old winner
+                    old_scene = scene_by_id.get(old_winner)
+                    if old_scene is not None and old_scene.thinking is not None:
+                        new_cbs = [
+                            cb for cb in old_scene.thinking.callback_plan
+                            if cb.ref_scene_id != ref_id
+                        ]
+                        new_thinking = old_scene.thinking.model_copy(
+                            update={"callback_plan": new_cbs},
+                        )
+                        scene_by_id[old_winner] = old_scene.model_copy(
+                            update={"thinking": new_thinking},
+                        )
+
+                    # Update log entry
+                    entry["winner"] = director_winner
+                    losers_pre = pre_claimants_by_ref.get(ref_id, [])
+                    entry["losers"] = [
+                        sid for sid in losers_pre if sid != director_winner
+                    ]
+                    entry["authority"] = "director_arbitration"
+
+                # Rebuild scenes in original order
+                resolved_scenes = [scene_by_id[s.id] for s in resolved_scenes]
+
+    if all_log:
         logger.warning(
-            f"cross_ref_sync: {len(conflicts)} callback collision(s) survived "
-            f"revision (logged to cross_ref_conflicts.jsonl; Reviewer catches "
-            f"dialogue-level outcomes later)"
+            f"cross_ref_sync: resolved {len(all_log)} callback conflict(s) "
+            f"(authorities: "
+            f"{set(e['authority'] for e in all_log)}; "
+            f"details in cross_ref_conflicts.jsonl)"
         )
-        _persist_conflicts(conflicts, state.get("output_dir", ""))
+        _persist_conflicts(all_log, state.get("output_dir", ""))
 
     return {
-        "vn_script": script.model_copy(update={"scenes": updated_scenes}),
+        "vn_script": script.model_copy(update={"scenes": resolved_scenes}),
     }

@@ -16,16 +16,19 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from vn_agent.agents.thinking import (
+    _build_director_authority_map,
     _build_resync_prompt,
     _build_thinking_prompt,
     _cross_ref_peer_subset,
     _parse_thinking_json,
     detect_cross_ref_conflicts,
+    resolve_callback_conflicts,
     run_cross_ref_sync,
     run_thinking_fanout,
 )
 from vn_agent.schema.character import CharacterProfile
 from vn_agent.schema.script import (
+    CallbackItem,
     MacroReference,
     Scene,
     SceneBrief,
@@ -364,7 +367,8 @@ class TestWorldStateThreading:
 
 
 # ===========================================================================
-# Phase 13-2 Step 3: cross_ref_sync
+# Phase 13-2 Step 3 + 3.5: cross_ref_sync (two-tier deterministic resolver
+# + opt-in Director arbitration, legacy Haiku revision behind a flag)
 # ===========================================================================
 
 
@@ -372,6 +376,8 @@ def _thinking(
     intent: str = "do the thing",
     callback_plan: list[dict] | None = None,
 ) -> SceneThinking:
+    """Factory. callback_plan is a list of dicts; Pydantic validates into
+    CallbackItem on construction."""
     return SceneThinking(
         writing_intent=intent,
         key_beats_expanded=["beat a", "beat b"],
@@ -381,25 +387,17 @@ def _thinking(
     )
 
 
-_RESYNC_JSON_OK = (
-    '{"writing_intent":"revised intent","key_beats_expanded":["beat x","beat y"],'
-    '"callback_plan":[{"ref_scene_id":"s01","what_lands":"fresh angle"}],'
-    '"opening_hook":"rev hook","closing_beat":"rev beat",'
-    '"voice_notes":{"alice":"hold back"},"risks":["avoid double-reveal"]}'
-)
-
-
 class TestCrossRefPeerSubset:
+    """Still used by the Tier-3 legacy LLM revision path."""
+
     def test_returns_only_dep_scenes_with_thinking(self):
-        s1 = _scene("s01")
-        s1 = s1.model_copy(update={"thinking": _thinking("s1 draft")})
-        s2 = _scene("s02")  # NOT in deps — must not appear
-        s2 = s2.model_copy(update={"thinking": _thinking("s2 draft")})
+        s1 = _scene("s01").model_copy(update={"thinking": _thinking("s1 draft")})
+        s2 = _scene("s02").model_copy(update={"thinking": _thinking("s2 draft")})
         s3 = _scene(
             "s03",
             deps=[SceneContextRef(
                 ref_type="scene", ref_id="s01",
-                link_type="callback", reason="back to s1",
+                link_type="callback", reason="r",
             )],
         )
         peers = _cross_ref_peer_subset(s3, [s1, s2, s3])
@@ -407,8 +405,6 @@ class TestCrossRefPeerSubset:
         assert peers[0].id == "s01"
 
     def test_skips_dep_without_thinking(self):
-        """Dep that hasn't been thought-about yet (thinking=None) is silently
-        dropped — can't coordinate with an empty peer."""
         s1 = _scene("s01")  # thinking=None
         s2 = _scene(
             "s02",
@@ -421,9 +417,7 @@ class TestCrossRefPeerSubset:
         assert peers == []
 
     def test_ignores_non_scene_deps(self):
-        """world_var / character_arc / motif deps don't surface as SceneThinking."""
-        s1 = _scene("s01")
-        s1 = s1.model_copy(update={"thinking": _thinking()})
+        s1 = _scene("s01").model_copy(update={"thinking": _thinking()})
         s2 = _scene(
             "s02",
             deps=[SceneContextRef(
@@ -435,55 +429,393 @@ class TestCrossRefPeerSubset:
         assert peers == []
 
 
-class TestDetectCrossRefConflicts:
-    def test_no_conflicts_when_callbacks_unique(self):
+class TestDetectCrossRefConflictsIDOnly:
+    """Step 3.5: conflict = same ref_scene_id claimed by ≥2 scenes. No text
+    similarity. Paraphrased collisions that difflib missed are now caught."""
+
+    def test_no_conflicts_when_ref_ids_unique(self):
         s1 = _scene("s01").model_copy(update={"thinking": _thinking(
-            callback_plan=[{"ref_scene_id": "s00", "what_lands": "reveal the watch"}],
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "a"}],
         )})
         s2 = _scene("s02").model_copy(update={"thinking": _thinking(
-            callback_plan=[{"ref_scene_id": "s00", "what_lands": "payoff of the letter"}],
+            callback_plan=[{"ref_scene_id": "s99", "what_lands": "b"}],  # different ref
         )})
-        # Different what_lands → below 0.7 similarity threshold → no conflict
         assert detect_cross_ref_conflicts([s1, s2]) == []
 
-    def test_detects_identical_callback_text(self):
-        """Two scenes planning the same callback beat → conflict."""
+    def test_conflict_by_shared_ref_id_regardless_of_text(self):
+        """Paraphrased duplicates are STILL caught under ID-only rule."""
         s1 = _scene("s01").model_copy(update={"thinking": _thinking(
-            callback_plan=[{"ref_scene_id": "s00", "what_lands": "reveal the watch's origin"}],
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "Explain the betrayal"}],
         )})
+        # difflib ratio < 0.3 but semantically same payoff
         s2 = _scene("s02").model_copy(update={"thinking": _thinking(
-            callback_plan=[{"ref_scene_id": "s00", "what_lands": "reveal the watch's origin"}],
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "Reveal that he was the traitor"}],
         )})
         conflicts = detect_cross_ref_conflicts([s1, s2])
         assert len(conflicts) == 1
         assert conflicts[0]["ref_scene_id"] == "s00"
-        assert conflicts[0]["similarity"] >= 0.9
-        assert {conflicts[0]["scene_a"], conflicts[0]["scene_b"]} == {"s01", "s02"}
-
-    def test_similarity_threshold_70_pct(self):
-        """Strings ~75% similar should trigger; ~50% similar shouldn't."""
-        # Very similar text
-        text_a = "reveal the watch's origin story fully"
-        text_b = "reveal the watch's origin story briefly"
-        s1 = _scene("s01").model_copy(update={"thinking": _thinking(
-            callback_plan=[{"ref_scene_id": "s00", "what_lands": text_a}],
-        )})
-        s2 = _scene("s02").model_copy(update={"thinking": _thinking(
-            callback_plan=[{"ref_scene_id": "s00", "what_lands": text_b}],
-        )})
-        assert len(detect_cross_ref_conflicts([s1, s2])) == 1
-
-        # Very different
-        s3 = _scene("s03").model_copy(update={"thinking": _thinking(
-            callback_plan=[{"ref_scene_id": "s00", "what_lands": "pour the tea slowly"}],
-        )})
-        assert len(detect_cross_ref_conflicts([s1, s3])) == 0
+        assert set(conflicts[0]["claimants"]) == {"s01", "s02"}
+        assert conflicts[0]["what_lands_by_scene"] == {
+            "s01": "Explain the betrayal",
+            "s02": "Reveal that he was the traitor",
+        }
 
     def test_no_thinking_means_no_conflicts(self):
-        """Scenes with thinking=None can't conflict."""
-        s1 = _scene("s01")  # thinking=None
-        s2 = _scene("s02")  # thinking=None
+        s1 = _scene("s01")
+        s2 = _scene("s02")
         assert detect_cross_ref_conflicts([s1, s2]) == []
+
+    def test_three_way_collision_reported_once(self):
+        s1 = _scene("s01").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "a"}],
+        )})
+        s2 = _scene("s02").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "b"}],
+        )})
+        s3 = _scene("s03").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "c"}],
+        )})
+        conflicts = detect_cross_ref_conflicts([s1, s2, s3])
+        assert len(conflicts) == 1
+        assert set(conflicts[0]["claimants"]) == {"s01", "s02", "s03"}
+
+
+class TestBuildDirectorAuthorityMap:
+    def test_empty_macro_reference_empty_map(self):
+        script = _script([_scene("s01")])
+        assert _build_director_authority_map(script) == {}
+
+    def test_foreshadow_plan_populates(self):
+        macro = MacroReference(foreshadow_plan=[
+            {"planted_in": "s01", "payoff_in": "s08", "element": "the watch"},
+            {"planted_in": "s02", "payoff_in": "s07"},
+        ])
+        script = _script([_scene("s01")], macro=macro)
+        owners = _build_director_authority_map(script)
+        assert owners == {"s01": "s08", "s02": "s07"}
+
+    def test_malformed_foreshadow_entries_skipped(self):
+        macro = MacroReference(foreshadow_plan=[
+            {"planted_in": "s01", "payoff_in": "s08"},
+            {"planted_in": "s02"},  # no payoff_in
+            {"element": "orphan"},  # no scenes
+        ])
+        script = _script([_scene("s01")], macro=macro)
+        owners = _build_director_authority_map(script)
+        assert owners == {"s01": "s08"}
+
+
+class TestResolveCallbackConflictsTier1:
+    """Step 3.5 Tier 1: deterministic resolver — Director authority first,
+    latest-claimant fallback."""
+
+    def test_director_authority_wins_over_latest(self):
+        """Director declared payoff_in=s08. Even if s02 is LATER-listed
+        than s08 (impossible in order, but hypothetically), s08 owns."""
+        macro = MacroReference(foreshadow_plan=[
+            {"planted_in": "s00", "payoff_in": "s08"},
+        ])
+        s1 = _scene("s01").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "reveal"}],
+        )})
+        s8 = _scene("s08").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "reveal"}],
+        )})
+        script = _script([s1, s8], macro=macro)
+
+        resolved, log = resolve_callback_conflicts([s1, s8], script)
+
+        assert len(log) == 1
+        assert log[0]["winner"] == "s08"
+        assert log[0]["authority"] == "director_foreshadow"
+        # s01 lost → callback dropped from its plan
+        assert resolved[0].thinking.callback_plan == []
+        # s08 kept its callback
+        assert len(resolved[1].thinking.callback_plan) == 1
+        assert resolved[1].thinking.callback_plan[0].ref_scene_id == "s00"
+
+    def test_fallback_latest_when_no_foreshadow_declared(self):
+        """No macro_reference.foreshadow_plan entry for this ref → LATEST
+        claimant wins (payoffs land in the back half of the arc, not front)."""
+        s1 = _scene("s01").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "early hint"}],
+        )})
+        s8 = _scene("s08").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "climactic payoff"}],
+        )})
+        script = _script([s1, s8])  # no macro
+
+        resolved, log = resolve_callback_conflicts([s1, s8], script)
+
+        assert log[0]["winner"] == "s08"  # latest wins
+        assert log[0]["authority"] == "fallback_latest"
+        assert resolved[0].thinking.callback_plan == []
+        assert len(resolved[1].thinking.callback_plan) == 1
+
+    def test_no_conflicts_no_changes(self):
+        s1 = _scene("s01").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "a"}],
+        )})
+        s2 = _scene("s02").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s99", "what_lands": "b"}],
+        )})
+        script = _script([s1, s2])
+
+        resolved, log = resolve_callback_conflicts([s1, s2], script)
+
+        assert log == []
+        # Everybody keeps their callbacks
+        assert len(resolved[0].thinking.callback_plan) == 1
+        assert len(resolved[1].thinking.callback_plan) == 1
+
+    def test_director_authority_for_scene_not_in_claimants(self):
+        """Director declared s09 as payoff_in, but s09 isn't among claimants.
+        Director's intent still honored — ALL claimants drop the callback;
+        it's up to downstream re-planning to repopulate s09's plan."""
+        macro = MacroReference(foreshadow_plan=[
+            {"planted_in": "s00", "payoff_in": "s09"},
+        ])
+        s1 = _scene("s01").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "a"}],
+        )})
+        s2 = _scene("s02").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "b"}],
+        )})
+        script = _script([s1, s2], macro=macro)
+
+        resolved, log = resolve_callback_conflicts([s1, s2], script)
+
+        assert log[0]["winner"] == "s09"
+        assert log[0]["authority"] == "director_foreshadow"
+        # Both claimants dropped (neither was Director's choice)
+        assert resolved[0].thinking.callback_plan == []
+        assert resolved[1].thinking.callback_plan == []
+
+
+class TestRunCrossRefSyncTier1Default:
+    """Tier 1 (deterministic) is the DEFAULT path — no LLM calls,
+    opt-in flags all off."""
+
+    @pytest.mark.asyncio
+    async def test_disabled_returns_empty(self):
+        s1 = _scene("s01").model_copy(update={"thinking": _thinking()})
+        s2 = _scene("s02").model_copy(update={"thinking": _thinking()})
+        script = _script([s1, s2])
+        with patch("vn_agent.agents.thinking.get_settings") as mock_s:
+            mock_s.return_value.enable_cross_ref_sync = False
+            mock_s.return_value.cross_ref_sync_min_scenes = 1
+
+            result = await run_cross_ref_sync(_state(script))
+
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_no_thinking_skipped(self):
+        """No scene has thinking populated → skip entirely."""
+        s1 = _scene("s01")  # thinking=None
+        s2 = _scene("s02")
+        script = _script([s1, s2])
+        with patch("vn_agent.agents.thinking.get_settings") as mock_s:
+            mock_s.return_value.enable_cross_ref_sync = True
+            mock_s.return_value.cross_ref_sync_min_scenes = 1
+            mock_s.return_value.enable_director_arbitration = False
+            mock_s.return_value.enable_cross_ref_sync_llm_revise = False
+
+            result = await run_cross_ref_sync(_state(script))
+
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_default_path_no_llm_called(self):
+        """Default (both flags off) — resolver is pure Python, no ainvoke_llm."""
+        s1 = _scene("s01").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "a"}],
+        )})
+        s2 = _scene("s02").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "b"}],
+        )})
+        script = _script([s1, s2])
+
+        mock_ainvoke = AsyncMock()
+
+        with patch("vn_agent.agents.thinking.get_settings") as mock_s, \
+             patch("vn_agent.agents.thinking.ainvoke_llm", mock_ainvoke):
+            mock_s.return_value.enable_cross_ref_sync = True
+            mock_s.return_value.cross_ref_sync_min_scenes = 1
+            mock_s.return_value.enable_director_arbitration = False
+            mock_s.return_value.enable_cross_ref_sync_llm_revise = False
+            mock_s.return_value.llm_thinking_model = "haiku"
+            mock_s.return_value.llm_director_model = "sonnet"
+
+            result = await run_cross_ref_sync(_state(script))
+
+        # Zero LLM calls — Tier 1 is pure Python.
+        assert mock_ainvoke.call_count == 0
+        # Conflict resolved deterministically: s02 (latest) wins.
+        out = result["vn_script"]
+        assert out.scenes[0].thinking.callback_plan == []  # s01 dropped
+        assert len(out.scenes[1].thinking.callback_plan) == 1  # s02 kept
+
+
+class TestRunCrossRefSyncTier2Arbitration:
+    """Tier 2 (opt-in Director arbitration) — reuses Director model, not a
+    new agent. Only re-arbitrates fallback_latest decisions."""
+
+    @pytest.mark.asyncio
+    async def test_director_overrides_latest_fallback(self):
+        """Tier 1 picks s02 (latest); Director arbitration overrides to s01."""
+        s1 = _scene("s01").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "planted hint"}],
+        )})
+        s2 = _scene("s02").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "later mention"}],
+        )})
+        script = _script([s1, s2])  # no foreshadow_plan → Tier 1 falls back
+
+        # Director arbitration says: s01 actually owns
+        arbitration_response = (
+            '{"decisions":[{"ref_scene_id":"s00","winner":"s01",'
+            '"reason":"s01 is the planting moment"}]}'
+        )
+        mock_ainvoke = AsyncMock(return_value=_FakeResponse(arbitration_response))
+
+        with patch("vn_agent.agents.thinking.get_settings") as mock_s, \
+             patch("vn_agent.agents.thinking.ainvoke_llm", mock_ainvoke):
+            mock_s.return_value.enable_cross_ref_sync = True
+            mock_s.return_value.cross_ref_sync_min_scenes = 1
+            mock_s.return_value.enable_director_arbitration = True
+            mock_s.return_value.enable_cross_ref_sync_llm_revise = False
+            mock_s.return_value.llm_director_model = "claude-sonnet-4-6"
+
+            result = await run_cross_ref_sync(_state(script))
+
+        # Director reversed the decision: s01 now owns
+        out = result["vn_script"]
+        assert len(out.scenes[0].thinking.callback_plan) == 1
+        assert out.scenes[0].thinking.callback_plan[0].ref_scene_id == "s00"
+        # s02's callback dropped
+        assert out.scenes[1].thinking.callback_plan == []
+
+    @pytest.mark.asyncio
+    async def test_director_not_invoked_when_no_fallback_cases(self):
+        """If Tier 1 used only director_foreshadow authority (no fallback
+        cases), Tier 2 skips the LLM call entirely."""
+        macro = MacroReference(foreshadow_plan=[
+            {"planted_in": "s00", "payoff_in": "s02"},
+        ])
+        s1 = _scene("s01").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "a"}],
+        )})
+        s2 = _scene("s02").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "b"}],
+        )})
+        script = _script([s1, s2], macro=macro)
+
+        mock_ainvoke = AsyncMock()
+
+        with patch("vn_agent.agents.thinking.get_settings") as mock_s, \
+             patch("vn_agent.agents.thinking.ainvoke_llm", mock_ainvoke):
+            mock_s.return_value.enable_cross_ref_sync = True
+            mock_s.return_value.cross_ref_sync_min_scenes = 1
+            mock_s.return_value.enable_director_arbitration = True
+            mock_s.return_value.enable_cross_ref_sync_llm_revise = False
+            mock_s.return_value.llm_director_model = "sonnet"
+
+            await run_cross_ref_sync(_state(script))
+
+        # No LLM call — Director's foreshadow_plan covered everything.
+        assert mock_ainvoke.call_count == 0
+
+
+class TestCrossRefSyncAuditLog:
+    """cross_ref_conflicts.jsonl must record authority so creator-pause
+    debug can trace decision chain."""
+
+    @pytest.mark.asyncio
+    async def test_authority_labels_written_to_jsonl(self, tmp_path):
+        macro = MacroReference(foreshadow_plan=[
+            {"planted_in": "s00", "payoff_in": "s01"},
+        ])
+        s1 = _scene("s01").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "s00", "what_lands": "director's choice"}],
+        )})
+        s2 = _scene("s02").model_copy(update={"thinking": _thinking(
+            callback_plan=[
+                {"ref_scene_id": "s00", "what_lands": "first collision"},
+                {"ref_scene_id": "sXX", "what_lands": "fallback collision"},
+            ],
+        )})
+        s3 = _scene("s03").model_copy(update={"thinking": _thinking(
+            callback_plan=[{"ref_scene_id": "sXX", "what_lands": "also claims sXX"}],
+        )})
+        script = _script([s1, s2, s3], macro=macro)
+
+        state = _state(script)
+        state["output_dir"] = str(tmp_path)
+
+        with patch("vn_agent.agents.thinking.get_settings") as mock_s:
+            mock_s.return_value.enable_cross_ref_sync = True
+            mock_s.return_value.cross_ref_sync_min_scenes = 1
+            mock_s.return_value.enable_director_arbitration = False
+            mock_s.return_value.enable_cross_ref_sync_llm_revise = False
+
+            await run_cross_ref_sync(state)
+
+        path = tmp_path / "cross_ref_conflicts.jsonl"
+        assert path.exists()
+        import json as _json
+        rows = [
+            _json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        by_ref = {r["ref_scene_id"]: r for r in rows}
+        # s00 collision → Director authority (foreshadow_plan says s01 owns)
+        assert by_ref["s00"]["authority"] == "director_foreshadow"
+        assert by_ref["s00"]["winner"] == "s01"
+        # sXX collision → latest-fallback (no foreshadow)
+        assert by_ref["sXX"]["authority"] == "fallback_latest"
+        assert by_ref["sXX"]["winner"] == "s03"
+
+
+class TestResyncLegacyPath:
+    """Tier 3 (enable_cross_ref_sync_llm_revise=True) is the legacy Haiku
+    self-revision path. Kept behind a flag for research. Default OFF."""
+
+    @pytest.mark.asyncio
+    async def test_legacy_path_calls_haiku_when_enabled(self):
+        s1 = _scene("s01").model_copy(update={"thinking": _thinking("s1 draft")})
+        s2 = _scene(
+            "s02",
+            deps=[SceneContextRef(
+                ref_type="scene", ref_id="s01",
+                link_type="callback", reason="r",
+            )],
+        ).model_copy(update={"thinking": _thinking("s2 draft")})
+        script = _script([s1, s2])
+
+        revised_json = (
+            '{"writing_intent":"revised intent","key_beats_expanded":["a"],'
+            '"callback_plan":[{"ref_scene_id":"s01","what_lands":"fresh angle"}],'
+            '"opening_hook":"h","closing_beat":"b","voice_notes":{},"risks":[]}'
+        )
+        mock_ainvoke = AsyncMock(return_value=_FakeResponse(revised_json))
+
+        with patch("vn_agent.agents.thinking.get_settings") as mock_s, \
+             patch("vn_agent.agents.thinking.ainvoke_llm", mock_ainvoke):
+            mock_s.return_value.enable_cross_ref_sync = True
+            mock_s.return_value.cross_ref_sync_min_scenes = 1
+            mock_s.return_value.enable_director_arbitration = False
+            mock_s.return_value.enable_cross_ref_sync_llm_revise = True
+            mock_s.return_value.llm_thinking_model = "haiku"
+            mock_s.return_value.llm_director_model = "sonnet"
+
+            result = await run_cross_ref_sync(_state(script))
+
+        # Haiku called for s02 (has peer deps); s01 has no deps → skipped
+        assert mock_ainvoke.call_count == 1
+        # s02 revised
+        assert result["vn_script"].scenes[1].thinking.writing_intent == "revised intent"
 
 
 class TestResyncPrompt:
@@ -505,137 +837,17 @@ class TestResyncPrompt:
         assert "peer plan" in prompt
 
 
-class TestRunCrossRefSync:
-    def _build_script_with_deps(self):
-        s1 = _scene("s01").model_copy(update={"thinking": _thinking("s1 draft")})
-        s2 = _scene(
-            "s02",
-            deps=[SceneContextRef(
-                ref_type="scene", ref_id="s01",
-                link_type="callback", reason="callback to s1",
-            )],
-        ).model_copy(update={"thinking": _thinking("s2 draft")})
-        return _script([s1, s2])
+# Sanity unit checks on CallbackItem (in thinking tests because that's the
+# primary consumer).
+class TestCallbackItemInvariants:
+    def test_hydrated_from_dict_on_thinking_build(self):
+        t = SceneThinking(callback_plan=[
+            {"ref_scene_id": "s01", "what_lands": "reveal"},
+        ])
+        assert isinstance(t.callback_plan[0], CallbackItem)
+        assert t.callback_plan[0].ref_scene_id == "s01"
 
-    @pytest.mark.asyncio
-    async def test_disabled_returns_empty(self):
-        script = self._build_script_with_deps()
-        with patch("vn_agent.agents.thinking.get_settings") as mock_s:
-            mock_s.return_value.enable_cross_ref_sync = False
-            mock_s.return_value.cross_ref_sync_min_scenes = 1
-
-            result = await run_cross_ref_sync(_state(script))
-
-        assert result == {}
-
-    @pytest.mark.asyncio
-    async def test_below_min_skipped(self):
-        script = self._build_script_with_deps()
-        with patch("vn_agent.agents.thinking.get_settings") as mock_s:
-            mock_s.return_value.enable_cross_ref_sync = True
-            mock_s.return_value.cross_ref_sync_min_scenes = 100  # unrealistic
-
-            result = await run_cross_ref_sync(_state(script))
-
-        assert result == {}
-
-    @pytest.mark.asyncio
-    async def test_no_work_when_no_deps_scenes(self):
-        """When no scene has context_deps, skip entirely — nothing to sync."""
-        s1 = _scene("s01").model_copy(update={"thinking": _thinking()})
-        s2 = _scene("s02").model_copy(update={"thinking": _thinking()})
-        script = _script([s1, s2])  # NO context_deps
-
-        with patch("vn_agent.agents.thinking.get_settings") as mock_s:
-            mock_s.return_value.enable_cross_ref_sync = True
-            mock_s.return_value.cross_ref_sync_min_scenes = 1
-
-            result = await run_cross_ref_sync(_state(script))
-
-        assert result == {}
-
-    @pytest.mark.asyncio
-    async def test_revises_scene_with_deps(self):
-        script = self._build_script_with_deps()
-
-        mock_ainvoke = AsyncMock(return_value=_FakeResponse(_RESYNC_JSON_OK))
-
-        with patch("vn_agent.agents.thinking.get_settings") as mock_s, \
-             patch("vn_agent.agents.thinking.ainvoke_llm", mock_ainvoke):
-            mock_s.return_value.enable_cross_ref_sync = True
-            mock_s.return_value.cross_ref_sync_min_scenes = 1
-            mock_s.return_value.llm_thinking_model = "claude-haiku-4-5-20251001"
-
-            result = await run_cross_ref_sync(_state(script))
-
-        out_script = result["vn_script"]
-        # s01 has no deps → NOT revised (keeps original)
-        assert out_script.scenes[0].thinking.writing_intent == "s1 draft"
-        # s02 has a dep → revised
-        assert out_script.scenes[1].thinking.writing_intent == "revised intent"
-        # Haiku called exactly once (only s02 has peers)
-        assert mock_ainvoke.call_count == 1
-
-    @pytest.mark.asyncio
-    async def test_revision_failure_keeps_original(self):
-        """Haiku failure on a scene must leave its original thinking intact."""
-        script = self._build_script_with_deps()
-
-        mock_ainvoke = AsyncMock(side_effect=RuntimeError("Haiku down"))
-
-        with patch("vn_agent.agents.thinking.get_settings") as mock_s, \
-             patch("vn_agent.agents.thinking.ainvoke_llm", mock_ainvoke):
-            mock_s.return_value.enable_cross_ref_sync = True
-            mock_s.return_value.cross_ref_sync_min_scenes = 1
-            mock_s.return_value.llm_thinking_model = "claude-haiku-4-5-20251001"
-
-            result = await run_cross_ref_sync(_state(script))
-
-        # s02 draft kept (not replaced)
-        assert result["vn_script"].scenes[1].thinking.writing_intent == "s2 draft"
-
-    @pytest.mark.asyncio
-    async def test_conflicts_persisted_to_jsonl(self, tmp_path):
-        """Post-revision callback collisions should land in
-        cross_ref_conflicts.jsonl."""
-        # Force a conflict: both scenes target s00 with near-identical text
-        conflicting = (
-            '{"writing_intent":"rev","key_beats_expanded":["a"],'
-            '"callback_plan":[{"ref_scene_id":"s00","what_lands":"the exact same beat"}],'
-            '"opening_hook":"h","closing_beat":"b","voice_notes":{},"risks":[]}'
-        )
-
-        s0 = _scene("s00")  # no thinking, just needs to exist
-        s1 = _scene("s01").model_copy(update={"thinking": _thinking(
-            callback_plan=[{"ref_scene_id": "s00", "what_lands": "the exact same beat"}],
-        )})
-        s2 = _scene(
-            "s02",
-            deps=[SceneContextRef(
-                ref_type="scene", ref_id="s01",
-                link_type="callback", reason="r",
-            )],
-        ).model_copy(update={"thinking": _thinking()})
-        script = _script([s0, s1, s2])
-
-        mock_ainvoke = AsyncMock(return_value=_FakeResponse(conflicting))
-
-        state = _state(script)
-        state["output_dir"] = str(tmp_path)
-
-        with patch("vn_agent.agents.thinking.get_settings") as mock_s, \
-             patch("vn_agent.agents.thinking.ainvoke_llm", mock_ainvoke):
-            mock_s.return_value.enable_cross_ref_sync = True
-            mock_s.return_value.cross_ref_sync_min_scenes = 1
-            mock_s.return_value.llm_thinking_model = "claude-haiku-4-5-20251001"
-
-            await run_cross_ref_sync(state)
-
-        conflict_path = tmp_path / "cross_ref_conflicts.jsonl"
-        assert conflict_path.exists()
-        content = conflict_path.read_text(encoding="utf-8").strip()
-        assert content  # non-empty
-        # Each line is a JSON object with the expected keys
-        import json as _json
-        line = _json.loads(content.splitlines()[0])
-        assert line["ref_scene_id"] == "s00"
+    def test_missing_key_rejects_at_thinking_build(self):
+        import pydantic
+        with pytest.raises(pydantic.ValidationError):
+            SceneThinking(callback_plan=[{"target_scene": "s01"}])  # bad key
