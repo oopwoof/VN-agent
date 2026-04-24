@@ -10,8 +10,14 @@ translation work, fits the project's model-selection rule. Summaries
 are called AFTER the scene is written + reviewed (not during writing)
 so they describe what actually landed, not what was planned.
 
+Phase 13-1 / Step 4: dialogue_digest() added as cache key. Writer checks
+scene.summary_dialogue_hash against digest(scene) before calling
+summarize_scene; match → skip the Haiku call. Revision loops on 50-scene
+runs would otherwise waste 150+ Haiku calls re-summarizing unchanged
+dialogue.
+
 Deferred (Sprint 11+ if run sizes justify):
-  - Chapter-level rollups every N scene summaries (500-word meta-summary)
+  - Chapter-level rollups every N scene summaries (see Step 6)
   - LLM-as-judge quality check on summaries
   - Human-editable summary overrides for creator mode
 
@@ -25,6 +31,7 @@ Design notes:
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 
 from vn_agent.config import get_settings
@@ -32,6 +39,26 @@ from vn_agent.schema.script import Scene
 from vn_agent.services.llm import ainvoke_llm
 
 logger = logging.getLogger(__name__)
+
+
+def dialogue_digest(scene: Scene) -> str:
+    """Phase 13-1 / Step 4: content-based cache key for summarize_scene.
+
+    SHA1 over (character_id, emotion, text) triples, truncated to 16 hex
+    chars (~64 bits of entropy — collision probability ≈ 10⁻¹⁵ across a
+    50-scene × 3-revision run, i.e. effectively zero).
+
+    NOT a cryptographic hash; just a stable fingerprint. Order-sensitive
+    (reordering dialogue lines intentionally invalidates the cache) and
+    uses `|` + `\\n` as separators that can't appear in the fields without
+    escaping (good enough — DialogueLine.text is Writer output, which
+    won't be adversarial).
+    """
+    payload = "\n".join(
+        f"{d.character_id or ''}|{d.emotion}|{d.text}"
+        for d in scene.dialogue
+    )
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
 
 
 SUMMARIZER_SYSTEM = """You are a scene summarizer for long-form visual novels. \

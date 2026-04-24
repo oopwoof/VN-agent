@@ -102,6 +102,18 @@ class Scene(BaseModel):
                     "by the summarizer. Used for long-form memory in scripts "
                     "beyond the writer_context_window.",
     )
+    # Phase 13-1 / Step 4: cache key for summary re-use. Writer computes
+    # dialogue_digest(scene) before calling summarize_scene; if the stored
+    # hash matches, the existing summary is kept and the Haiku call is
+    # skipped. Revision loops on a 50-scene run would otherwise re-fire
+    # summarize_scene × revision_count × scene_count times (150 wasted
+    # Haiku calls on a single 50-scene × 3-revision run).
+    summary_dialogue_hash: str | None = Field(
+        default=None,
+        description="SHA1[:16] over (character_id, emotion, text) triples of "
+                    "this scene's dialogue. Cache key for summarize_scene "
+                    "re-use across revision loops.",
+    )
 
 
 class StateTimelineEntry(BaseModel):

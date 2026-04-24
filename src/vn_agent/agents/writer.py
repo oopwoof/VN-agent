@@ -182,22 +182,36 @@ async def run_writer(state: AgentState) -> dict:
         # Sprint 11-1: fire per-scene summarization (Haiku) for long-form runs.
         # Gated by both config toggle and total-scene-count threshold so
         # short demos don't pay the extra Haiku cost.
+        # Phase 13-1 / Step 4: skip if scene.summary_dialogue_hash matches
+        # current dialogue digest — the stored summary is still valid.
+        # Cuts 150+ redundant Haiku calls on a 50-scene × 3-revision run.
         if (
             settings.enable_scene_summarization
             and len(script.scenes) >= settings.summarization_min_scenes
         ):
             try:
-                from vn_agent.agents.summarizer import summarize_scene
-                summary = await summarize_scene(updated_scene)
-                if summary:
-                    updated_scene = updated_scene.model_copy(
-                        update={"summary": summary},
-                    )
-                    # Overwrite the scene we just appended so the summary sticks
-                    updated_scenes[-1] = updated_scene
+                from vn_agent.agents.summarizer import dialogue_digest, summarize_scene
+                current_hash = dialogue_digest(updated_scene)
+                if (
+                    updated_scene.summary
+                    and updated_scene.summary_dialogue_hash == current_hash
+                ):
                     logger.debug(
-                        f"Writer[{updated_scene.id}] summary: {summary[:60]}..."
+                        f"Writer[{updated_scene.id}] summary: cache hit "
+                        f"(hash={current_hash})"
                     )
+                else:
+                    summary = await summarize_scene(updated_scene)
+                    if summary:
+                        updated_scene = updated_scene.model_copy(update={
+                            "summary": summary,
+                            "summary_dialogue_hash": current_hash,
+                        })
+                        # Overwrite the scene we just appended so summary sticks
+                        updated_scenes[-1] = updated_scene
+                        logger.debug(
+                            f"Writer[{updated_scene.id}] summary: {summary[:60]}..."
+                        )
             except Exception as e:  # noqa: BLE001
                 logger.debug(f"Summarization skipped for {updated_scene.id}: {e}")
 

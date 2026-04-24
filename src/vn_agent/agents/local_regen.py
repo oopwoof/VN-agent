@@ -126,6 +126,30 @@ async def regenerate_scene(
     )
     wall = time.perf_counter() - t0
 
+    # Phase 13-1 / Step 4: refire summary if enabled — the regenerated
+    # dialogue is new, so any stored summary is stale. Without this,
+    # downstream scenes reading `older_summaries` get the OLD scene's
+    # summary, gradually drifting the Writer's narrative memory. Guard
+    # by enable_scene_summarization so 6-scene demos don't pay Haiku.
+    if settings.enable_scene_summarization:
+        try:
+            from vn_agent.agents.summarizer import dialogue_digest, summarize_scene
+            current_hash = dialogue_digest(updated)
+            if (
+                updated.summary
+                and updated.summary_dialogue_hash == current_hash
+            ):
+                pass  # unchanged dialogue (shouldn't happen after regen, but cheap)
+            else:
+                summary = await summarize_scene(updated)
+                if summary:
+                    updated = updated.model_copy(update={
+                        "summary": summary,
+                        "summary_dialogue_hash": current_hash,
+                    })
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Summary refire skipped for {scene_id}: {e}")
+
     # Splice the regenerated scene back into the script
     new_scenes = list(script.scenes)
     new_scenes[idx] = updated
