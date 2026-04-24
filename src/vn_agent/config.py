@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).parent.parent.parent
@@ -235,6 +235,21 @@ class Settings(BaseSettings):
     # renders intent/beats/callbacks/voice/risks as the last signal
     # Writer sees before the "write dialogue" instruction.
     writer_consume_thinking: bool = False
+
+    # Phase 13-2 Step 4b (route 4): Writer concurrency ceiling.
+    # 1 (default) = strictly sequential, byte-identical to pre-4b behavior.
+    # >1 enables the parallel writer: within each chapter, scenes are
+    # grouped into DAG waves by context_deps, each wave runs concurrently
+    # under asyncio.Semaphore(writer_max_concurrent). Chapters remain
+    # sequential (chapter barrier triggers chapter rollup safely).
+    #
+    # Concurrent scene workers within the same wave have no visibility
+    # into each other's real dialogue — cross-scene coordination signal
+    # comes EXCLUSIVELY from scene.thinking (populated upstream by
+    # thinking_fanout + cross_ref_sync). That's why values >1 are only
+    # permitted when thinking is enabled AND writer consumes it
+    # (validated below in _require_thinking_for_parallel_writer).
+    writer_max_concurrent: int = 1
     # Phase 13-2 Step 3.5 (post-Gemini-review): Tier 2 Director arbitration.
     # When ON, conflicts that Tier 1 (deterministic) had to fall back to
     # "latest claimant wins" get re-arbitrated by a second Director LLM
@@ -273,6 +288,41 @@ class Settings(BaseSettings):
     bg_aspect_ratio: str = "16:9"
     bg_zoom: float = 1.4286         # 1344×768 × 1.4286 → 1920×1097 (fills 1920 wide,
                                     # 17px top+bottom crop — cheaper than black bars)
+
+    # ------------------------------------------------------------------
+    # Cross-field validators (Phase 13-2 Step 4b)
+    # ------------------------------------------------------------------
+    @model_validator(mode="after")
+    def _require_thinking_for_parallel_writer(self) -> "Settings":
+        """writer_max_concurrent>1 requires thinking to be on AND consumed.
+
+        Concurrent scene workers cannot see each other's real dialogue;
+        the only cross-scene coordination signal available to same-wave
+        peers is scene.thinking (computed upstream by thinking_fanout +
+        cross_ref_sync, then rendered into the Writer prompt via
+        writer_consume_thinking).
+
+        Without these flags, concurrent peers would drift on voice,
+        duplicate callbacks, and collide on foreshadow payoffs — the
+        exact failure modes route 4 exists to prevent. Fail fast at
+        startup rather than burning API calls on an unsupported combo.
+        """
+        if self.writer_max_concurrent <= 1:
+            return self  # sequential path has no coupling requirement
+        missing = []
+        if not self.enable_thinking_fanout:
+            missing.append("enable_thinking_fanout")
+        if not self.writer_consume_thinking:
+            missing.append("writer_consume_thinking")
+        if missing:
+            raise ValueError(
+                f"writer_max_concurrent={self.writer_max_concurrent} "
+                f"requires {missing}=True. Concurrent scene workers "
+                f"cannot see each other's dialogue; scene.thinking is "
+                f"the only cross-scene coordination signal. Either set "
+                f"the required flag(s) or keep writer_max_concurrent=1."
+            )
+        return self
 
 
 def _load_yaml_settings() -> dict:
