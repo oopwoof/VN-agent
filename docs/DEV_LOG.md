@@ -40,6 +40,51 @@
 
 ---
 
+## Phase 13-1 长篇 VN 生产级 (2026-04-23)
+
+**北极星**：稳定生成 50+ scene 生产级长篇 VN，向下兼容短篇。
+
+Phase 12-3 管线只在 6-scene demo 验证过；50-scene 会在多处爆——summary 重复 firing、premise cosine 被踢出 top-k、单 key 429 挂、context 必爆、分支 state 毒化。本轮基于 Gemini 3 Pro 深度 review + user 追加需求（narrative graph + prompt dedup）补齐 7 个 step，全部 mock 测试覆盖，真 API 验证由用户手动启动（见 `scripts/smoke_longvn.py`）。
+
+### Step 1 — Anthropic key pool + exp backoff + Haiku/Sonnet 分池
+`services/llm.py::_KeyPool` 轮询 + 冷却；`_pool_for(model)` 按 "haiku" 子串路由；`ainvoke_llm` 加 exp backoff + jitter + Retry-After header。单 key 向后兼容（池空时用 `anthropic_api_key`）。记到 `api_key_rotations.jsonl`（gitignored）。（Gemini BLOCKER #4 retry-storm, MAJOR #4 分池）
+
+### Step 2 — `state_timeline` + hard truncate on local_regen
+`VNScript.state_timeline: list[StateTimelineEntry]` 每场 append。`local_regen` splice 后 **hard-delete** `state_timeline[idx+1:]` + 下游 `chapters` — 不是 warning-only。避免 post-splice 状态毒化 Writer context。（Gemini MAJOR #5 branch state pollution）
+
+### Step 3 — lore scope + 1-hour cache + monolithic prefix ≥1024 token
+- `AnnotatedSession.scope ∈ {always, chapter, scene}`；premise + 主角（coverage ≥50% 启发式，**不**用 `immutability_score` 默认值——那是结构保护不是 prominence 信号）→ always
+- `_sentence_break` 替代硬 `[:N]`
+- `format_lore_block` 三路输出 (always / chapter / retrieved)
+- 新模块 `prompts/cached_prefix.py::build_monolithic_prefix`：低于 2048 token 阈值时**禁用**缓存（避免 1.25× write 无 read 折扣损失）
+- `ainvoke_llm` 加 `cache_ttl="1h"` + `force_cache=True` kwarg，走 Anthropic 1-hour 缓存层（5-min ephemeral 对 30-min 端到端 run 不够）
+
+（Gemini BLOCKER #1 cache threshold + prefix busting, #1c TTL, #1e 1024-token 最小块）
+
+### Step 4 — summary dialogue hash dedup
+`Scene.summary_dialogue_hash` + `summarizer.dialogue_digest(scene)` (SHA1[:16])。Writer 入口匹配 hash 就 reuse；`local_regen` 重 fire。50-scene × 3-revision 从 150 Haiku 次降到 50（3×）。
+
+### Step 5 — 叙事图 (`Scene.context_deps`)
+Director 规划时声明 ≤5 条强依赖（scene/character_arc/world_var/motif/location + link_type + reason + inject_as）。StructureReviewer 校验：backward-only、无自指、state_dependency 必须在 state_reads、ref_id 必须存在。Writer `_format_graph_context` 按 `inject_as` 拉取（full_dialogue / summary / state_snapshot / character_arc_so_far），集成 canonical dedup（`emitted_scene_ids` set）让 recent window 跳过重复。解决 Gemini 的"flat index"建议 — 不靠 cosine 抽奖决定关键 callback。
+
+### Step 6 — async chapter rollup (from raw, dynamic length, graph-aware)
+- `Chapter` schema + `VNScript.chapters`
+- `summarizer.rollup_chapter(scenes, pinned_scene_ids, ...)` **无** `prior_chapter_summary` 参数（regression-guard 测试确保签名不会被加回），从 raw dialogue 直接读
+- 动态 200-800 word（高潮 800 / 过渡 200）
+- pinned scenes（被后续 graph 引用的）prompt 明确"保留 1-2 行 dialogue 逐字"
+- Writer 每 `chapter_rollup_every`(10) 场 `asyncio.create_task` fire-and-forget；下一章开头 `gather` — rollup 延迟与下一场 Writer 重叠，零额外 wall time
+- config 默认 `enable_chapter_rollup=True`（10-scene 起触发；6-scene demo 不动）
+
+（Gemini BLOCKER #2 telephone-game, #3 sync blocking）
+
+### Step 7 — 50-scene smoke 脚本 + docs
+`scripts/smoke_longvn.py`（不跑 pytest，只手动）：--scenes 6/20/50，--confirm 门禁，期望值：
+- 50-scene: ≤30 min 墙钟，≤$15 API，chapters=5，state_timeline=50，cache_read_ratio ≥ 50%，key rotations ≥ 1
+
+**测试状况**：412 passed（352 → 412，+60，含 key pool 13, state_timeline 5, lore scope + cached_prefix 16, summary hash 9, graph 14, rollup 9）。coverage 维持 ≥66%，ruff + mypy 干净。真 50-scene 验证待 user 审核后手动运行。
+
+---
+
 ## Phase 12-3 完成摘要 (2026-04-14)
 
 创作者模式 + Ren'Py 视觉层一次性做完，从"能跑通生成"进到"能被玩"。
@@ -489,6 +534,30 @@ def npc_chat(character_id, player_input):
 ---
 
 ## 开发记录
+
+### 2026-04-23 | 测试 - 2026-04-23 18:59
+
+**变更文件** (5 个):
+**测试变更** (1 文件):
+  - `tests/test_agents/test_chapter_rollup.py`
+
+**其他变更** (2 文件):
+  - `README.md`
+  - `scripts/smoke_longvn.py`
+
+**变更统计**:
+```
+README.md                                |   1 +
+ docs/DEV_LOG.md                          |  45 +++++++
+ docs/PRODUCT.md                          |  18 ++-
+ scripts/smoke_longvn.py                  | 219 +++++++++++++++++++++++++++++++
+ tests/test_agents/test_chapter_rollup.py |   1 -
+ 5 files changed, 282 insertions(+), 2 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
 
 ### 2026-04-23 | 实现 - 2026-04-23 18:51
 

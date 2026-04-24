@@ -14,7 +14,6 @@ from vn_agent.schema.script import (
     Scene,
     SceneContextRef,
     VNScript,
-    WorldVariable,
 )
 
 

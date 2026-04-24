@@ -23,7 +23,23 @@
 
 ## 产品状态
 
-**当前阶段**: Phase 12-3 创作者模式 + Ren'Py 视觉层全面补完。352 tests pass。
+**当前阶段**: **Phase 13-1 长篇 VN 生产级**（2026-04-23）— 50+ scene 生产级长篇 VN 的地基全部落地。412 tests pass (+60 from Phase 12-3)。真 50-scene API 验证由用户手动启动（`scripts/smoke_longvn.py`）。
+
+**北极星**：稳定生成 50+ scene 生产级长篇 VN，向下兼容 6-10 scene demo。
+
+**Phase 13-1 验收目标（smoke_longvn.py --scenes 50 手动验证）**：
+| 指标 | 目标 | 来源 |
+|---|---|---|
+| 端到端墙钟 | ≤ 30 min | Step 6 async rollup + Step 1 key pool |
+| 总 API 成本 | ≤ $15 | Step 4 dedup + Step 3 cache |
+| `chapters` 条目 | 5 (= 50/10) | Step 6 |
+| `state_timeline` 条目 | 50 | Step 2 |
+| cache_read_ratio | ≥ 50%（scene 10+） | Step 3 monolithic prefix |
+| key rotations | ≥ 1（3-key 池 50-scene 压力） | Step 1 pool |
+
+**Phase 13-1 地基 7 步（全 mock 测试）**：key pool + exp backoff（Step 1）／ state_timeline + hard truncate（Step 2）／ lore scope + 1h cache + monolithic prefix（Step 3）／ summary hash dedup（Step 4）／ narrative graph `context_deps`（Step 5）／ async chapter rollup（Step 6）／ smoke 脚本（Step 7）。详见 DEV_LOG.md "Phase 13-1"。
+
+**上一阶段 Phase 12-3**（2026-04-14，6-scene demo 验证完成）：创作者模式 + Ren'Py 视觉层全面补完。
 
 **Sprint 8-5 sweep + cross-model judge 完成**：literary 4.17 > action 3.92 > baseline_self_refine 3.45 > baseline_single 3.25。GPT-4o cross-judge 重跑后 Sonnet 3.68 / GPT-4o 3.66，**Pearson r = 0.643, ±1-pt agreement = 87%** — 直接反驳"自评自"批评。
 

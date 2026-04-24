@@ -168,6 +168,7 @@ Multi-agent pipeline beats best baseline by +0.72 absolute — complexity earns 
 - Dialogue box styled via `define gui.*` on stock Ren'Py `say` screen (dark 80% alpha textbox, gold speaker name, 1560px wrap, punctuation-aware typewriter). 深色半透明对话框 + 米金色说话人名 + 标点节奏 typewriter。
 - Floating center-screen choice menu with 50% scene dim (branches don't live inside the textbox). 分支选择浮窗中央大按钮，50% 黑蒙。
 - Symbolic world-state emission: `default met_suspect = False` + `$ met_suspect = True` inside scene labels + `menu if met_suspect:` branch guards. 符号化状态 → Ren'Py `$ var` + `if` guards。
+- **Long-form 50+ scene production-grade runs** (Phase 13-1): Anthropic key pool with exp backoff + Haiku/Sonnet split, async chapter rollup (flat index, dynamic 200–800 word, pinned scenes preserved), Director-declared `context_deps` graph with backward-only validation, 1-hour prompt-cache prefix (monolithic, ≥2048 token), SHA1 summary cache dedup, `state_timeline` with hard-truncate on local_regen. Short 6-scene demos remain unaffected (gating thresholds). 长篇 50+ scene 生产级支撑 — key pool、异步章节 rollup、叙事图、1h 缓存前缀、state 硬截断；短 demo 向下兼容。
 
 ---
 
