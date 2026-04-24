@@ -2,11 +2,19 @@
 from __future__ import annotations
 
 from vn_agent.agents.director import (
+    _build_from_plan,
     _degrade_invalid_branches,
+    _merge_outline_details,
     _reachable_within,
     _validate_branch_structure,
 )
-from vn_agent.schema.script import BranchOption, Scene, VNScript
+from vn_agent.schema.script import (
+    BranchOption,
+    MacroReference,
+    Scene,
+    SceneBrief,
+    VNScript,
+)
 
 
 def _scene(sid: str, branches: list[tuple[str, str]] | None = None, nxt: str | None = None) -> Scene:
@@ -184,3 +192,201 @@ class TestDegradeInvalidBranches:
         # next_scene_id already set — don't overwrite
         assert script.scenes[0].next_scene_id == "c"
         assert script.scenes[0].branches == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 13-2 Step 1 (route 4): Director step1/step2 emit macro_reference +
+# scene_brief; merge + build_from_plan hydrate them. Validation failures
+# must log + drop, never crash the pipeline.
+# ---------------------------------------------------------------------------
+
+
+class TestDirectorStep1PromptContainsMacroReference:
+    """Cheap static check — don't call LLM, just verify the user_prompt
+    string mentions macro_reference so Director actually asks for it.
+
+    Trick: we call _step1_outline via a stubbed ainvoke_llm that captures
+    the prompt and raises. Works because large-model branch is the one
+    we care about (small-model branch intentionally skips macro_reference).
+    """
+
+    def test_prompt_has_macro_reference_keyword(self, monkeypatch):
+        import asyncio
+
+        captured: dict = {}
+
+        async def _fake_invoke(system, user, **kwargs):
+            captured["system"] = system
+            captured["user"] = user
+            raise RuntimeError("stop before real LLM call")
+
+        class _FakeSettings:
+            llm_director_model = "claude-sonnet-4-6"  # not "haiku" → large branch
+            llm_temperature = 0.7
+            llm_max_tokens = 16000
+            llm_provider = "anthropic"
+
+        monkeypatch.setattr("vn_agent.agents.director.ainvoke_llm", _fake_invoke)
+
+        from vn_agent.agents.director import _step1_outline
+
+        try:
+            asyncio.run(_step1_outline(
+                "test theme", max_scenes=5, num_characters=3,
+                output_dir=".", settings=_FakeSettings(),
+            ))
+        except RuntimeError:
+            pass  # expected
+
+        assert "user" in captured
+        assert "macro_reference" in captured["user"]
+        # Sanity: still mentions world_variables — we extended, not replaced
+        assert "world_variables" in captured["user"]
+
+
+class TestDirectorStep2PromptContainsSceneBrief:
+    def test_prompt_has_scene_brief_keyword(self, monkeypatch):
+        import asyncio
+
+        captured: dict = {}
+
+        async def _fake_invoke(system, user, **kwargs):
+            captured["user"] = user
+            raise RuntimeError("stop before real LLM call")
+
+        class _FakeSettings:
+            llm_director_model = "claude-sonnet-4-6"
+            llm_temperature = 0.7
+            llm_max_tokens = 16000
+            llm_provider = "anthropic"
+
+        monkeypatch.setattr("vn_agent.agents.director.ainvoke_llm", _fake_invoke)
+
+        from vn_agent.agents.director import _step2_details
+
+        outline = {
+            "start_scene_id": "s1",
+            "scenes": [{"id": "s1", "title": "Start", "description": "open"}],
+            "world_variables": [],
+        }
+        try:
+            asyncio.run(_step2_details(outline, output_dir=".", settings=_FakeSettings()))
+        except RuntimeError:
+            pass
+
+        assert "scene_brief" in captured["user"]
+        assert "context_deps" in captured["user"]  # regression guard
+
+
+class TestMergeOutlineDetailsCarriesSceneBrief:
+    def test_scene_brief_dict_preserved(self):
+        outline = {
+            "scenes": [{"id": "s1", "title": "A", "description": "x"}],
+        }
+        details = {
+            "scenes": [{
+                "id": "s1",
+                "next_scene_id": None,
+                "branches": [],
+                "scene_brief": {
+                    "beats": ["arrives", "pauses"],
+                    "tension_target": "high",
+                },
+            }],
+        }
+        merged = _merge_outline_details(outline, details)
+        assert merged["scenes"][0]["scene_brief"] == {
+            "beats": ["arrives", "pauses"],
+            "tension_target": "high",
+        }
+
+    def test_scene_brief_absent_becomes_none(self):
+        """Director omitting scene_brief → merged gets None, not {}. Matters
+        because _build_from_plan checks `if brief_raw:` — {} would truthily
+        attempt to hydrate an empty SceneBrief."""
+        outline = {"scenes": [{"id": "s1", "title": "A", "description": "x"}]}
+        details = {"scenes": [{"id": "s1"}]}
+        merged = _merge_outline_details(outline, details)
+        assert merged["scenes"][0]["scene_brief"] is None
+
+
+class TestBuildFromPlanHydratesMacroReference:
+    def _minimal_plan(self, **extra):
+        return {
+            "title": "T",
+            "description": "d",
+            "start_scene_id": "s1",
+            "scenes": [{"id": "s1", "title": "A", "description": "x", "background_id": "bg"}],
+            "characters": [{"id": "c1", "name": "C", "role": "p"}],
+            **extra,
+        }
+
+    def test_macro_reference_absent_yields_none(self):
+        script, _ = _build_from_plan(self._minimal_plan(), theme="t")
+        assert script.macro_reference is None
+
+    def test_macro_reference_populated(self):
+        script, _ = _build_from_plan(
+            self._minimal_plan(macro_reference={
+                "theme_thesis": "duty vs memory",
+                "tone_register": "literary third-person-limited",
+            }),
+            theme="t",
+        )
+        assert isinstance(script.macro_reference, MacroReference)
+        assert script.macro_reference.theme_thesis == "duty vs memory"
+
+    def test_macro_reference_invalid_dropped_not_crashed(self, caplog):
+        """Bad macro_reference (wrong type for a field) should log warn +
+        drop, NOT crash the pipeline."""
+        script, _ = _build_from_plan(
+            self._minimal_plan(macro_reference={
+                "theme_thesis": 123,  # wrong type — must be str
+            }),
+            theme="t",
+        )
+        assert script.macro_reference is None
+
+
+class TestBuildFromPlanHydratesSceneBrief:
+    def _plan_with_scene_brief(self, brief: dict | None):
+        plan = {
+            "title": "T",
+            "description": "d",
+            "start_scene_id": "s1",
+            "scenes": [{
+                "id": "s1", "title": "A", "description": "x",
+                "background_id": "bg",
+            }],
+            "characters": [{"id": "c1", "name": "C", "role": "p"}],
+        }
+        if brief is not None:
+            plan["scenes"][0]["scene_brief"] = brief
+        return plan
+
+    def test_scene_brief_absent_yields_none(self):
+        script, _ = _build_from_plan(self._plan_with_scene_brief(None), theme="t")
+        assert script.scenes[0].scene_brief is None
+
+    def test_scene_brief_populated(self):
+        script, _ = _build_from_plan(
+            self._plan_with_scene_brief({
+                "beats": ["arrival", "recognition"],
+                "tension_target": "high",
+            }),
+            theme="t",
+        )
+        assert isinstance(script.scenes[0].scene_brief, SceneBrief)
+        assert script.scenes[0].scene_brief.beats == ["arrival", "recognition"]
+        assert script.scenes[0].scene_brief.tension_target == "high"
+
+    def test_scene_brief_invalid_dropped(self):
+        """Invalid tension_target ('extreme') → log warn, scene keeps
+        scene_brief=None; scene itself still builds."""
+        script, _ = _build_from_plan(
+            self._plan_with_scene_brief({"tension_target": "extreme"}),
+            theme="t",
+        )
+        assert script.scenes[0].scene_brief is None
+        # Scene still valid:
+        assert script.scenes[0].id == "s1"

@@ -1,9 +1,15 @@
 """Tests for Pydantic schema models."""
 import pytest
+from pydantic import ValidationError
 
 from vn_agent.schema.character import CharacterProfile
 from vn_agent.schema.music import Mood, MusicCue
-from vn_agent.schema.script import Scene, VNScript
+from vn_agent.schema.script import (
+    MacroReference,
+    Scene,
+    SceneBrief,
+    VNScript,
+)
 
 
 class TestMusicCue:
@@ -127,3 +133,131 @@ class TestCharacterProfile:
         assert char.id == "char_hero"
         assert char.visual is None
         assert char.color == "#ffffff"
+
+
+# ---------------------------------------------------------------------------
+# Phase 13-2 Step 1 (route 4): MacroReference + SceneBrief + Scene/VNScript
+# plumbing for AUDITS §2 state_constraints_seen.
+# ---------------------------------------------------------------------------
+
+
+class TestMacroReference:
+    def test_all_defaults_empty_valid(self):
+        """Every field is Optional-shaped so short demos can leave everything
+        blank without tripping validation."""
+        m = MacroReference()
+        assert m.theme_thesis == ""
+        assert m.pacing_arc == ""
+        assert m.foreshadow_plan == []
+        assert m.character_voice_charter == {}
+        assert m.tone_register == ""
+
+    def test_full_populated(self):
+        m = MacroReference(
+            theme_thesis="duty vs memory in the three hours before the tide",
+            pacing_arc="accumulate s01-04 → rupture s05 → resolve s08",
+            foreshadow_plan=[
+                {"planted_in": "s01", "payoff_in": "s05", "element": "the watch"},
+            ],
+            character_voice_charter={
+                "yui": "short declaratives, sea metaphors",
+                "ren": "question-heavy, academic",
+            },
+            tone_register="literary third-person-limited",
+        )
+        assert m.character_voice_charter["yui"].startswith("short")
+        assert m.foreshadow_plan[0]["element"] == "the watch"
+
+    def test_theme_thesis_max_length_enforced(self):
+        with pytest.raises(ValidationError):
+            MacroReference(theme_thesis="x" * 400)
+
+    def test_foreshadow_plan_accepts_heterogeneous_dicts(self):
+        """list[dict] with varying keys is fine — Director invents the shape."""
+        m = MacroReference(foreshadow_plan=[
+            {"planted_in": "s01", "payoff_in": "s05"},
+            {"planted_in": "s02", "payoff_in": "s07", "element": "the letter"},
+        ])
+        assert len(m.foreshadow_plan) == 2
+
+
+class TestSceneBrief:
+    def test_defaults(self):
+        b = SceneBrief()
+        assert b.beats == []
+        assert b.character_blocking == {}
+        assert b.emotional_curve == []
+        assert b.tension_target == "medium"
+        assert b.subtext_notes == ""
+
+    def test_beats_hard_capped_at_7(self):
+        """Director over-producing beats gets silently truncated, not
+        rejected — pipeline continuity beats strict validation."""
+        b = SceneBrief(beats=[f"beat {i}" for i in range(12)])
+        assert len(b.beats) == 7
+        assert b.beats[-1] == "beat 6"  # kept first 7
+
+    def test_emotional_curve_hard_capped_at_5(self):
+        b = SceneBrief(emotional_curve=["a", "b", "c", "d", "e", "f", "g"])
+        assert len(b.emotional_curve) == 5
+
+    def test_tension_target_literal(self):
+        for valid in ("low", "medium", "high", "climax"):
+            b = SceneBrief(tension_target=valid)
+            assert b.tension_target == valid
+        with pytest.raises(ValidationError):
+            SceneBrief(tension_target="extreme")
+
+    def test_subtext_notes_max_length(self):
+        with pytest.raises(ValidationError):
+            SceneBrief(subtext_notes="x" * 500)
+
+
+class TestScenePhase13_2Fields:
+    """Scene-level new fields — both Optional, must default to None to keep
+    older vn_script.json round-tripping."""
+
+    def test_scene_brief_default_none(self):
+        scene = Scene(
+            id="s1", title="t", description="d", background_id="bg",
+        )
+        assert scene.scene_brief is None
+
+    def test_scene_brief_accepts_nested(self):
+        scene = Scene(
+            id="s1", title="t", description="d", background_id="bg",
+            scene_brief=SceneBrief(beats=["arrival", "recognition"]),
+        )
+        assert scene.scene_brief is not None
+        assert scene.scene_brief.beats == ["arrival", "recognition"]
+
+    def test_state_constraints_seen_default_none(self):
+        scene = Scene(
+            id="s1", title="t", description="d", background_id="bg",
+        )
+        assert scene.state_constraints_seen is None
+
+
+class TestVNScriptMacroReference:
+    def test_macro_reference_default_none(self):
+        """Backward-compat: older vn_script.json files without macro_reference
+        still load without error."""
+        script = VNScript(
+            title="t", description="d", theme="th", start_scene_id="s1",
+        )
+        assert script.macro_reference is None
+
+    def test_macro_reference_round_trip_via_dump(self):
+        """Serialize + revalidate must preserve MacroReference nested structure."""
+        original = VNScript(
+            title="T", description="d", theme="th", start_scene_id="s1",
+            macro_reference=MacroReference(
+                theme_thesis="x",
+                character_voice_charter={"a": "brief"},
+            ),
+        )
+        payload = original.model_dump_json()
+        revived = VNScript.model_validate_json(payload)
+        assert revived.macro_reference is not None
+        assert revived.macro_reference.theme_thesis == "x"
+        assert revived.macro_reference.character_voice_charter == {"a": "brief"}

@@ -171,6 +171,17 @@ async def run_writer(state: AgentState) -> dict:
                 for s in updated_scenes[: max(0, idx - window)]
                 if s.summary
             ]
+        # Phase 13-2 Step 1 (AUDITS §2 piggyback): snapshot the current
+        # state_orchestrator output onto the scene BEFORE calling Writer,
+        # so the persisted scene records what constraint text Writer saw.
+        # Empty state_constraints stays None (don't pollute with empty strings).
+        # Snapshot the INPUT scene; _write_scene internally does model_copy
+        # for dialogue, which preserves this field via Pydantic's default
+        # update semantics.
+        if state_constraints:
+            scene = scene.model_copy(
+                update={"state_constraints_seen": state_constraints},
+            )
         updated_scene = await _write_scene(
             scene, script, char_desc, revision_feedback, output_dir,
             corpus=corpus, embedding_index=embedding_index,

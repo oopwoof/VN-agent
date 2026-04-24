@@ -14,7 +14,14 @@ from vn_agent.prompts.templates import (
 )
 from vn_agent.schema.character import CharacterProfile
 from vn_agent.schema.music import Mood, MusicCue
-from vn_agent.schema.script import BranchOption, Scene, VNScript, WorldVariable
+from vn_agent.schema.script import (
+    BranchOption,
+    MacroReference,
+    Scene,
+    SceneBrief,
+    VNScript,
+    WorldVariable,
+)
 from vn_agent.services.llm import ainvoke_llm
 from vn_agent.strategies.narrative import format_strategies_for_prompt
 
@@ -229,7 +236,19 @@ Return ONLY this JSON (no branches, no music yet):
       "enum_values": ["clear", "storm", "fog"],
       "description": "Current weather — affects travel and mood"
     }}
-  ]
+  ],
+  "macro_reference": {{
+    "theme_thesis": "duty and memory collide in the three hours before the tide",
+    "pacing_arc": "accumulate s01-03 → rupture s04 → uncover s05-06 → resolve s07",
+    "foreshadow_plan": [
+      {{"planted_in": "ch1_opening", "payoff_in": "ch2_confession", "element": "the watch her father left"}}
+    ],
+    "character_voice_charter": {{
+      "char_protagonist": "short declaratives, sea metaphors for grief",
+      "char_other": "question-heavy academic register; fragments under stress"
+    }},
+    "tone_register": "literary third-person-limited, restrained, elliptical"
+  }}
 }}
 
 ## world_variables (Sprint 9-1)
@@ -243,7 +262,25 @@ scenes. These are NOT for every small detail — use them for:
 enum_values ["clear","storm","fog"])
 
 Leave `world_variables: []` for simple linear stories without state \
-gating. Only declare variables the story will actually read or write."""
+gating. Only declare variables the story will actually read or write.
+
+## macro_reference (Phase 13-2 Step 1, route-4 prep)
+
+Produce ONE macro_reference object that every downstream Writer worker \
+will share. This block enters a CACHED prompt prefix (Phase 13-1 Step 3, \
+1-hour tier) used on every Writer call — wasted tokens here get \
+multiplied by scene count, so be dense.
+
+- theme_thesis: 1 sentence, the story's central tension
+- pacing_arc: dense phrase mapping scene ranges to narrative strategies
+- foreshadow_plan: 2-5 MAJOR foreshadow→payoff links only (not minor callbacks)
+- character_voice_charter: ONE LINE per character_id — signature register \
+cues a parallel Writer worker can read and reproduce
+- tone_register: literary / action / mixed, plus POV and tension default
+
+For short/simple stories (≤6 scenes), set foreshadow_plan=[] and \
+tone_register=""; they don't need this scaffolding and paying for \
+unused tokens is wasteful."""
 
     response = await ainvoke_llm(system, user_prompt, model=settings.llm_director_model, caller="director/step1")
     content = response.content if hasattr(response, "content") else str(response)
@@ -324,7 +361,21 @@ For EACH scene, specify navigation, music, transition cards, AND state I/O. Retu
       "exit_hook": "How this scene should end to set up the next",
       "state_reads": [],
       "state_writes": {{}},
-      "context_deps": []
+      "context_deps": [],
+      "scene_brief": {{
+        "beats": [
+          "yui arrives at the lighthouse unannounced",
+          "the lamp flickers — first sign of the storm",
+          "she finds the letter from her father"
+        ],
+        "character_blocking": {{
+          "yui": "stands near the window, back to the lamp",
+          "ren": "approaches from the stairs, stops at the doorway"
+        }},
+        "emotional_curve": ["apprehension", "recognition", "grief"],
+        "tension_target": "medium",
+        "subtext_notes": "yui knows ren knows about the letter; neither acknowledges it until the last line"
+      }}
     }}
   ]
 }}
@@ -367,7 +418,18 @@ that scene's state_reads.
   Example context_deps for a scene that resolves an earlier confession: \
 `[{{"ref_type": "scene", "ref_id": "s02", "link_type": "callback", \
 "reason": "A's confession in s02 is directly recalled and resolved here", \
-"inject_as": "full_dialogue"}}]`."""
+"inject_as": "full_dialogue"}}]`.
+- **scene_brief (Phase 13-2 Step 1, route-4 prep)**: per-scene creative \
+instructions the downstream parallel Writer workers will consume. Required fields:
+  * beats: 3-7 ordered scene events (≤80 chars each) — the creative spine
+  * character_blocking: {{character_id: position/movement/posture}} for each \
+character in characters_present
+  * emotional_curve: 2-5 emotion labels tracking the scene's internal arc
+  * tension_target: one of "low" / "medium" / "high" / "climax"
+  * subtext_notes: what stays UNSAID between lines (≤400 chars)
+  Keep it tight — this is a planning artifact, not prose. Writer workers \
+will inflate beats into actual dialogue; they need the skeleton, not your \
+draft."""
 
     response = await ainvoke_llm(
         system, user_prompt, model=settings.llm_director_model, caller="director/step2",
@@ -406,6 +468,10 @@ def _merge_outline_details(outline: dict, details: dict) -> dict:
         # happens in StructureReviewer — merge step just carries the raw
         # list through. Defaults to [] if Director didn't emit.
         merged["context_deps"] = d.get("context_deps") or []
+        # Phase 13-2 / Step 1: per-scene creative brief (route-4 prep). Raw
+        # dict here; hydration to SceneBrief happens in _build_from_plan
+        # so validation failures log+drop instead of killing the pipeline.
+        merged["scene_brief"] = d.get("scene_brief") or None
         merged_scenes.append(merged)
     # Filter out invalid branch/next_scene_id references from step2
     valid_ids = {s["id"] for s in merged_scenes}
@@ -726,6 +792,20 @@ def _build_from_plan(plan: dict, theme: str) -> tuple[VNScript, dict[str, Charac
             if b and b.get("text") and b.get("next_scene_id")
         ]
 
+        # Phase 13-2 Step 1: hydrate scene_brief if present. Validation
+        # failures log+drop rather than abort — missing brief is harmless
+        # (Writer just doesn't have the extra planning signal yet).
+        scene_brief_obj = None
+        brief_raw = s.get("scene_brief")
+        if brief_raw:
+            try:
+                scene_brief_obj = SceneBrief.model_validate(brief_raw)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    f"scene_brief invalid for scene '{s.get('id', '?')}', "
+                    f"dropping: {e}"
+                )
+
         scene = Scene(
             id=s["id"],
             title=s.get("title") or s["id"],
@@ -744,6 +824,8 @@ def _build_from_plan(plan: dict, theme: str) -> tuple[VNScript, dict[str, Charac
             # Sprint 9-1: symbolic state I/O
             state_reads=s.get("state_reads") or [],
             state_writes=s.get("state_writes") or {},
+            # Phase 13-2 Step 1
+            scene_brief=scene_brief_obj,
         )
         scenes.append(scene)
 
@@ -755,6 +837,18 @@ def _build_from_plan(plan: dict, theme: str) -> tuple[VNScript, dict[str, Charac
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Skipped invalid world_variable {v.get('name', '?')}: {e}")
 
+    # Phase 13-2 Step 1: hydrate macro_reference if present. Same log+drop
+    # policy as scene_brief — missing macro_reference just means route-4
+    # downstream workers fall back to per-run system prompt without the
+    # shared voice charter.
+    macro_ref = None
+    macro_raw = plan.get("macro_reference")
+    if macro_raw:
+        try:
+            macro_ref = MacroReference.model_validate(macro_raw)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"macro_reference invalid, dropping: {e}")
+
     script = VNScript(
         title=plan.get("title", "Untitled Story"),
         description=plan.get("description", ""),
@@ -763,5 +857,7 @@ def _build_from_plan(plan: dict, theme: str) -> tuple[VNScript, dict[str, Charac
         scenes=scenes,
         characters=list(characters.keys()),
         world_variables=world_variables,
+        # Phase 13-2 Step 1
+        macro_reference=macro_ref,
     )
     return script, characters

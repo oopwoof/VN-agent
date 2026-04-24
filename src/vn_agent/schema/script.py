@@ -74,6 +74,61 @@ class SceneContextRef(BaseModel):
     ] = "summary"
 
 
+class SceneBrief(BaseModel):
+    """Phase 13-2 Step 1 (路线四): per-scene creative instructions, produced
+    by Director step2 alongside navigation/music/state I/O. The downstream
+    Writer-parallel workers (route 4 Step 2+) consume these as the plan
+    skeleton before going to thinking fanout.
+
+    Designed to be dense: `beats` is the creative spine, `character_blocking`
+    answers "where are they physically/relationally", `emotional_curve`
+    tracks the interior arc, `tension_target` sets expected energy,
+    `subtext_notes` is what's UNSAID between lines.
+
+    All fields are hard-capped at small sizes (beats ≤ 7, curve ≤ 5) so a
+    misbehaving Director can't blow up the Writer prompt when this gets
+    consumed later.
+    """
+    beats: list[str] = Field(
+        default_factory=list,
+        description="3-7 ordered scene beats (each ≤80 chars). The creative spine "
+                    "Writer workers will inflate into dialogue.",
+    )
+    character_blocking: dict[str, str] = Field(
+        default_factory=dict,
+        description="{character_id: position/movement/posture} for each "
+                    "characters_present. e.g. {'yui': 'leans on the railing, "
+                    "back to the lamp'}.",
+    )
+    emotional_curve: list[str] = Field(
+        default_factory=list,
+        description="2-5 emotion labels in order, tracking the scene's "
+                    "internal arc (e.g. ['apprehension','recognition','grief']).",
+    )
+    tension_target: Literal["low", "medium", "high", "climax"] = Field(
+        default="medium",
+        description="Expected energy level for this scene.",
+    )
+    subtext_notes: str = Field(
+        default="", max_length=400,
+        description="What stays UNSAID between lines. Drives voice/restraint "
+                    "choices downstream.",
+    )
+
+    @field_validator("beats")
+    @classmethod
+    def _cap_beats(cls, v: list[str]) -> list[str]:
+        # Hard ceiling — keeps Writer prompt bounded even if Director
+        # over-produces. Deterministic truncation (keep first 7) is safer
+        # than raising a validation error and risking a pipeline abort.
+        return list(v)[:7]
+
+    @field_validator("emotional_curve")
+    @classmethod
+    def _cap_emotional_curve(cls, v: list[str]) -> list[str]:
+        return list(v)[:5]
+
+
 class BranchOption(BaseModel):
     text: str = Field(description="Choice text shown to player")
     next_scene_id: str = Field(description="Scene to jump to when this option is chosen")
@@ -169,6 +224,28 @@ class Scene(BaseModel):
         specific version — 5 is a firm ceiling (budget design)."""
         return list(v)[:5]
 
+    # Phase 13-2 Step 1: Director step2 creative brief. Consumed by the
+    # route-4 Writer-parallel pipeline once Steps 2-6 land. Optional so
+    # older vn_script.json files (and small-model Director runs that
+    # skip brief generation) still load fine.
+    scene_brief: SceneBrief | None = Field(
+        default=None,
+        description="Director-declared per-scene creative instructions "
+                    "(Phase 13-2 Step 1). Consumed by Writer workers in "
+                    "route-4 fanout-sync-fanout parallelization.",
+    )
+    # AUDITS §2 piggyback (2026-04-24): snapshot of the StateOrchestrator
+    # constraint text that Writer was shown when writing this scene. Lets
+    # debug/front-end retrospectively see the "directive" the Writer read
+    # — without this, state_constraints was ephemeral in AgentState and
+    # lost on every reload.
+    state_constraints_seen: str | None = Field(
+        default=None,
+        description="Frozen copy of state_constraints (StateOrchestrator "
+                    "output) as Writer saw it when writing this scene. "
+                    "None when no state constraints were active.",
+    )
+
 
 class Chapter(BaseModel):
     """Phase 13-1 / Step 6: chapter-level rollup for long-form VN memory.
@@ -202,6 +279,50 @@ class Chapter(BaseModel):
         default_factory=list,
         description="Member scenes referenced by later scenes via graph "
                     "context_deps. Rollup preserves these verbatim.",
+    )
+
+
+class MacroReference(BaseModel):
+    """Phase 13-2 Step 1 (路线四): global writing reference shared across
+    every Writer worker.
+
+    Director step1 emits this as part of the outline. Once route-4 Step 3
+    lands, it flows into the monolithic 1-hour cache prefix (Phase 13-1
+    Step 3), so every parallel Writer call reads the same character voice
+    charter and tone register at amortized-zero cost. Addresses the
+    primary risk of fanout parallelism: character voice drift and pacing
+    imbalance across 50+ scenes written by independent workers.
+
+    All fields are Optional-shaped (empty string / empty list / empty
+    dict). Short demos (≤6 scenes) can leave most blank — Director prompt
+    explicitly says so to avoid wasted tokens on short runs.
+    """
+    theme_thesis: str = Field(
+        default="", max_length=300,
+        description="One sentence capturing the story's central tension "
+                    "(e.g. 'duty vs memory in the three hours before the tide').",
+    )
+    pacing_arc: str = Field(
+        default="", max_length=500,
+        description="Dense phrase mapping scene ranges to strategies "
+                    "(e.g. 'accumulate s01-04 → rupture s05 → uncover s06-07 "
+                    "→ resolve s08').",
+    )
+    foreshadow_plan: list[dict] = Field(
+        default_factory=list,
+        description="Major foreshadow→payoff links. Each entry is a dict "
+                    "like {planted_in: scene_id, payoff_in: scene_id, element: str}. "
+                    "2-5 entries for most stories; [] for simple/short runs.",
+    )
+    character_voice_charter: dict[str, str] = Field(
+        default_factory=dict,
+        description="{character_id: one-line voice anchor}. ≤150 chars each. "
+                    "Read by every Writer worker to keep voice consistent.",
+    )
+    tone_register: str = Field(
+        default="", max_length=200,
+        description="Unified language register — literary / action / mixed, "
+                    "plus POV and default tension.",
     )
 
 
@@ -264,4 +385,15 @@ class VNScript(BaseModel):
         description="Haiku chapter rollups (≤800 words each). Stable within "
                     "a chapter, updated at chapter boundaries. Fed into the "
                     "cached system prefix by the Writer prompt assembler.",
+    )
+    # Phase 13-2 Step 1 (route 4): global writing reference produced by
+    # Director step1. Optional so older vn_script.json files still load.
+    # Once route-4 Step 3 lands, this feeds the monolithic cache prefix
+    # (Phase 13-1 Step 3) so every Writer worker shares the same voice
+    # charter / pacing arc / foreshadow plan at amortized-zero cost.
+    macro_reference: MacroReference | None = Field(
+        default=None,
+        description="Director-declared global writing reference (Phase 13-2 "
+                    "Step 1). Feeds route-4 Writer-parallel pipeline via the "
+                    "monolithic 1h cache prefix.",
     )
