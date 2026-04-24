@@ -223,3 +223,8 @@ _eval_tmp/
 _eval_ollama_output/
 vn_jobs.db
 .claude/scheduled_tasks.lock
+
+# Phase 13-1 / Step 1: best-effort key rotation audit trail.
+# Written to cwd by services.llm._log_key_rotation during tests / ad-hoc runs.
+# Not a persisted dataset — always rewritten, never consumed programmatically.
+api_key_rotations.jsonl

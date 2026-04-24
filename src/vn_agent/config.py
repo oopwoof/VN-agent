@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).parent.parent.parent
@@ -22,6 +22,49 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     stability_api_key: str = Field(default="", alias="STABILITY_API_KEY")
     suno_api_key: str = Field(default="", alias="SUNO_API_KEY")
+
+    # Phase 13-1 / Step 1: Anthropic key pool for 50-scene long-form runs.
+    # Single key goes 429 under sustained load; round-robin + per-key cooldown
+    # + exp backoff + jitter keeps the pipeline moving. Haiku / Sonnet tier
+    # limits differ, so split pools avoid Haiku bursts exhausting Sonnet budget.
+    # Resolution order (in services.llm._pool_for):
+    #   1. Model is Haiku     → anthropic_api_keys_haiku  (if set)
+    #   2. Model is Sonnet/other → anthropic_api_keys_sonnet (if set)
+    #   3. Fallback           → anthropic_api_keys (shared generic pool)
+    #   4. Final fallback     → single anthropic_api_key (backward compat)
+    # Populate via CSV env vars:
+    #   VN_ANTHROPIC_API_KEYS="key1,key2,key3"
+    #   VN_ANTHROPIC_KEYS_SONNET="sk-ant-...,sk-ant-..."
+    #   VN_ANTHROPIC_KEYS_HAIKU="sk-ant-...,sk-ant-..."
+    anthropic_api_keys: list[str] = Field(
+        default_factory=list, alias="VN_ANTHROPIC_API_KEYS",
+    )
+    anthropic_api_keys_sonnet: list[str] = Field(
+        default_factory=list, alias="VN_ANTHROPIC_KEYS_SONNET",
+    )
+    anthropic_api_keys_haiku: list[str] = Field(
+        default_factory=list, alias="VN_ANTHROPIC_KEYS_HAIKU",
+    )
+    anthropic_max_retries: int = 4            # total attempts incl. rotations
+    anthropic_backoff_base: float = 1.5       # seconds (capped below)
+    anthropic_backoff_cap: float = 30.0       # seconds
+    anthropic_backoff_jitter: float = 0.5     # multiplier range: [1-j, 1+j]
+
+    @field_validator(
+        "anthropic_api_keys",
+        "anthropic_api_keys_sonnet",
+        "anthropic_api_keys_haiku",
+        mode="before",
+    )
+    @classmethod
+    def _split_csv_keys(cls, v: str | list[str] | None) -> list[str]:
+        """Env vars come in as CSV strings; split + strip."""
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [k.strip() for k in v.split(",") if k.strip()]
+        return list(v)
+
     # Sprint 10-1: Google Gemini API key (used by Nano Banana image provider).
     # Free tier covers text models; image generation (gemini-2.5-flash-image)
     # requires a paid-tier account. Pipeline falls back to gpt-image-1 / DALL-E

@@ -447,4 +447,49 @@ Phase 11 就是对这批批评的系统化响应（Sprint 9/10 deferred 处理 s
 - [ ] L2 Reflection Agent：异步跑批提炼元规则 → `dynamic_guidelines.json` → 启动时拼接 System Prompt
 - [ ] L3 DSPy 式自动 Prompt 优化 + DPO 微调廉价模型（Llama 3 8B / Haiku）
 
-_最后更新: 2026-04-14_
+**P2 - Ren'Py 表现力扩展 + Multi-Agent 架构演进**（详见 DEV_LOG.md 路线三，2026-04-20 草案）
+
+*Schema + Graph 层*
+- [ ] `Scene` 扩字段：`cg_moment` / `ambient` / `minigame` / `scene_effects` / `loop_reset_vars` / `locale_hints`（全 Optional，向后兼容）
+- [ ] `VNScript` 扩字段：`style_bible` / `audio_plan` / `stat_system` / `ending_classifiers` / `minigame_library`
+- [ ] 管线图分三段：规划层（串行）/ 内容层（并行）/ 集成层，新增 5 个 Agent（StyleDirector / InteractivityPlanner / EffectComposer / MinigameSpecWriter / PlaytestAgent / LocalizationAgent）
+
+*StructureReviewer 守门规则升级*
+- [ ] `loop_reset_vars ⊆ world_variables` / `scene_effects.on_enter ∈ transforms 白名单` / `minigame.id ∈ minigame_library` / `ending_classifiers` 覆盖所有 terminal state / Live2D motion 引用校验
+
+*Compiler 模板参数化*
+- [ ] 拆出 `gui.rpy.j2` / `screens.rpy.j2` / `transforms.rpy.j2` / `audio.rpy.j2` / `live2d.rpy.j2` / `tl/{locale}/` 模板
+- [ ] transforms 白名单机制（StyleDirector 只组合不发明，避免不能编译的 .rpy）
+
+*Ren'Py 表现力落地（按 Ren'Py 原生支持度分档）*
+- [ ] Live2D 立绘（`renpy.Live2D` 官方模块，CharacterDesigner 输出 segment 拆图）
+- [ ] 多音轨音景（`register_channel`，SFX/ambience/stinger 三轨，AudioDirector 产 per-scene cue）
+- [ ] Minigame 插片（CDD + screen lang，结果写回 world_variables）
+- [ ] 好感度/属性系统面板（`screen stats_menu` 自动生成）
+- [ ] 时间循环 / flashback（`loop_reset_vars` + `jump` 编译器支持）
+- [ ] 多结局自动分类 + gallery 解锁（EndingClassifier Agent）
+- [ ] LLM 驱动 i18n 翻译管线（`translate` 块自动生成，保留语气标签 + TM 复用）
+
+*运行时 Agent 通道（生产级必备，增强非核心）*
+- [ ] `src/vn_agent/runtime/` FastAPI 常驻服务（`/npc_chat` / `/suggest_branch`）
+- [ ] Ren'Py 侧 `httpx` 打包到 `game/python-packages/` + 离线降级 fallback
+- [ ] 玩家 persona / session cache 支持自适应叙事
+
+*质量保障闭环（对 miHoYo 管线口味）*
+- [ ] PlaytestAgent：`config.skipping` + `--warp` + `renpy.screenshot()` harness，auto-walk 所有分支
+- [ ] Vision LLM Judge：截图 + 对话日志打分"画面/文本匹配度""死路检测"
+- [ ] Eval 扩维度：UI coherence / Interactivity pacing / Player agency / Coverage
+- [ ] 分数回流 Director prompt（反向传播闭环）
+
+*面试口径红线*
+- ✅ 能吹：Live2D / 多音轨 / minigame CDD / screen lang / i18n / live reload（全有官方 API）
+- ⚠️ 要保守：runtime LLM 需打包依赖、auto-playthrough 无 `--test` flag、mod 热加载官方未承诺
+- ❌ 别碰：粒子特效（Ren'Py 支持弱）、"Agent-driven 自由叙事沙盒"（超出 VN 范式）
+
+*实施顺序（8 步，严格按依赖）*
+1. Schema 扩容 → 2. StructureReviewer 规则 → 3. Compiler 模板拆分 → 4. StyleDirector + EffectComposer
+5. PlaytestAgent → 6. InteractivityPlanner + MinigameSpecWriter → 7. LocalizationAgent → 8. Runtime API 通道
+
+前 4 步 = "把静态 VN 做到生产级"的最小增量；后 4 步 = "走向 AI-native VN"的研究性扩展。
+
+_最后更新: 2026-04-23_

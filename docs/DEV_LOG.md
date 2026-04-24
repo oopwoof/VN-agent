@@ -312,9 +312,209 @@ Sprint 11-1 的 per-scene Haiku summary 有两个 bug 类问题，外加一个�
 4. `pause-outline` + `continue-outline` 成对做 — 是 creator mode 的门面
 5. `WorldStatePanel` + `DiagnosticsSidebar` — 大块 UI，最后做
 
+### 路线三：Ren'Py 表现力扩展 + Multi-Agent 架构演进 (2026-04-20)
+
+当前管线只处理"剧本 + 立绘 + 背景 + BGM + 分支"这 5 个维度。要把 Ren'Py 支持的能力吃干榨净（Live2D / 多音轨 / minigame / stat 面板 / 时间循环 / 多结局 / i18n / runtime LLM），管线本身需要分层扩容。这一路线和路线一、二正交——它动的是 **schema + graph topology + compiler 模板**，不是检索机制或自我进化机制。
+
+#### 摸底：Ren'Py 到底支持哪些（诚实版）
+
+面试级别的诚实审计：Ren'Py 能力分三档。
+
+| 档位 | 能力 | 依据 |
+|---|---|---|
+| ✅ 官方 API 直接支持 | Live2D (`renpy.Live2D`)、ATL 动画、多音轨 (`renpy.music.register_channel`)、CDD minigame（DDLC 同款）、`screen` lang 自定义 UI、`translate` 块 i18n、Shift+R live reload、GLSL shader (7.4+)、`python:` 块跑任意 Python | 全部有官方 doc / 经典游戏示例 |
+| ⚠️ 技术上能做但要自己搭 harness | auto-playthrough（`config.skipping` + `--warp` + `renpy.screenshot()`，但**没有** `--test` flag）、mod/DLC 热加载（`config.archives.append()` 可行但官方没承诺热插拔）、runtime LLM 调 API（`httpx` 不在自带包里，要打包到 `game/python-packages/`） | 需要自己写胶水，不是开箱即用 |
+| ❌ 不建议吹 | 粒子特效（只有 `SnowBlossom` 和 deprecated `Particles`，真要做得嵌 pygame）、真正的"热加载 DLC"（通常要重启）、"Agent-driven 自由叙事沙盒"（超出 VN 范式） |
+
+**设计红线**：不要把"Ren'Py 理论上能跑 Python"等价于"Ren'Py 原生支持 X"。面试官懂 Ren'Py 会追问具体 API。
+
+#### 六个管线改造点（按优先级）
+
+**① Schema 大扩容（最基础，纯 Pydantic 变更）**
+
+现有 `Scene` 字段：`state_reads/state_writes/branches/bgm_mood/description/dialogue`。新增以承载扩展能力：
+
+```python
+class Scene(BaseModel):
+    # 现有字段...
+    cg_moment: bool = False                       # 触发 CG 高保真生成管线
+    ambient: AmbientSpec | None = None            # {time, weather, tension_level}
+    minigame: MinigameRef | None = None           # 插入 CDD minigame
+    scene_effects: SceneEffectPlan | None = None  # on_enter/emphasis_lines/on_exit
+    loop_reset_vars: list[str] = []               # 时间循环回滚清单
+    locale_hints: dict[str, str] = {}             # i18n TM hint
+
+class VNScript(BaseModel):
+    # 现有：scenes, characters, world_variables
+    style_bible: StyleBible | None = None         # 项目级皮肤（gui.rpy 参数）
+    audio_plan: AudioPlan | None = None           # 多音轨声场
+    stat_system: StatSystemSpec | None = None     # 好感度 / 属性系统
+    ending_classifiers: list[EndingRule] = []     # true/good/normal/bad 自动分类
+    minigame_library: list[MinigameSpec] = []     # 可被 scene 引用的 CDD 定义
+```
+
+**关键原则**：新字段全部 `Optional`，旧 pipeline 看不懂就忽略 — 零破坏性升级。
+
+**② 管线图拆成"规划层 / 内容层 / 集成层"三段**
+
+现在是扁平线性（Director → Structure → State → Writer → Reviewer → Assets）。扩展后：
+想下要不要抽离一个总设计师出来。主agent决定是否激活可选agent。
+
+```
+[规划层] 全串行（schema 层层填充）
+  Director
+    → StructureReviewer
+    → StateOrchestrator
+    → StyleDirector          （新）查 StyleBible RAG 产 project_skin + scene_effects
+    → InteractivityPlanner   （新）决策 minigame / stat_panel 插入点
+    → AudioDirector          （扩）替代 MusicDirector，产多轨 AudioPlan
+
+[内容层] 尽量并行（asyncio.gather return_exceptions=True）
+  Writer ⇄ Reviewer（revise 循环保留）
+  CharacterDesigner（加 Live2D segment 输出）
+  SceneArtist（加 ambient 变体：白天/黄昏/雨）
+  MinigameSpecWriter       （新）为每个 slot 生成 Python snippet
+  EffectComposer           （新）per-scene transform 编排
+
+[集成层]
+  RenpyCompiler（模板参数化）
+  LocalizationAgent        （新）translate 块生成
+  PlaytestAgent            （新）auto-walk + 截图 + Vision 审查
+```
+
+**③ StructureReviewer 升级为"全 schema 完整性守门人"**
+
+现有只 check BFS 可达 + `state_writes` 变量声明。扩展后新增规则：
+
+| 规则 | 检查什么 |
+|---|---|
+| `loop_reset_vars ⊆ world_variables` | 时间循环只能回滚声明过的变量 |
+| `scene.scene_effects.on_enter ∈ transforms 白名单` | 特效名必须在 `transforms.rpy.j2` 已定义 |
+| `minigame.id ∈ minigame_library` | 场景引用的 minigame 必须有对应 spec |
+| `ending_classifiers 覆盖所有 terminal state` | 所有 branch 终点都能被分类（无 orphan） |
+| `stat_system.thresholds` 单调 | 好感度阈值不能乱序 |
+| Live2D motion ∈ 角色 motion 库 | 引用的动画必须存在 |
+
+**延续非阻塞哲学**：新 Agent 输出经过这一关，错了写 `structure_feedback`，不直接崩 Ren'Py 编译。
+
+**④ Compiler 从"写死模板"变"参数化皮肤 + 特效白名单"**
+
+现有只俩模板（`script.rpy.j2` + `init.rpy.j2`）。扩展后：
+
+```
+compiler/templates/
+├── script.rpy.j2        # 扩展：scene_effects / minigame / loop 支持
+├── init.rpy.j2          # 扩展：world_vars 注册、stat_system 声明
+├── gui.rpy.j2           # 新：StyleBible → 项目皮肤
+├── screens.rpy.j2       # 新：say screen + stats panel + gallery
+├── transforms.rpy.j2    # 新：特效白名单（shake/fade/vignette/...）
+├── audio.rpy.j2         # 新：register_channel + 音景 cue
+├── live2d.rpy.j2        # 新：角色 Live2D 声明
+└── tl/{locale}/...      # 新：translate 块（LocalizationAgent 产）
+```
+
+**关键防线**：`transforms.rpy.j2` 作为白名单——StyleDirector / EffectComposer 只能**组合**不能**发明** transform 名字，避免生成不能编译的 .rpy。等价于 `state_writes` 变量必须在 `world_variables` 声明过的哲学。
+
+**⑤ 加"运行时 Agent 通道"（为 NPC 闲聊 / 自适应分支）**
+
+VN-Agent 当前只是编译期工具。要支持 runtime LLM 需要常驻服务：
+
+```
+src/vn_agent/runtime/
+├── runtime_api.py       # FastAPI: POST /npc_chat, /suggest_branch
+├── game_bridge.py       # Ren'Py 侧 httpx 封装 + 降级逻辑
+└── session_cache.py     # 玩家 persona / 对话历史
+```
+
+Ren'Py 侧（打包 httpx 到 `game/python-packages/`）：
+
+```python
+# init python:
+def npc_chat(character_id, player_input):
+    try:
+        return httpx.post(f"{API}/npc_chat", timeout=3.0).json()["reply"]
+    except Exception:
+        return fallback_lines[character_id]  # 离线降级
+```
+
+**设计原则**：runtime LLM 是**增强**不是核心——服务挂了游戏仍可玩（走预生成 fallback）。这是生产级必须的。
+
+**⑥ Eval 框架扩维度（闭环）**
+
+现有 Reviewer 5 维只评文本。扩展后新增：
+
+| 新维度 | 审核方式 |
+|---|---|
+| UI coherence | Vision LLM 看 Playtest 截图打分 |
+| Interactivity pacing | 确定性规则 + LLM（minigame 频次合理性） |
+| Player agency | 跑 state diff 分析（branch 是否有实质影响） |
+| Coverage | 确定性：所有 scene/branch ≥1 条 playtest 通路 |
+
+**闭环**：Eval 分数回流 Director 下次 prompt——"上次 interactivity pacing 低，这次少塞 minigame"。
+
+#### 实施顺序（严格按依赖）
+
+| 步 | 工作 | 工期估计 |
+|---|---|---|
+| 1 | Schema 扩容（Pydantic 字段 + 向后兼容） | 1 周 |
+| 2 | StructureReviewer 规则扩展（与 schema 同步） | 几天 |
+| 3 | Compiler 模板参数化（拆 gui/screens/transforms） | 1-2 周 |
+| 4 | StyleDirector + EffectComposer | 1 周 |
+| 5 | PlaytestAgent（Ren'Py warp + screenshot harness） | 2 周 |
+| 6 | InteractivityPlanner + MinigameSpecWriter | 1-2 周 |
+| 7 | LocalizationAgent | 1 周 |
+| 8 | Runtime API 通道（打包 + 降级） | 2 周 |
+
+**前四步 = "把静态 VN 做到生产级"的最小增量**；后四步 = "走向 AI-native VN"的研究性扩展。面试被问"从哪开始"答前四步。
+
+#### 面试口径（什么能吹、什么要保守）
+
+**能吹**：
+- Live2D / 多音轨 / minigame CDD / screen lang / i18n / live reload — 全都有官方 API
+- StyleDirector + transforms 白名单这套设计哲学（延续 state_writes 声明式约束）
+- 运行时 LLM + 降级 fallback 的生产级考量
+- PlaytestAgent + Vision Judge 闭环（miHoYo 质量保障口味）
+- 策划编辑器 + 局部重跑（Sprint 12-4 已有 foundation，扩到图形化）
+
+**要保守**：
+- Runtime LLM 需要打包 httpx 到 `game/python-packages/`，有部署摩擦
+- Auto-playthrough 没有 `--test` flag，要自己搭 harness
+- Mod/DLC 热加载 Ren'Py 官方没承诺，通常要重启
+- 粒子特效 Ren'Py 支持弱，不要和 Unity ParticleSystem 比
+
+**别碰**：
+- "Agent-driven 自由互动 VN"（超出 VN 范式，面试被追问会露馅）
+- "跨作品 IP 共享 world_lore"（是后端 RAG 工程问题，不是 Ren'Py 问题）
+
 ---
 
 ## 开发记录
+
+### 2026-04-23 | 实现 - 2026-04-23 17:58
+
+**变更文件** (4 个):
+**源码变更** (2 文件):
+  - `src/vn_agent/config.py`
+  - `src/vn_agent/services/llm.py`
+
+**测试变更** (1 文件):
+  - `tests/test_services/test_llm.py`
+
+**其他变更** (1 文件):
+  - `.gitignore`
+
+**变更统计**:
+```
+.gitignore                      |   5 +
+ src/vn_agent/config.py          |  45 +++++-
+ src/vn_agent/services/llm.py    | 330 ++++++++++++++++++++++++++++++++++++----
+ tests/test_services/test_llm.py | 223 ++++++++++++++++++++++++++-
+ 4 files changed, 571 insertions(+), 32 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
 
 ### 2026-04-14 | 杂项 - 2026-04-14 16:24
 
@@ -3549,4 +3749,4 @@ _（每次 commit 后更新）_
 
 ---
 
-_最后更新: 2026-04-14_
+_最后更新: 2026-04-23_

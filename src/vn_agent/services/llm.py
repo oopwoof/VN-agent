@@ -1,8 +1,20 @@
-"""LLM client with retry logic and structured output."""
+"""LLM client with retry logic and structured output.
+
+Phase 13-1 / Step 1: Anthropic key pool added on top of the tenacity inner
+retry. Outer loop handles RateLimitError + key rotation + exp backoff;
+inner tenacity still handles connection errors and 5xx. RateLimitError is
+intentionally EXCLUDED from the inner retry list so the outer loop owns it.
+"""
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
+import time
 from functools import lru_cache
+from itertools import cycle
+from pathlib import Path
+from threading import Lock
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -16,19 +28,36 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
+# Inner-retry list (tenacity): connection errors, timeouts, 5xx. Does NOT
+# include RateLimitError — the outer pool-rotation loop handles 429.
 _RETRIABLE_LIST: list[type[Exception]] = [TimeoutError, ConnectionError]
+_RATE_LIMIT_LIST: list[type[Exception]] = []
 try:
     from anthropic import APIConnectionError, InternalServerError, RateLimitError
-    _RETRIABLE_LIST.extend([APIConnectionError, RateLimitError, InternalServerError])
+    _RETRIABLE_LIST.extend([APIConnectionError, InternalServerError])
+    _RATE_LIMIT_LIST.append(RateLimitError)
 except ImportError:
     pass
 try:
     from openai import APIConnectionError as OC
     from openai import RateLimitError as OR
-    _RETRIABLE_LIST.extend([OC, OR])
+    _RETRIABLE_LIST.append(OC)
+    _RATE_LIMIT_LIST.append(OR)
 except ImportError:
     pass
 _RETRIABLE = tuple(_RETRIABLE_LIST)
+
+
+class _NeverRaised(Exception):
+    """Sentinel for the empty rate-limit tuple case (SDKs missing).
+    Using an empty tuple in `except` is illegal; this never-raised class
+    makes `except _RATE_LIMIT_TYPES` a no-op when no SDK is available.
+    """
+
+
+_RATE_LIMIT_TYPES: tuple[type[Exception], ...] = (
+    tuple(_RATE_LIMIT_LIST) if _RATE_LIMIT_LIST else (_NeverRaised,)
+)
 
 
 def _make_retry_decorator(max_retries: int):
@@ -38,6 +67,154 @@ def _make_retry_decorator(max_retries: int):
         retry=retry_if_exception_type(_RETRIABLE),
         reraise=True,
     )
+
+
+# ----------------------------------------------------------------------------
+# Phase 13-1 / Step 1: Anthropic key pool + exp backoff + cooldown
+# ----------------------------------------------------------------------------
+
+
+class _KeyPool:
+    """Round-robin key pool with per-key cooldown after rate-limit hits.
+
+    pick() skips keys currently in cooldown; if all are cooling, returns
+    the one with earliest cooldown expiration so the loop still makes
+    progress (waking up shortly after the earliest key becomes eligible).
+    """
+
+    def __init__(self, keys: list[str]):
+        if not keys:
+            raise ValueError("_KeyPool requires at least one key")
+        self._keys = list(keys)
+        self._cycle_iter = cycle(self._keys)
+        self._lock = Lock()
+        self._cooldown: dict[str, float] = {}  # key → available_at (monotonic)
+
+    def pick(self) -> str:
+        with self._lock:
+            now = time.monotonic()
+            for _ in range(len(self._keys)):
+                k = next(self._cycle_iter)
+                if self._cooldown.get(k, 0.0) <= now:
+                    return k
+            # All keys currently in cooldown — return the soonest-eligible.
+            return min(self._keys, key=lambda k: self._cooldown.get(k, 0.0))
+
+    def mark_rate_limited(self, key: str, cooldown_s: float) -> None:
+        with self._lock:
+            self._cooldown[key] = time.monotonic() + cooldown_s
+
+    @property
+    def size(self) -> int:
+        return len(self._keys)
+
+
+_pool_sonnet: _KeyPool | None = None
+_pool_haiku: _KeyPool | None = None
+_pool_generic: _KeyPool | None = None
+_pool_init_lock = Lock()
+
+
+def _reset_pools() -> None:
+    """Test helper: reset module-level pools so config changes take effect."""
+    global _pool_sonnet, _pool_haiku, _pool_generic
+    with _pool_init_lock:
+        _pool_sonnet = None
+        _pool_haiku = None
+        _pool_generic = None
+
+
+def _pool_for(model: str) -> _KeyPool | None:
+    """Pick the pool matching the model's tier. Returns None when no pool
+    is configured (all key lists empty) — caller falls back to the single
+    anthropic_api_key path (backward compat).
+
+    Routing rules:
+      - "haiku" in model name → haiku pool if set, else generic, else None
+      - otherwise             → sonnet pool if set, else generic, else None
+    """
+    global _pool_sonnet, _pool_haiku, _pool_generic
+    settings = get_settings()
+    is_haiku = "haiku" in (model or "").lower()
+
+    with _pool_init_lock:
+        if is_haiku:
+            if _pool_haiku is None and settings.anthropic_api_keys_haiku:
+                _pool_haiku = _KeyPool(settings.anthropic_api_keys_haiku)
+            if _pool_haiku is not None:
+                return _pool_haiku
+        else:
+            if _pool_sonnet is None and settings.anthropic_api_keys_sonnet:
+                _pool_sonnet = _KeyPool(settings.anthropic_api_keys_sonnet)
+            if _pool_sonnet is not None:
+                return _pool_sonnet
+        if _pool_generic is None and settings.anthropic_api_keys:
+            _pool_generic = _KeyPool(settings.anthropic_api_keys)
+        return _pool_generic
+
+
+def _extract_retry_after(exc: Exception) -> float | None:
+    """Extract Retry-After header from an Anthropic/OpenAI RateLimitError."""
+    try:
+        resp = getattr(exc, "response", None)
+        if resp is None:
+            return None
+        headers = getattr(resp, "headers", None) or {}
+        v = headers.get("retry-after") or headers.get("Retry-After")
+        if v is None:
+            return None
+        return float(v)
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _backoff_delay(attempt: int, settings: Any) -> float:
+    """Exponential backoff with multiplicative jitter."""
+    base = settings.anthropic_backoff_base * (2 ** attempt)
+    capped = min(base, settings.anthropic_backoff_cap)
+    jitter_low = 1.0 - settings.anthropic_backoff_jitter
+    jitter_high = 1.0 + settings.anthropic_backoff_jitter
+    return capped * random.uniform(jitter_low, jitter_high)
+
+
+def _log_key_rotation(
+    caller: str,
+    attempt: int,
+    key: str | None,
+    reason: str,
+    delay_s: float,
+    model: str,
+) -> None:
+    """Log a rotation event. Always emits to logger; best-effort file write
+    to ./api_key_rotations.jsonl in the active output dir if discoverable.
+    """
+    key_suffix = (key or "")[-4:] if key else ""
+    logger.warning(
+        f"[key-pool] rotate: caller={caller} attempt={attempt} "
+        f"key_suffix={key_suffix} reason={reason} delay={delay_s:.2f}s model={model}"
+    )
+    # Best-effort JSONL audit trail in the current working directory.
+    # Full output-dir wiring would require a context variable; defer to
+    # existing rag_retrievals pattern if/when needed.
+    try:
+        import json
+        from datetime import UTC, datetime
+
+        path = Path.cwd() / "api_key_rotations.jsonl"
+        entry = {
+            "ts": datetime.now(UTC).isoformat(),
+            "caller": caller,
+            "attempt": attempt,
+            "key_suffix": key_suffix,
+            "reason": reason,
+            "delay_s": round(delay_s, 2),
+            "model": model,
+        }
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as e:  # noqa: BLE001 — observability is best-effort
+        logger.debug(f"Failed to persist key rotation event: {e}")
+
 
 
 @lru_cache(maxsize=8)
@@ -94,14 +271,19 @@ def _infer_provider_from_model(model: str) -> str | None:
     return None
 
 
-def get_llm(model: str | None = None):
-    """Get configured LLM instance (cached per model).
+def get_llm(model: str | None = None, *, api_key_override: str | None = None):
+    """Get configured LLM instance (cached per model + api_key).
 
     Sprint 8-1 fix: when `model` is an OpenAI name (gpt-*, o1-*) but the
     pipeline provider is Anthropic (or vice versa), override the provider
     based on the model name. Prevents the Sonnet reviewer's cross-model
     judge calls to gpt-4o from being routed to Anthropic (which returns
     a 404 for unknown model names).
+
+    Phase 13-1 / Step 1: api_key_override routes the request through a
+    specific key (from `_KeyPool.pick()`). Different keys yield different
+    `_get_llm_cached` cache entries, so key rotation naturally creates a
+    fresh ChatAnthropic instance per key.
     """
     settings = get_settings()
     resolved_model = model or settings.llm_model
@@ -116,8 +298,10 @@ def get_llm(model: str | None = None):
         if inferred and inferred != effective_provider and inferred in {"anthropic", "openai"}:
             effective_provider = inferred
 
-    # Explicit api_key override wins; then provider-specific env key
-    if settings.llm_api_key:
+    # Key resolution priority: pool override > explicit llm_api_key > env per provider
+    if api_key_override:
+        api_key = api_key_override
+    elif settings.llm_api_key:
         api_key = settings.llm_api_key
     elif effective_provider == "anthropic":
         api_key = settings.anthropic_api_key
@@ -134,9 +318,14 @@ def get_llm(model: str | None = None):
     )
 
 
-def get_structured_llm(schema: type[T], model: str | None = None) -> Any:
+def get_structured_llm(
+    schema: type[T],
+    model: str | None = None,
+    *,
+    api_key_override: str | None = None,
+) -> Any:
     """Get LLM with structured output bound to a Pydantic schema."""
-    return get_llm(model).with_structured_output(schema)
+    return get_llm(model, api_key_override=api_key_override).with_structured_output(schema)
 
 
 def _log_stop_reason(result: Any, caller: str) -> None:
@@ -197,20 +386,16 @@ def _build_system_message(system_prompt: str, provider: str, enable_cache: bool)
     return SystemMessage(content=system_prompt)
 
 
-async def ainvoke_llm(
+async def _invoke_once_async(
     system_prompt: str,
     user_prompt: str,
-    schema: type[T] | None = None,
-    model: str | None = None,
-    caller: str = "llm",
+    schema: type[T] | None,
+    model: str | None,
+    caller: str,
+    api_key_override: str | None,
 ) -> T | str:
-    """Invoke LLM with system+user prompts, optionally with structured output.
-
-    Sprint 8-4: system prompts ≥1500 chars are tagged for Anthropic
-    prompt caching when the Anthropic provider is in use. Cached blocks
-    amortize across the 5-minute TTL so agents that fire many calls with
-    the same system prompt (Writer across 6-18 scenes, DialogueReviewer
-    across revision rounds) pay the input-tokens cost only once.
+    """Single invocation attempt with inner tenacity retry (conn errors / 5xx).
+    RateLimitError is NOT caught here — the outer pool-rotation loop owns it.
     """
     from langchain_core.messages import HumanMessage
 
@@ -225,9 +410,9 @@ async def ainvoke_llm(
         )
         messages = [sys_msg, HumanMessage(content=user_prompt)]
         if schema is not None:
-            llm = get_structured_llm(schema, model)
+            llm = get_structured_llm(schema, model, api_key_override=api_key_override)
         else:
-            llm = get_llm(model)
+            llm = get_llm(model, api_key_override=api_key_override)
         result = await llm.ainvoke(messages)
         _log_stop_reason(result, caller)
         return result
@@ -235,14 +420,15 @@ async def ainvoke_llm(
     return await _call()
 
 
-def invoke_llm(
+def _invoke_once_sync(
     system_prompt: str,
     user_prompt: str,
-    schema: type[T] | None = None,
-    model: str | None = None,
-    caller: str = "llm",
+    schema: type[T] | None,
+    model: str | None,
+    caller: str,
+    api_key_override: str | None,
 ) -> T | str:
-    """Synchronous LLM invocation (same prompt-caching behavior as async)."""
+    """Sync counterpart to _invoke_once_async."""
     from langchain_core.messages import HumanMessage
 
     settings = get_settings()
@@ -256,11 +442,97 @@ def invoke_llm(
         )
         messages = [sys_msg, HumanMessage(content=user_prompt)]
         if schema is not None:
-            llm = get_structured_llm(schema, model)
+            llm = get_structured_llm(schema, model, api_key_override=api_key_override)
         else:
-            llm = get_llm(model)
+            llm = get_llm(model, api_key_override=api_key_override)
         result = llm.invoke(messages)
         _log_stop_reason(result, caller)
         return result
 
     return _call()
+
+
+async def ainvoke_llm(
+    system_prompt: str,
+    user_prompt: str,
+    schema: type[T] | None = None,
+    model: str | None = None,
+    caller: str = "llm",
+) -> T | str:
+    """Invoke LLM with system+user prompts, optionally with structured output.
+
+    Sprint 8-4: system prompts ≥1500 chars are tagged for Anthropic
+    prompt caching when the Anthropic provider is in use.
+
+    Phase 13-1 / Step 1: when a key pool is configured (any of the
+    anthropic_api_keys_* settings set), each attempt picks a fresh key;
+    RateLimitError triggers exp backoff + key rotation. Single-key
+    deployments keep the old behavior (rate-limit still retried via the
+    outer loop, but against the same key).
+    """
+    settings = get_settings()
+    resolved_model = model or settings.llm_model
+    pool = _pool_for(resolved_model)
+    n_keys = pool.size if pool else 1
+    max_attempts = max(settings.anthropic_max_retries, n_keys)
+
+    last_err: Exception | None = None
+    for attempt in range(max_attempts):
+        key_override = pool.pick() if pool else None
+        try:
+            return await _invoke_once_async(
+                system_prompt, user_prompt, schema, resolved_model,
+                caller, key_override,
+            )
+        except _RATE_LIMIT_TYPES as e:
+            last_err = e
+            cooldown = _extract_retry_after(e) or 30.0
+            if pool and key_override:
+                pool.mark_rate_limited(key_override, cooldown)
+            delay = _backoff_delay(attempt, settings)
+            _log_key_rotation(
+                caller, attempt, key_override, "429", delay, resolved_model,
+            )
+            if attempt + 1 < max_attempts:
+                await asyncio.sleep(delay)
+            continue
+    assert last_err is not None
+    raise last_err
+
+
+def invoke_llm(
+    system_prompt: str,
+    user_prompt: str,
+    schema: type[T] | None = None,
+    model: str | None = None,
+    caller: str = "llm",
+) -> T | str:
+    """Synchronous LLM invocation. Same pool + backoff semantics as async."""
+    settings = get_settings()
+    resolved_model = model or settings.llm_model
+    pool = _pool_for(resolved_model)
+    n_keys = pool.size if pool else 1
+    max_attempts = max(settings.anthropic_max_retries, n_keys)
+
+    last_err: Exception | None = None
+    for attempt in range(max_attempts):
+        key_override = pool.pick() if pool else None
+        try:
+            return _invoke_once_sync(
+                system_prompt, user_prompt, schema, resolved_model,
+                caller, key_override,
+            )
+        except _RATE_LIMIT_TYPES as e:
+            last_err = e
+            cooldown = _extract_retry_after(e) or 30.0
+            if pool and key_override:
+                pool.mark_rate_limited(key_override, cooldown)
+            delay = _backoff_delay(attempt, settings)
+            _log_key_rotation(
+                caller, attempt, key_override, "429", delay, resolved_model,
+            )
+            if attempt + 1 < max_attempts:
+                time.sleep(delay)
+            continue
+    assert last_err is not None
+    raise last_err
