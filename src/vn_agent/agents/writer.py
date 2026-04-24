@@ -12,7 +12,7 @@ from vn_agent.agents.state import AgentState
 from vn_agent.config import get_settings
 from vn_agent.prompts.templates import WRITER_SYSTEM, strip_thinking
 from vn_agent.schema.character import CharacterProfile
-from vn_agent.schema.script import DialogueLine, Scene, VNScript
+from vn_agent.schema.script import DialogueLine, Scene, StateTimelineEntry, VNScript
 from vn_agent.services.llm import ainvoke_llm
 from vn_agent.strategies.narrative import get_strategy
 
@@ -90,6 +90,11 @@ async def run_writer(state: AgentState) -> dict:
     # long-context coherence — Writer can reference previous scenes' actual
     # dialogue, not just Director's entry_context one-liner.
     updated_scenes: list[Scene] = []
+    # Phase 13-1 / Step 2: rebuild state_timeline from scratch on every
+    # run_writer invocation (not inherited from state). Revision loops
+    # re-seed world_state from initial_values above, so timeline rebuild
+    # matches that semantics.
+    state_timeline: list[StateTimelineEntry] = []
     for idx, scene in enumerate(script.scenes):
         window = settings.writer_context_window
         prior_scenes = (
@@ -134,6 +139,14 @@ async def run_writer(state: AgentState) -> dict:
                 f"{list(updated_scene.state_writes.keys())}"
             )
 
+        # Phase 13-1 / Step 2: snapshot world_state AFTER state_writes applied.
+        # Always append — one row per scene, no state_writes still means
+        # "state at this point is unchanged from prior", which is meaningful.
+        state_timeline.append(StateTimelineEntry(
+            scene_id=updated_scene.id,
+            state_after=dict(world_state),
+        ))
+
         # Sprint 11-1: fire per-scene summarization (Haiku) for long-form runs.
         # Gated by both config toggle and total-scene-count threshold so
         # short demos don't pay the extra Haiku cost.
@@ -165,7 +178,10 @@ async def run_writer(state: AgentState) -> dict:
             summary=updated_scene.summary,
         )
 
-    updated_script = script.model_copy(update={"scenes": updated_scenes})
+    updated_script = script.model_copy(update={
+        "scenes": updated_scenes,
+        "state_timeline": state_timeline,
+    })
     logger.info(f"Writer completed: dialogue written for {len(updated_scenes)} scenes")
 
     return {

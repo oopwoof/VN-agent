@@ -31,7 +31,7 @@ from vn_agent.agents.writer import (
 from vn_agent.config import get_settings
 from vn_agent.prompts.templates import WRITER_SYSTEM
 from vn_agent.schema.character import CharacterProfile
-from vn_agent.schema.script import VNScript
+from vn_agent.schema.script import StateTimelineEntry, VNScript
 
 logger = logging.getLogger(__name__)
 
@@ -129,12 +129,61 @@ async def regenerate_scene(
     # Splice the regenerated scene back into the script
     new_scenes = list(script.scenes)
     new_scenes[idx] = updated
-    new_script = script.model_copy(update={"scenes": new_scenes})
 
     # Apply state_writes to world_state snapshot for this scene
     scene_state_after = dict(world_state)
     for k, v in updated.state_writes.items():
         scene_state_after[k] = v
+
+    # Phase 13-1 / Step 2: hard-truncate state_timeline and chapters.
+    # Why hard-delete instead of warn-and-keep: leaving state_timeline[idx+1:]
+    # lets Writer's next call read polluted post-splice state (affinity,
+    # flags, items from the OLD branch of events). That's context poisoning.
+    # Creator who wants to preserve the old branch should snapshot the whole
+    # project directory (git commit or cp -r) rather than rely on in-place
+    # persistence. Downstream chapters that include any scene-id past idx
+    # are also dropped — their rollup references dialogue that no longer
+    # reflects the intended narrative.
+    new_timeline = list(script.state_timeline)[: idx + 1]
+    if len(new_timeline) <= idx:
+        # Timeline shorter than idx (edge case — e.g. old script without
+        # state_timeline field). Pad with empty entries up to idx, then replace.
+        while len(new_timeline) < idx:
+            missing_scene = script.scenes[len(new_timeline)]
+            new_timeline.append(StateTimelineEntry(
+                scene_id=missing_scene.id, state_after={},
+            ))
+        new_timeline.append(StateTimelineEntry(
+            scene_id=scene_id, state_after=dict(scene_state_after),
+        ))
+    else:
+        new_timeline[idx] = StateTimelineEntry(
+            scene_id=scene_id, state_after=dict(scene_state_after),
+        )
+    dropped_timeline = max(0, len(script.state_timeline) - (idx + 1))
+
+    kept_scene_ids = {s.id for s in new_scenes[: idx + 1]}
+    new_chapters = [
+        ch for ch in getattr(script, "chapters", [])
+        if all(sid in kept_scene_ids for sid in ch.scene_ids)
+    ] if hasattr(script, "chapters") else []
+    dropped_chapters = len(getattr(script, "chapters", [])) - len(new_chapters)
+
+    if dropped_timeline or dropped_chapters:
+        logger.warning(
+            f"local_regen at '{scene_id}' (idx={idx}): hard-truncated "
+            f"state_timeline (dropped {dropped_timeline} rows) "
+            f"and chapters (dropped {dropped_chapters}). "
+            f"Downstream scenes must be re-run to reflect changed state."
+        )
+
+    update_fields: dict = {
+        "scenes": new_scenes,
+        "state_timeline": new_timeline,
+    }
+    if hasattr(script, "chapters"):
+        update_fields["chapters"] = new_chapters
+    new_script = script.model_copy(update=update_fields)
 
     # Persist: updated vn_script.json + fresh snapshot
     script_path.write_text(

@@ -104,6 +104,21 @@ class Scene(BaseModel):
     )
 
 
+class StateTimelineEntry(BaseModel):
+    """One row in VNScript.state_timeline (Phase 13-1 Step 2).
+
+    state_after is the FULL world_state dict after this scene's state_writes
+    have been applied — not a delta. Caching the full snapshot makes
+    front-end rendering and debug inspection O(1) instead of O(N) fold.
+    """
+    scene_id: str = Field(description="Scene this snapshot captures the post-state of")
+    state_after: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Full world_state after the scene's state_writes merged in. "
+                    "Not a delta — complete snapshot.",
+    )
+
+
 class VNScript(BaseModel):
     title: str = Field(description="Visual novel title")
     description: str = Field(description="Story premise and overview")
@@ -122,4 +137,19 @@ class VNScript(BaseModel):
         description="Typed symbolic state declared by Director. "
                     "Read/written by scenes, enforced by DialogueReviewer, "
                     "emitted into Ren'Py $ var = value.",
+    )
+    # Phase 13-1 / Step 2: top-level state time series for long-form runs.
+    # Each entry captures world_state immediately AFTER scene N's state_writes
+    # have been applied. Appended by writer.run_writer after each scene
+    # completes, hard-truncated by local_regen on splice (see local_regen
+    # docstring). Linear (non-branch-aware) — branch DAG walker deferred.
+    #
+    # Redundant with fold(scenes[:N].state_writes) but explicit caching means
+    # (a) Web API / front-end renders without reconstructing, (b) debug tools
+    # can inspect state at scene N without replaying, (c) hard-truncate on
+    # splice prevents poisoned downstream entries from polluting Writer context.
+    state_timeline: list[StateTimelineEntry] = Field(
+        default_factory=list,
+        description="Per-scene world_state snapshots, post-state_writes. "
+                    "Appended by Writer, hard-truncated by local_regen on splice.",
     )
