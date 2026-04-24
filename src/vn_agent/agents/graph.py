@@ -15,6 +15,7 @@ from vn_agent.agents.scene_artist import run_scene_artist
 from vn_agent.agents.state import AgentState
 from vn_agent.agents.state_orchestrator import run_state_orchestrator
 from vn_agent.agents.structure_reviewer import run_structure_reviewer
+from vn_agent.agents.thinking import run_thinking_fanout
 from vn_agent.agents.writer import run_writer
 from vn_agent.config import get_settings
 from vn_agent.observability.tracing import get_trace
@@ -125,14 +126,19 @@ def _after_review(state: AgentState) -> str:
 def build_graph():  # type: ignore[return]
     """Build the full VN generation pipeline.
 
-    Topology (Sprint 9-6 state-aware):
-        director → structure_reviewer → state_orchestrator → writer → reviewer ─┬─ PASS → assets → END
-                                                               ↑                 ├─ FAIL → writer  (revision loop)
-                                                               └─────────────────┘  end  → END     (text_only)
+    Topology (Phase 13-2 Step 2: thinking_fanout in front of writer):
+        director → structure_reviewer → state_orchestrator → thinking_fanout
+            → writer → reviewer ─┬─ PASS → assets → END
+                                 ├─ FAIL → writer  (revision loop)
+                                 └─ end  → END     (text_only)
 
     - structure_reviewer (Sonnet): audits outline BEFORE writer — branch
       intent alignment, strategy distribution, narrative shape. Non-blocking
       by default; feedback lands in state for writer context and errors.
+    - thinking_fanout (Haiku, route-4 Step 2): per-scene creative planning
+      artifact. Gated off by default (enable_thinking_fanout) and by scene
+      count (thinking_fanout_min_scenes). No-op pass-through otherwise.
+      Step 4 will add parallel execution; step 3 will add cross_ref_sync.
     - reviewer (Haiku, Sprint 7-5 revert): audits dialogue AFTER writer —
       mechanical format + keyword + rubric checks.
 
@@ -151,17 +157,22 @@ def build_graph():  # type: ignore[return]
         "state_orchestrator",
         _make_traced_node("state_orchestrator", run_state_orchestrator),
     )
+    graph.add_node(  # type: ignore[call-overload]
+        "thinking_fanout",
+        _make_traced_node("thinking_fanout", run_thinking_fanout),
+    )
     graph.add_node("writer", _make_traced_node("writer", run_writer))  # type: ignore[call-overload]
     graph.add_node("reviewer", _make_traced_node("reviewer", run_reviewer))  # type: ignore[call-overload]
 
     # Parallel asset generation (3 sub-agents run concurrently inside one node)
     graph.add_node("asset_generation", _run_assets_parallel)  # type: ignore[call-overload]
 
-    # Linear flow: director → structure_reviewer → writer → reviewer
+    # Linear flow: director → structure → state → thinking → writer → reviewer
     graph.set_entry_point("director")
     graph.add_edge("director", "structure_reviewer")
     graph.add_edge("structure_reviewer", "state_orchestrator")
-    graph.add_edge("state_orchestrator", "writer")
+    graph.add_edge("state_orchestrator", "thinking_fanout")
+    graph.add_edge("thinking_fanout", "writer")
     graph.add_edge("writer", "reviewer")
 
     # Conditional: reviewer either approves (with text_only check), or sends back to writer
@@ -189,19 +200,28 @@ def create_pipeline():
 def build_writer_graph():  # type: ignore[return]
     """Sprint 12-3: resume-from-outline graph — skips Director/structure/state.
 
-    Entry at `writer`. Assumes vn_script, characters, world_state, and
-    state_constraints are pre-populated in state by the caller (loaded
-    from disk after a creator pauses-for-outline run). Same writer →
+    Entry at `thinking_fanout` (Phase 13-2 Step 2) so the resumed pipeline
+    still plans scenes before writing. thinking_fanout is gated off by
+    default, so this is a no-op pass-through for short runs.
+
+    Assumes vn_script, characters, world_state, and state_constraints are
+    pre-populated in state by the caller (loaded from disk after a
+    creator pauses-for-outline run). Same thinking → writer →
     reviewer → (revise|assets|end) topology as the full graph so
     revision loops and text_only still work identically.
     """
     graph = StateGraph(AgentState)  # type: ignore[type-var]
 
+    graph.add_node(  # type: ignore[call-overload]
+        "thinking_fanout",
+        _make_traced_node("thinking_fanout", run_thinking_fanout),
+    )
     graph.add_node("writer", _make_traced_node("writer", run_writer))  # type: ignore[call-overload]
     graph.add_node("reviewer", _make_traced_node("reviewer", run_reviewer))  # type: ignore[call-overload]
     graph.add_node("asset_generation", _run_assets_parallel)  # type: ignore[call-overload]
 
-    graph.set_entry_point("writer")
+    graph.set_entry_point("thinking_fanout")
+    graph.add_edge("thinking_fanout", "writer")
     graph.add_edge("writer", "reviewer")
     graph.add_conditional_edges(
         "reviewer",

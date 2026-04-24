@@ -198,6 +198,18 @@ class Settings(BaseSettings):
     chapter_rollup_min_scenes: int = 10   # below this, skip — short demos unaffected
     rollup_target_min_words: int = 200
     rollup_target_max_words: int = 800
+
+    # Phase 13-2 Step 2 (route 4): thinking_fanout — per-scene Haiku
+    # planning pass between state_orchestrator and writer. Produces
+    # structured SceneThinking artifacts that Step 4 will hand to
+    # parallel Writer workers for coordination. Default OFF because
+    # Step 2 is validating thinking quality before turning it on by
+    # default; flip to True when Step 4 parallel writing lands.
+    # min_scenes gate keeps 6-scene demos from paying Haiku cost they
+    # don't benefit from (thinking matters most for 10+ scene runs).
+    enable_thinking_fanout: bool = False
+    thinking_fanout_min_scenes: int = 10
+    llm_thinking_model: str = "claude-haiku-4-5-20251001"
     embedding_model: str = "all-MiniLM-L6-v2"
     embedding_index_path: str = ""  # pre-built index dir; empty = build on-the-fly
 

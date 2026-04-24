@@ -8,6 +8,7 @@ from vn_agent.schema.script import (
     MacroReference,
     Scene,
     SceneBrief,
+    SceneThinking,
     VNScript,
 )
 
@@ -261,3 +262,75 @@ class TestVNScriptMacroReference:
         assert revived.macro_reference is not None
         assert revived.macro_reference.theme_thesis == "x"
         assert revived.macro_reference.character_voice_charter == {"a": "brief"}
+
+
+# ---------------------------------------------------------------------------
+# Phase 13-2 Step 2 (route 4): SceneThinking — pre-write planning artifact.
+# ---------------------------------------------------------------------------
+
+
+class TestSceneThinking:
+    def test_all_defaults_empty_valid(self):
+        t = SceneThinking()
+        assert t.writing_intent == ""
+        assert t.key_beats_expanded == []
+        assert t.callback_plan == []
+        assert t.opening_hook == ""
+        assert t.closing_beat == ""
+        assert t.voice_notes == {}
+        assert t.risks == []
+
+    def test_full_populated(self):
+        t = SceneThinking(
+            writing_intent="resolve the father's watch callback with restraint",
+            key_beats_expanded=[
+                "yui holds the watch — first time since s01",
+                "ren sees it, says nothing",
+                "the lamp catches the second hand's reflection",
+            ],
+            callback_plan=[
+                {"ref_scene_id": "s01", "what_lands": "reveal that the watch stopped the night he died"},
+            ],
+            opening_hook="waves hitting the lantern room — rhythm Wider than speech",
+            closing_beat="yui pockets the watch without looking at ren; cuts to black",
+            voice_notes={"yui": "tighter cadence — she's guarding"},
+            risks=["don't over-explain the watch; subtext only"],
+        )
+        assert t.writing_intent.startswith("resolve")
+        assert len(t.key_beats_expanded) == 3
+        assert t.callback_plan[0]["ref_scene_id"] == "s01"
+
+    def test_key_beats_expanded_capped_at_8(self):
+        t = SceneThinking(key_beats_expanded=[f"beat {i}" for i in range(15)])
+        assert len(t.key_beats_expanded) == 8
+
+    def test_risks_capped_at_6(self):
+        t = SceneThinking(risks=[f"risk {i}" for i in range(10)])
+        assert len(t.risks) == 6
+
+    def test_writing_intent_max_length(self):
+        with pytest.raises(ValidationError):
+            SceneThinking(writing_intent="x" * 400)
+
+
+class TestSceneThinkingOnScene:
+    def test_scene_thinking_default_none(self):
+        scene = Scene(
+            id="s1", title="t", description="d", background_id="bg",
+        )
+        assert scene.thinking is None
+
+    def test_scene_thinking_nested_round_trip(self):
+        """Scene with SceneThinking survives JSON round-trip."""
+        scene = Scene(
+            id="s1", title="t", description="d", background_id="bg",
+            thinking=SceneThinking(
+                writing_intent="open with silence",
+                key_beats_expanded=["pause", "look", "speak"],
+            ),
+        )
+        payload = scene.model_dump_json()
+        revived = Scene.model_validate_json(payload)
+        assert revived.thinking is not None
+        assert revived.thinking.writing_intent == "open with silence"
+        assert revived.thinking.key_beats_expanded == ["pause", "look", "speak"]

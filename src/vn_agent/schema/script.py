@@ -129,6 +129,74 @@ class SceneBrief(BaseModel):
         return list(v)[:5]
 
 
+class SceneThinking(BaseModel):
+    """Phase 13-2 Step 2 (路线四): per-scene creative planning artifact.
+
+    Produced by the `thinking_fanout` node (Haiku-level, sequential for
+    now — Step 4 moves to parallel). The job of a thinking worker is to
+    read scene_brief + context_deps + prior-scene summaries + macro_reference
+    and emit a STRUCTURED plan that later Writer workers can coordinate on.
+
+    This is intentionally NOT dialogue. The whole point of decoupling
+    thinking from writing is to let workers "see what each other plan to
+    write" before any dialogue commits — eliminates the two-worker-
+    plants-the-same-callback problem that naive parallel writing hits.
+
+    Step 3 (`cross_ref_sync`) will give workers one chance to amend their
+    thinking after seeing peers'; Step 4 (`writing_fanout`) freezes thinking
+    and fans Sonnet writers out in parallel.
+    """
+    writing_intent: str = Field(
+        default="", max_length=300,
+        description="One sentence on what this scene is TRYING to achieve "
+                    "narratively/emotionally. Drives voice + pacing choices.",
+    )
+    key_beats_expanded: list[str] = Field(
+        default_factory=list,
+        description="Expanded beat descriptions (≤120 chars each). Adds "
+                    "subtext / causality beyond scene_brief.beats shorthand.",
+    )
+    callback_plan: list[dict] = Field(
+        default_factory=list,
+        description="Explicit callback slots {ref_scene_id: str, "
+                    "what_lands: str}. Must match scene.context_deps "
+                    "(StructureReviewer-validated at plan time); thinking "
+                    "phase just plans HOW each callback will land.",
+    )
+    opening_hook: str = Field(
+        default="", max_length=200,
+        description="How the scene opens — one line of stage direction or "
+                    "action that sets tone.",
+    )
+    closing_beat: str = Field(
+        default="", max_length=200,
+        description="How the scene ends — the last emotional chord, "
+                    "transition into next scene's entry_context.",
+    )
+    voice_notes: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-character voice reminders SPECIFIC to this scene "
+                    "(e.g. {'yui': 'tighter cadence here — she's guarding'}). "
+                    "Layered on top of macro_reference.character_voice_charter.",
+    )
+    risks: list[str] = Field(
+        default_factory=list,
+        description="Known failure modes Writer should avoid (e.g. 'don't "
+                    "over-explain the watch — subtext only'). Harvested from "
+                    "scene_brief.subtext_notes + macro_reference.tone_register.",
+    )
+
+    @field_validator("key_beats_expanded")
+    @classmethod
+    def _cap_beats(cls, v: list[str]) -> list[str]:
+        return list(v)[:8]
+
+    @field_validator("risks")
+    @classmethod
+    def _cap_risks(cls, v: list[str]) -> list[str]:
+        return list(v)[:6]
+
+
 class BranchOption(BaseModel):
     text: str = Field(description="Choice text shown to player")
     next_scene_id: str = Field(description="Scene to jump to when this option is chosen")
@@ -244,6 +312,15 @@ class Scene(BaseModel):
         description="Frozen copy of state_constraints (StateOrchestrator "
                     "output) as Writer saw it when writing this scene. "
                     "None when no state constraints were active.",
+    )
+    # Phase 13-2 Step 2 (route 4): per-scene thinking plan produced by
+    # thinking_fanout before Writer runs. Later (Step 4) Writer workers
+    # consume this to coordinate voice/callbacks across parallel writes.
+    # Optional — runs only when enable_thinking_fanout + scene count ≥ min.
+    thinking: SceneThinking | None = Field(
+        default=None,
+        description="Pre-write creative plan (thinking_fanout output). "
+                    "Consumed by parallel Writer workers in route-4 Step 4.",
     )
 
 
