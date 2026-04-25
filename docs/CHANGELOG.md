@@ -15,6 +15,34 @@
 
 ## [Unreleased]
 
+### 2026-04-24 | 实现 - 2026-04-24 22:20
+
+**变更文件** (5 个):
+**源码变更** (2 文件):
+  - `src/vn_agent/agents/state.py`
+  - `src/vn_agent/agents/structure_reviewer.py`
+
+**测试变更** (2 文件):
+  - `tests/test_agents/test_narrative_graph.py`
+  - `tests/test_agents/test_structure_reviewer.py`
+
+**其他变更** (1 文件):
+  - `scripts/smoke_longvn.py`
+
+**变更统计**:
+```
+scripts/smoke_longvn.py                      |  16 +-
+ src/vn_agent/agents/state.py                 |  19 +-
+ src/vn_agent/agents/structure_reviewer.py    | 479 +++++++++++++++++++--------
+ tests/test_agents/test_narrative_graph.py    |  44 ++-
+ tests/test_agents/test_structure_reviewer.py | 392 ++++++++++++++++++++++
+ 5 files changed, 789 insertions(+), 161 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-24 | 实现 - 2026-04-24 21:44
 
 **变更文件** (3 个):

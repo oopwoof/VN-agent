@@ -7,7 +7,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
 from vn_agent.schema.character import CharacterProfile
-from vn_agent.schema.script import VNScript
+from vn_agent.schema.script import StructureFinding, VNScript
 
 
 class AgentState(dict):
@@ -39,13 +39,25 @@ class AgentState(dict):
     review_scores: dict | None
     # Sprint 7-5: structure-reviewer (pre-Writer audit) results. Informational
     # for Writer context, non-blocking by default.
+    # Phase 13-2 Step 4e: structured findings (typed categories) populated
+    # alongside the legacy issues list. routing.decide_retry_target consumes
+    # findings to decide whether Director should re-run.
     structure_review_passed: bool
     structure_review_feedback: str
-    structure_review_issues: list[str]
+    structure_review_issues: list[str]              # legacy: just messages
+    structure_review_findings: list[StructureFinding]  # NEW: categorized
+    # Phase 13-2 Step 4e: how many Director retries triggered by
+    # structure_reviewer findings have already happened. Capped at
+    # settings.max_director_revisions.
+    director_revision_count: int
     assets_generated: bool
     output_dir: str
     messages: Annotated[list[BaseMessage], add_messages]
     errors: list[str]
+    # Phase 13-2 Step 4e: non-blocking findings (advisory + post-budget
+    # un-fixable). Smoke harness reports these separately from `errors`
+    # so a [PASS] run with structural warnings doesn't read as a failure.
+    warnings: list[str]
     text_only: bool
     max_scenes: int
     num_characters: int
@@ -83,10 +95,13 @@ def initial_state(
         "structure_review_passed": False,
         "structure_review_feedback": "",
         "structure_review_issues": [],
+        "structure_review_findings": [],
+        "director_revision_count": 0,
         "assets_generated": False,
         "output_dir": output_dir,
         "messages": [],
         "errors": [],
+        "warnings": [],
         "text_only": text_only,
         "max_scenes": max_scenes,
         "num_characters": num_characters,

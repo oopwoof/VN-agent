@@ -16,27 +16,55 @@ Two audits:
      consequence (e.g. "Read aloud" → quiet-ascent scene instead of
      confrontation scene).
 
-Non-blocking by default: issues land as warnings in state["errors"]. Blocking
-failure only when settings.structure_review_strict=True and multiple issues
-found — lets us catch regressions during sweeps without stopping on every
-soft warning.
+Phase 13-2 Step 4e (Gemini smoke-review #C reframed):
+  - Findings now emit as schema.script.StructureFinding (typed category +
+    source + requires_retry) instead of plain strings. routing.py reads
+    these to decide whether Director should re-run, and which step.
+  - Non-advisory findings flow to state["warnings"] (NEW), no longer
+    polluting state["errors"]. Pre-Step-4e runs reported "7 errors but
+    [PASS]" in run_metrics.json — confusing because they were warnings.
+  - Legacy state["structure_review_issues"] (list[str]) is preserved for
+    Writer's existing prompt-context path; it's just `[f.message for f
+    in findings]` now.
 
 Output:
   state["structure_review_passed"]: bool
   state["structure_review_feedback"]: str summary
-  state["structure_review_issues"]: list[str]
+  state["structure_review_issues"]: list[str]              # legacy (messages)
+  state["structure_review_findings"]: list[StructureFinding]  # NEW
+  state["warnings"]: list[str]                             # NEW (was state["errors"])
 """
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from vn_agent.agents.state import AgentState
 from vn_agent.config import get_settings
-from vn_agent.schema.script import VNScript
+from vn_agent.schema.script import StructureFinding, VNScript
 from vn_agent.services.llm import ainvoke_llm
 from vn_agent.strategies.narrative import DATASET_ALIGNED, StrategyType
+
+# Valid category strings (mirror StructureFindingCategory Literal). Used to
+# clamp LLM output: if the model emits an unknown category we fall back to
+# "advisory" instead of failing the whole audit.
+_VALID_CATEGORIES = frozenset({
+    "roster_unused",
+    "world_var_unused",
+    "macro_pacing_misaligned",
+    "foreshadow_payoff_missing",
+    "branch_target_invalid",
+    "unreachable_scene",
+    "branch_dead_end",
+    "branch_intent_misalign",
+    "strategy_distribution_gap",
+    "branch_bypass",
+    "tone_inconsistent",
+    "world_var_undeclared_use",
+    "character_undeclared_use",
+    "advisory",
+})
 
 logger = logging.getLogger(__name__)
 
@@ -80,12 +108,37 @@ Return JSON with exactly this shape:
   "verdict": "PASS" | "FAIL",
   "branch_alignment_score": <0.0-1.0 fraction of branches that align>,
   "aligned_branches": [{{"scene_id": "...", "branch_text": "...", "aligned": true|false, "reason": "..."}}],
-  "narrative_issues": ["one issue per string, max 5"],
+  "narrative_findings": [
+    {{
+      "category": "<see Category guidance below>",
+      "message": "concrete one-line description of the issue",
+      "requires_retry": true | false,
+      "target_scene_id": "<scene id this concerns, or null>"
+    }}
+  ],
   "summary": "one-sentence overall assessment"
 }}
 
+## Category guidance
+
+- `branch_intent_misalign`: branch text's implied consequence contradicts
+  the target scene's content. Set requires_retry=true.
+- `strategy_distribution_gap`: a critical narrative beat type is missing
+  or only reachable on some paths. Set requires_retry=true.
+- `branch_bypass`: a branch path skips a strategically critical scene.
+  Set requires_retry=true.
+- `tone_inconsistent`: scene contradicts macro_reference's voice charter.
+  Set requires_retry=true.
+- `macro_pacing_misaligned`: declared pacing arc doesn't match scene
+  distribution. Set requires_retry=true. (Step1 layer.)
+- `foreshadow_payoff_missing`: declared foreshadow has no payoff scene.
+  Set requires_retry=true. (Step1 layer.)
+- `advisory`: subjective stylistic concern that would NOT be reliably
+  fixed by re-rolling Director. Set requires_retry=false. Use sparingly
+  — most narrative critiques should pick a concrete category.
+
 Verdict rules:
-- PASS if branch_alignment_score >= 0.8 AND narrative_issues has <=1 entry
+- PASS if branch_alignment_score >= 0.8 AND no findings have requires_retry=true
 - FAIL otherwise
 
 No markdown, no <thinking> tags in the final output. Return JSON only."""
@@ -95,9 +148,16 @@ No markdown, no <thinking> tags in the final output. Return JSON only."""
 class StructureReviewResult:
     passed: bool
     feedback: str
-    issues: list[str]
+    findings: list[StructureFinding] = field(default_factory=list)
     branch_alignment_score: float | None = None
     aligned_branches: list[dict] | None = None
+
+    @property
+    def issues(self) -> list[str]:
+        """Legacy view: just the message strings. Used by Writer's prompt
+        context block (structure_feedback section) which was already
+        consuming `state["structure_review_issues"]` pre-Step-4e."""
+        return [f.message for f in self.findings]
 
 
 async def run_structure_reviewer(state: AgentState) -> dict:
@@ -109,6 +169,7 @@ async def run_structure_reviewer(state: AgentState) -> dict:
             "structure_review_passed": True,
             "structure_review_feedback": "skipped (no script)",
             "structure_review_issues": [],
+            "structure_review_findings": [],
         }
 
     settings = get_settings()
@@ -122,12 +183,16 @@ async def run_structure_reviewer(state: AgentState) -> dict:
             "structure_review_passed": True,
             "structure_review_feedback": "trivial outline, skipped",
             "structure_review_issues": [],
+            "structure_review_findings": [],
         }
 
     # ── Cheap local checks first (no LLM cost) ─────────────────────────────
-    local_issues = _local_structural_audit(script, state.get("characters", {}))
-    if local_issues and logger.isEnabledFor(logging.INFO):
-        logger.info(f"StructureReviewer local issues: {local_issues[:3]}")
+    local_findings = _local_structural_audit(script, state.get("characters", {}))
+    if local_findings and logger.isEnabledFor(logging.INFO):
+        logger.info(
+            f"StructureReviewer local findings: "
+            f"{[f'{f.category}:{f.message[:40]}' for f in local_findings[:3]]}"
+        )
 
     # ── LLM-backed intent-alignment + narrative shape audit ────────────────
     user_prompt = _build_audit_prompt(script, state.get("characters", {}))
@@ -139,108 +204,138 @@ async def run_structure_reviewer(state: AgentState) -> dict:
             caller="structure_reviewer",
         )
         content = response.content if hasattr(response, "content") else str(response)
-        result = _parse_audit(content, local_issues)
+        result = _parse_audit(content, local_findings)
     except Exception as e:
         logger.warning(f"StructureReviewer LLM call failed: {e} — passing through")
         return {
             "structure_review_passed": True,
             "structure_review_feedback": f"LLM audit failed: {e}",
-            "structure_review_issues": local_issues,
+            "structure_review_issues": [f.message for f in local_findings],
+            "structure_review_findings": local_findings,
         }
 
     if result.passed:
         logger.info(
             f"StructureReviewer PASS: alignment={result.branch_alignment_score}, "
-            f"issues={len(result.issues)}"
+            f"findings={len(result.findings)}"
         )
     else:
         logger.warning(
             f"StructureReviewer FAIL: alignment={result.branch_alignment_score}, "
-            f"issues={result.issues[:3]}"
+            f"findings={[f.category for f in result.findings[:5]]}"
         )
 
-    # Persist to state. Reviewer feedback will be visible to Writer as
-    # `structure_feedback` in the prompt.
-    errors = list(state.get("errors", []))
-    for issue in result.issues:
-        errors.append(f"StructureReviewer: {issue}")
+    # Phase 13-2 Step 4e: warnings go to state["warnings"], NOT state["errors"].
+    # state["errors"] is reserved for hard pipeline failures; structural
+    # audit findings are advisory/retry-eligible by design. Keeping the two
+    # separate fixes the smoke harness's confusing "[PASS] but 7 errors"
+    # display (Gemini smoke-review #C reframed).
+    warnings = list(state.get("warnings", []))
+    for f in result.findings:
+        warnings.append(f"StructureReviewer[{f.category}]: {f.message}")
 
     return {
         "structure_review_passed": result.passed,
         "structure_review_feedback": result.feedback,
-        "structure_review_issues": result.issues,
+        "structure_review_issues": [f.message for f in result.findings],  # legacy
+        "structure_review_findings": result.findings,                     # NEW
         "structure_review_alignment_score": result.branch_alignment_score,
         "structure_review_aligned_branches": result.aligned_branches,
-        "errors": errors,
+        "warnings": warnings,
     }
 
 
 def _local_structural_audit(
     script: VNScript, characters: dict
-) -> list[str]:
-    """Cheap pre-LLM checks — catch obvious defects without a Sonnet call."""
-    issues: list[str] = []
+) -> list[StructureFinding]:
+    """Cheap pre-LLM checks — catch obvious defects without a Sonnet call.
+
+    Phase 13-2 Step 4e: returns StructureFinding[] with typed categories
+    so routing.decide_retry_target can act on them. All findings here are
+    source="deterministic" (pure-Python static checks; ~0% false positives).
+    """
+    findings: list[StructureFinding] = []
 
     if not script.scenes:
-        issues.append("script has zero scenes")
-        return issues
+        # Defensive: structure_reviewer's caller already short-circuits
+        # on missing script, but if we get here something's badly wrong.
+        findings.append(StructureFinding(
+            category="advisory", source="deterministic",
+            message="script has zero scenes",
+            requires_retry=False,
+        ))
+        return findings
 
-    # 1. Unreachable / dangling scenes already caught by Sprint 6-6 in Director.
-    # Here we just verify character efficiency.
+    # 1. Roster efficiency — characters declared in step1 but unused in
+    # any scene. STEP1_CATEGORIES per routing.py: triggers step1+step2
+    # escalation immediately (per Gemini design review #c — forcing step2
+    # to inject a forced cameo degrades narrative quality).
     if characters:
         used_chars = {
             cid for scene in script.scenes for cid in scene.characters_present
         }
         unused = set(characters.keys()) - used_chars
         if unused:
-            issues.append(
-                f"characters defined but never used in any scene: {sorted(unused)}"
-            )
+            findings.append(StructureFinding(
+                category="roster_unused", source="deterministic",
+                message=(
+                    f"characters defined but never used in any scene: "
+                    f"{sorted(unused)}"
+                ),
+            ))
 
-    # 2. Strategy variety: if every scene has the same strategy, the arc is flat.
+    # 2. Strategy variety: flat arc.
     strategies = [s.narrative_strategy for s in script.scenes if s.narrative_strategy]
     if strategies and len(set(strategies)) == 1 and len(strategies) >= 3:
-        issues.append(
-            f"all {len(strategies)} scenes use the same strategy "
-            f"'{strategies[0]}' — arc is flat"
-        )
+        findings.append(StructureFinding(
+            category="strategy_distribution_gap", source="deterministic",
+            message=(
+                f"all {len(strategies)} scenes use the same strategy "
+                f"'{strategies[0]}' — arc is flat"
+            ),
+        ))
 
-    # 2b. Strategy diversity for longer scripts: need at least 3 distinct
-    # strategies if there are 5+ scenes, otherwise the narrative arc is thin
-    # regardless of which single strategy is over-represented.
+    # 2b. Strategy diversity for longer scripts.
     if len(strategies) >= 5 and len(set(strategies)) < 3:
-        issues.append(
-            f"{len(strategies)} scenes but only "
-            f"{len(set(strategies))} distinct strategies — "
-            f"arc lacks beginning/middle/end contrast"
-        )
+        findings.append(StructureFinding(
+            category="strategy_distribution_gap", source="deterministic",
+            message=(
+                f"{len(strategies)} scenes but only "
+                f"{len(set(strategies))} distinct strategies — "
+                f"arc lacks beginning/middle/end contrast"
+            ),
+        ))
 
-    # 2c. Emotional arc shape: expect a "rising" or "rising-falling" shape.
-    # Sprint 7-5b heuristic: if the LAST scene's strategy is one of the
-    # "early" strategies (drift/accumulate) with no resolution-style ending
-    # anywhere, the story has no landing.
+    # 2c. Emotional arc shape: rising or rising-falling expected.
     early_strategies = {"drift", "accumulate"}
     ending_strategies = {"resolve", "uncover", "rupture"}
     if len(strategies) >= 4:
         last = strategies[-1]
         has_ending = any(s in ending_strategies for s in strategies)
         if last in early_strategies and not has_ending:
-            issues.append(
-                f"final scene strategy '{last}' is an opening-type "
-                f"strategy and no ending-type strategy (resolve/uncover/"
-                f"rupture) appears anywhere — story has no landing"
-            )
+            findings.append(StructureFinding(
+                category="strategy_distribution_gap", source="deterministic",
+                message=(
+                    f"final scene strategy '{last}' is an opening-type "
+                    f"strategy and no ending-type strategy (resolve/uncover/"
+                    f"rupture) appears anywhere — story has no landing"
+                ),
+            ))
 
-    # 3. Sprint 6-13 tag: if Director emits a non-enum strategy value,
-    # downstream Writer/Reviewer/Judge all get confused (see "branch"
-    # hallucination in sweep cell vn_20260413_194624).
+    # 3. Non-canonical strategy values. Director typo would re-typo on
+    # retry, so mark advisory (don't retry).
     valid = {s.value for s in StrategyType}
     for scene in script.scenes:
         if scene.narrative_strategy and scene.narrative_strategy not in valid:
-            issues.append(
-                f"scene '{scene.id}' has non-canonical strategy "
-                f"'{scene.narrative_strategy}' (not in StrategyType enum)"
-            )
+            findings.append(StructureFinding(
+                category="advisory", source="deterministic",
+                message=(
+                    f"scene '{scene.id}' has non-canonical strategy "
+                    f"'{scene.narrative_strategy}' (not in StrategyType enum)"
+                ),
+                requires_retry=False,
+                target_scene_id=scene.id,
+            ))
 
     # 4. Note for downstream: flag generation-only strategies so humans can
     # spot cases where RAG fallback behavior may be in play.
@@ -256,28 +351,23 @@ def _local_structural_audit(
         )
 
     # 5. Phase 13-1 / Step 5: narrative graph validation.
-    issues.extend(_check_context_deps(script, characters))
+    findings.extend(_check_context_deps(script, characters))
 
-    return issues
+    return findings
 
 
-def _check_context_deps(script: VNScript, characters: dict) -> list[str]:
+def _check_context_deps(script: VNScript, characters: dict) -> list[StructureFinding]:
     """Phase 13-1 / Step 5: validate Director-emitted SceneContextRef entries.
 
-    Rules (all violations emit non-fatal structure_feedback, consistent with
-    the agent's non-blocking philosophy — errors flow to Writer prompt so
-    it can be cautious, not reject the script outright):
-      - ref_id must point to an existing entity (scene / character / world_var /
-        location / motif)
-      - Scene refs are BACKWARD-only: scene_5 → scene_1..4 OK, → scene_5 or
-        scene_6+ rejected. Prevents forward-looking deps that would make the
-        dependency graph contain cycles or future-knowledge leakage.
-      - state_dependency link_type requires that ref_id (a world_var name
-        without the "world_var:" prefix) also appears in the scene's
-        state_reads list. Keeps symbolic-state semantics coherent with graph
-        semantics.
+    Phase 13-2 Step 4e: returns StructureFinding[] with categories so
+    routing.py can decide which Director step needs to retry. Most
+    findings here map to step2-class categories (per-scene context_dep
+    is a step2 product). world_var refs to unknown vars map to
+    `world_var_undeclared_use` (step2 — scene declared a var the
+    declarations don't include, fix is in step2 by removing the use OR
+    adding the var to step1; we route to step2_only by default).
     """
-    errors: list[str] = []
+    findings: list[StructureFinding] = []
 
     scene_id_to_index: dict[str, int] = {
         s.id: i for i, s in enumerate(script.scenes)
@@ -293,59 +383,100 @@ def _check_context_deps(script: VNScript, characters: dict) -> list[str]:
         for dep in deps:
             # Self-ref check (scene → itself)
             if dep.ref_type == "scene" and dep.ref_id == scene.id:
-                errors.append(
-                    f"scene '{scene.id}': context_dep ref_id='{dep.ref_id}' "
-                    f"self-references — backward-only graph forbids self-loops"
-                )
+                findings.append(StructureFinding(
+                    category="advisory", source="deterministic",
+                    message=(
+                        f"scene '{scene.id}': context_dep ref_id='{dep.ref_id}' "
+                        f"self-references — backward-only graph forbids "
+                        f"self-loops"
+                    ),
+                    requires_retry=False,
+                    target_scene_id=scene.id,
+                ))
                 continue
 
             # ref_id existence + backward-only enforcement by ref_type
             if dep.ref_type == "scene":
                 target_idx = scene_id_to_index.get(dep.ref_id)
                 if target_idx is None:
-                    errors.append(
-                        f"scene '{scene.id}': context_dep ref_id='{dep.ref_id}' "
-                        f"points to unknown scene"
-                    )
+                    findings.append(StructureFinding(
+                        category="branch_target_invalid",
+                        source="deterministic",
+                        message=(
+                            f"scene '{scene.id}': context_dep ref_id="
+                            f"'{dep.ref_id}' points to unknown scene"
+                        ),
+                        target_scene_id=scene.id,
+                    ))
                 elif target_idx >= scene_idx:
-                    errors.append(
-                        f"scene '{scene.id}': context_dep ref_id='{dep.ref_id}' "
-                        f"is forward/same-scene (target idx {target_idx} ≥ "
-                        f"current {scene_idx}) — graph must be backward-only"
-                    )
+                    findings.append(StructureFinding(
+                        category="advisory", source="deterministic",
+                        message=(
+                            f"scene '{scene.id}': context_dep ref_id="
+                            f"'{dep.ref_id}' is forward/same-scene "
+                            f"(target idx {target_idx} ≥ current "
+                            f"{scene_idx}) — graph must be backward-only"
+                        ),
+                        requires_retry=False,
+                        target_scene_id=scene.id,
+                    ))
             elif dep.ref_type == "character_arc":
-                # Strip "character:" prefix per schema doc
                 cid = dep.ref_id.split(":", 1)[1] if ":" in dep.ref_id else dep.ref_id
                 if cid not in valid_character_ids:
-                    errors.append(
-                        f"scene '{scene.id}': context_dep ref_id='{dep.ref_id}' "
-                        f"points to unknown character"
-                    )
+                    findings.append(StructureFinding(
+                        category="character_undeclared_use",
+                        source="deterministic",
+                        message=(
+                            f"scene '{scene.id}': context_dep ref_id="
+                            f"'{dep.ref_id}' points to unknown character"
+                        ),
+                        target_scene_id=scene.id,
+                        target_character_id=cid,
+                    ))
             elif dep.ref_type == "world_var":
                 var_name = dep.ref_id.split(":", 1)[1] if ":" in dep.ref_id else dep.ref_id
                 if var_name not in valid_world_var_names:
-                    errors.append(
-                        f"scene '{scene.id}': context_dep ref_id='{dep.ref_id}' "
-                        f"points to unknown world_variable"
-                    )
+                    findings.append(StructureFinding(
+                        category="world_var_undeclared_use",
+                        source="deterministic",
+                        message=(
+                            f"scene '{scene.id}': context_dep ref_id="
+                            f"'{dep.ref_id}' points to unknown world_variable"
+                        ),
+                        target_scene_id=scene.id,
+                    ))
                 # state_dependency must also be in state_reads
-                if dep.link_type == "state_dependency" and var_name not in (scene.state_reads or []):
-                    errors.append(
-                        f"scene '{scene.id}': context_dep link_type="
-                        f"'state_dependency' for '{var_name}' but it is not "
-                        f"in scene.state_reads — symbolic state must agree "
-                        f"with graph declaration"
-                    )
+                if (
+                    dep.link_type == "state_dependency"
+                    and var_name not in (scene.state_reads or [])
+                ):
+                    findings.append(StructureFinding(
+                        category="advisory", source="deterministic",
+                        message=(
+                            f"scene '{scene.id}': context_dep link_type="
+                            f"'state_dependency' for '{var_name}' but it is "
+                            f"not in scene.state_reads — symbolic state must "
+                            f"agree with graph declaration"
+                        ),
+                        requires_retry=False,
+                        target_scene_id=scene.id,
+                    ))
             elif dep.ref_type == "location":
                 bg_id = dep.ref_id.split(":", 1)[1] if ":" in dep.ref_id else dep.ref_id
                 if bg_id not in valid_location_ids:
-                    errors.append(
-                        f"scene '{scene.id}': context_dep ref_id='{dep.ref_id}' "
-                        f"points to unknown location/background_id"
-                    )
+                    findings.append(StructureFinding(
+                        category="advisory", source="deterministic",
+                        message=(
+                            f"scene '{scene.id}': context_dep ref_id="
+                            f"'{dep.ref_id}' points to unknown "
+                            f"location/background_id"
+                        ),
+                        requires_retry=False,
+                        target_scene_id=scene.id,
+                    ))
             # motif has no registry yet — Director invents them; accept any id
 
-    return errors
+    return findings
 
 
 def _build_audit_prompt(script: VNScript, characters: dict) -> str:
@@ -378,8 +509,47 @@ def _build_audit_prompt(script: VNScript, characters: dict) -> str:
     )
 
 
-def _parse_audit(content: str, local_issues: list[str]) -> StructureReviewResult:
-    """Extract JSON verdict. Falls back to local-only issues on parse fail."""
+def _normalize_finding_dict(d: dict) -> StructureFinding | None:
+    """Coerce an LLM-emitted dict into a StructureFinding. Unknown
+    categories fall back to 'advisory' rather than raising — Sonnet
+    sometimes invents labels and we'd rather log than fail the audit."""
+    msg = (d.get("message") or "").strip()
+    if not msg:
+        return None
+    category = (d.get("category") or "advisory").strip().lower()
+    if category not in _VALID_CATEGORIES:
+        logger.debug(
+            f"StructureReviewer: unknown LLM category '{category}', "
+            f"falling back to 'advisory'"
+        )
+        category = "advisory"
+    requires_retry = bool(d.get("requires_retry", category != "advisory"))
+    target_scene_id = d.get("target_scene_id")
+    if target_scene_id == "null" or target_scene_id == "":
+        target_scene_id = None
+    return StructureFinding(
+        category=category,  # type: ignore[arg-type]
+        source="llm",
+        message=msg,
+        requires_retry=requires_retry,
+        target_scene_id=target_scene_id,
+    )
+
+
+def _parse_audit(
+    content: str, local_findings: list[StructureFinding],
+) -> StructureReviewResult:
+    """Extract JSON verdict. Falls back to local-only findings on parse fail.
+
+    Phase 13-2 Step 4e: returns StructureFinding[] (categorized) instead
+    of plain strings. LLM-emitted findings get source="llm"; local pre-
+    checks already arrived as source="deterministic".
+
+    Backwards-compat: if the LLM emits the legacy `narrative_issues`
+    (list[str]) instead of `narrative_findings` (list[dict]), each
+    string becomes an "advisory" finding so we don't lose the signal.
+    Sonnet drift in either direction is tolerated.
+    """
     import re
     content = content.strip()
     # Strip common wrappers
@@ -394,43 +564,72 @@ def _parse_audit(content: str, local_issues: list[str]) -> StructureReviewResult
             try:
                 data, _ = json.JSONDecoder().raw_decode(content, start)
             except json.JSONDecodeError:
-                logger.warning("StructureReviewer: JSON parse failed, using local checks only")
+                logger.warning(
+                    "StructureReviewer: JSON parse failed, using local "
+                    "checks only"
+                )
                 return StructureReviewResult(
-                    passed=not local_issues,
+                    passed=not any(f.requires_retry for f in local_findings),
                     feedback="LLM audit JSON unparseable",
-                    issues=local_issues,
+                    findings=local_findings,
                 )
         else:
             return StructureReviewResult(
-                passed=not local_issues,
+                passed=not any(f.requires_retry for f in local_findings),
                 feedback="LLM returned no JSON",
-                issues=local_issues,
+                findings=local_findings,
             )
 
     verdict = (data.get("verdict") or "").upper().strip()
-    narrative_issues = data.get("narrative_issues") or []
     summary = data.get("summary") or ""
     alignment_score = data.get("branch_alignment_score")
     aligned_branches = data.get("aligned_branches") or []
 
-    # Misaligned branches as discrete issues so Writer sees them
-    misaligned = [
-        b for b in aligned_branches
-        if isinstance(b, dict) and b.get("aligned") is False
-    ]
-    for m in misaligned:
-        narrative_issues.append(
-            f"branch intent misaligned in scene '{m.get('scene_id', '?')}': "
-            f"'{m.get('branch_text', '?')[:60]}' — {m.get('reason', '')[:120]}"
-        )
+    # Preferred new shape: narrative_findings (list of dicts with category)
+    llm_findings: list[StructureFinding] = []
+    raw_findings = data.get("narrative_findings")
+    if isinstance(raw_findings, list):
+        for d in raw_findings:
+            if isinstance(d, dict):
+                f = _normalize_finding_dict(d)
+                if f is not None:
+                    llm_findings.append(f)
 
-    all_issues = list(local_issues) + list(narrative_issues)
-    passed = verdict == "PASS" and len(all_issues) <= 1
+    # Backwards-compat: legacy narrative_issues (list[str]).
+    raw_issues = data.get("narrative_issues")
+    if isinstance(raw_issues, list):
+        for msg in raw_issues:
+            if isinstance(msg, str) and msg.strip():
+                llm_findings.append(StructureFinding(
+                    category="advisory", source="llm",
+                    message=msg.strip(),
+                    requires_retry=False,
+                ))
+
+    # Misaligned branches: extract from aligned_branches and surface as
+    # discrete findings (category=branch_intent_misalign, requires_retry=True).
+    for b in aligned_branches:
+        if isinstance(b, dict) and b.get("aligned") is False:
+            llm_findings.append(StructureFinding(
+                category="branch_intent_misalign",
+                source="llm",
+                message=(
+                    f"branch intent misaligned in scene "
+                    f"'{b.get('scene_id', '?')}': "
+                    f"'{(b.get('branch_text') or '')[:60]}' — "
+                    f"{(b.get('reason') or '')[:120]}"
+                ),
+                target_scene_id=b.get("scene_id"),
+            ))
+
+    all_findings = list(local_findings) + llm_findings
+    actionable = [f for f in all_findings if f.requires_retry]
+    passed = verdict == "PASS" and not actionable
 
     return StructureReviewResult(
         passed=passed,
         feedback=summary or ("PASS" if passed else "FAIL"),
-        issues=all_issues,
+        findings=all_findings,
         branch_alignment_score=alignment_score,
         aligned_branches=aligned_branches,
     )

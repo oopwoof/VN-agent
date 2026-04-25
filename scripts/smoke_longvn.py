@@ -150,9 +150,15 @@ async def _run(args: argparse.Namespace, *, concurrent: int | None = None,
 
     # Preflight
     logger.info("Running preflight checks…")
-    readiness = check_readiness()
-    if not readiness.is_ready:
-        logger.error(f"Preflight failed: {readiness.issues}")
+    readiness = await check_readiness(
+        settings=settings,
+        max_scenes=args.scenes,
+        num_characters=args.characters,
+        text_only=text_only,
+        output_dir=output_dir,
+    )
+    if not readiness.passed:
+        logger.error(f"Preflight failed: {readiness.errors}")
         raise SystemExit(2)
 
     # Reset trace + token tracker
@@ -188,6 +194,10 @@ async def _run(args: argparse.Namespace, *, concurrent: int | None = None,
         "theme": theme,
         "output_dir": str(output_dir),
         "errors": final_state.get("errors", []),
+        # Phase 13-2 Step 4e: warnings split from errors. StructureReviewer
+        # findings now flow to warnings instead of errors so [PASS] runs
+        # don't read as failures in run_metrics.json.
+        "warnings": final_state.get("warnings", []),
     }
     if hasattr(tracker, "total_cost_usd"):
         report["total_cost_usd"] = round(tracker.total_cost_usd(), 2)

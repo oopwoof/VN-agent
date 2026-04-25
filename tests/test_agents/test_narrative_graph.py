@@ -82,6 +82,11 @@ def test_context_deps_max_5():
 # ------------------------------------------------------------
 
 
+# Phase 13-2 Step 4e: _check_context_deps now returns list[StructureFinding]
+# instead of list[str]. Substring assertions check f.message; empty-list
+# assertions check the findings list directly.
+
+
 def test_validator_rejects_forward_scene_ref():
     s1 = _scene("s01", deps=[SceneContextRef(
         ref_type="scene", ref_id="s02", link_type="callback",
@@ -89,8 +94,8 @@ def test_validator_rejects_forward_scene_ref():
     )])
     s2 = _scene("s02")
     script = _script([s1, s2])
-    errors = _check_context_deps(script, {})
-    assert any("forward/same-scene" in e for e in errors)
+    findings = _check_context_deps(script, {})
+    assert any("forward/same-scene" in f.message for f in findings)
 
 
 def test_validator_rejects_self_ref():
@@ -99,8 +104,8 @@ def test_validator_rejects_self_ref():
         reason="self ref",
     )])
     script = _script([s1])
-    errors = _check_context_deps(script, {})
-    assert any("self-references" in e for e in errors)
+    findings = _check_context_deps(script, {})
+    assert any("self-references" in f.message for f in findings)
 
 
 def test_validator_rejects_unknown_scene_ref():
@@ -109,8 +114,11 @@ def test_validator_rejects_unknown_scene_ref():
         reason="dangling",
     )])
     script = _script([_scene("s01"), s2])
-    errors = _check_context_deps(script, {})
-    assert any("unknown scene" in e for e in errors)
+    findings = _check_context_deps(script, {})
+    assert any("unknown scene" in f.message for f in findings)
+    # 4e categorization: a dangling scene ref is branch_target_invalid
+    # (deterministic, requires_retry=True) so it routes to step2 retry.
+    assert any(f.category == "branch_target_invalid" for f in findings)
 
 
 def test_validator_accepts_backward_scene_ref():
@@ -119,8 +127,8 @@ def test_validator_accepts_backward_scene_ref():
         reason="valid backward",
     )])
     script = _script([_scene("s01"), s2])
-    errors = _check_context_deps(script, {})
-    assert errors == []
+    findings = _check_context_deps(script, {})
+    assert findings == []
 
 
 def test_validator_state_dependency_requires_state_reads():
@@ -140,8 +148,8 @@ def test_validator_state_dependency_requires_state_reads():
             name="affinity", type="int", initial_value=0, description="x",
         )],
     )
-    errors = _check_context_deps(script, {})
-    assert any("state_reads" in e for e in errors)
+    findings = _check_context_deps(script, {})
+    assert any("state_reads" in f.message for f in findings)
 
 
 def test_validator_state_dependency_ok_when_in_state_reads():
@@ -160,8 +168,8 @@ def test_validator_state_dependency_ok_when_in_state_reads():
             name="affinity", type="int", initial_value=0, description="x",
         )],
     )
-    errors = _check_context_deps(script, {})
-    assert errors == []
+    findings = _check_context_deps(script, {})
+    assert findings == []
 
 
 def test_validator_rejects_unknown_character():
@@ -174,8 +182,10 @@ def test_validator_rejects_unknown_character():
         id="alice", name="Alice", role="main",
         personality="kind", background="village",
     )}
-    errors = _check_context_deps(script, chars)
-    assert any("unknown character" in e for e in errors)
+    findings = _check_context_deps(script, chars)
+    assert any("unknown character" in f.message for f in findings)
+    # 4e: maps to character_undeclared_use (deterministic, requires_retry=True)
+    assert any(f.category == "character_undeclared_use" for f in findings)
 
 
 def test_validator_rejects_unknown_world_var():
@@ -184,8 +194,10 @@ def test_validator_rejects_unknown_world_var():
         link_type="motif_recurrence", reason="unknown var",
     )])
     script = _script([_scene("s01"), s2])
-    errors = _check_context_deps(script, {})
-    assert any("unknown world_variable" in e for e in errors)
+    findings = _check_context_deps(script, {})
+    assert any("unknown world_variable" in f.message for f in findings)
+    # 4e: maps to world_var_undeclared_use (deterministic, requires_retry=True)
+    assert any(f.category == "world_var_undeclared_use" for f in findings)
 
 
 # ------------------------------------------------------------
