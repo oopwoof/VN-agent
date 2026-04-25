@@ -1386,3 +1386,105 @@ class TestChapterRollupRebuildsPrefix:
         # Sanity: chapters_list in the output reflects the rollups.
         assert len(result["vn_script"].chapters) >= 1
 
+
+# ---------------------------------------------------------------------------
+# Phase 13-2 Step 4b-8 (Gemini review fix #3): on Writer failure in the
+# parallel path, Director-declared state_writes must still be applied to
+# world_state so the persisted scene.state_writes and the actual
+# state_timeline.state_after agree. Pre-fix, a failed scene's writes
+# stayed in the schema but never reached world_state, fragmenting the
+# narrative state for downstream Reviewer/Compiler.
+# ---------------------------------------------------------------------------
+
+
+class TestParallelFailureAppliesStateWrites:
+
+    def _scene(self, sid: str, state_writes=None):
+        from vn_agent.schema.script import Scene
+        return Scene(
+            id=sid, title=sid.upper(), description="d",
+            background_id="bg", characters_present=["a"],
+            state_writes=state_writes or {},
+        )
+
+    def _settings(self, max_concurrent: int = 3):
+        from vn_agent.config import Settings
+        return Settings(
+            writer_max_concurrent=max_concurrent,
+            enable_thinking_fanout=True,
+            writer_consume_thinking=True,
+            enable_scene_summarization=False,
+            enable_chapter_rollup=False,
+            writer_context_window=0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_failed_scene_state_writes_still_applied(
+        self, mocker, tmp_path,
+    ):
+        """3 scenes with state_writes; scene 1 raises. Even so, all three
+        scenes' Director-declared writes must land in world_state and
+        state_timeline so downstream consumers see consistent state."""
+        from vn_agent.agents.state import initial_state
+        from vn_agent.agents.writer import run_writer
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import VNScript, WorldVariable
+
+        async def _fake_write(scene, *args, **kwargs):
+            if scene.id == "s1":
+                raise RuntimeError("simulated Writer failure on s1")
+            return scene
+
+        mocker.patch("vn_agent.agents.writer._write_scene", side_effect=_fake_write)
+        mocker.patch("vn_agent.agents.writer._write_scene_snapshot")
+        mocker.patch(
+            "vn_agent.agents.writer.get_settings",
+            return_value=self._settings(max_concurrent=3),
+        )
+
+        scenes = [
+            self._scene("s0", state_writes={"a": 1}),
+            self._scene("s1", state_writes={"b": 2}),  # fails
+            self._scene("s2", state_writes={"c": 3}),
+        ]
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s0", scenes=scenes,
+            world_variables=[
+                WorldVariable(name="a", type="int", initial_value=0,
+                              description=""),
+                WorldVariable(name="b", type="int", initial_value=0,
+                              description=""),
+                WorldVariable(name="c", type="int", initial_value=0,
+                              description=""),
+            ],
+        )
+        chars = {"a": CharacterProfile(id="a", name="A", role="p",
+                                       personality="", background="")}
+
+        state = initial_state(theme="th", output_dir=str(tmp_path),
+                              max_scenes=3, num_characters=1)
+        state["vn_script"] = script
+        state["characters"] = chars
+        state["output_dir"] = str(tmp_path)
+
+        result = await run_writer(state)
+        timeline = result["vn_script"].state_timeline
+        ts = {e.scene_id: e.state_after for e in timeline}
+
+        # All three scenes' state_writes apply cumulatively, INCLUDING
+        # the failed s1's b=2.
+        assert ts["s0"] == {"a": 1, "b": 0, "c": 0}
+        assert ts["s1"] == {"a": 1, "b": 2, "c": 0}, (
+            "Failed scene s1 must still apply its declared state_writes "
+            "(Director-owned, forward-progress)."
+        )
+        assert ts["s2"] == {"a": 1, "b": 2, "c": 3}
+
+        # The persisted scene s1 still carries state_writes={"b": 2}
+        # (we don't strip them on failure) — schema and timeline agree.
+        out_scenes = {s.id: s for s in result["vn_script"].scenes}
+        assert out_scenes["s1"].state_writes == {"b": 2}
+        # And: world_state returned from run_writer reflects all three.
+        assert result["world_state"] == {"a": 1, "b": 2, "c": 3}
+

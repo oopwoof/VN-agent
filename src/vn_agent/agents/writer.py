@@ -555,9 +555,20 @@ async def _run_scenes_parallel(
                     logger.warning(
                         f"Writer[{scene.id}] failed in wave "
                         f"{wave_idx}: {result}; keeping input scene "
-                        f"(no dialogue)"
+                        f"(no dialogue) and applying declared state_writes"
                     )
                     updated_scenes_sparse[idx] = scene
+                    # 4b-8 fix: apply Director-declared state_writes even
+                    # on Writer failure, so world_state stays consistent
+                    # with scene.state_writes. Pre-fix, the scene's
+                    # state_writes lived in the schema but never reached
+                    # world_state — downstream state-dependent scenes saw
+                    # a stale value while the persisted scene claimed the
+                    # write happened. Director owns state authority; one
+                    # missing dialogue body shouldn't fragment narrative
+                    # state.
+                    for var, value in scene.state_writes.items():
+                        world_state[var] = value
                     state_timeline_sparse[idx] = StateTimelineEntry(
                         scene_id=scene.id, state_after=dict(world_state),
                     )
