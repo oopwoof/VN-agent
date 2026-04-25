@@ -40,12 +40,14 @@ thinking LLM cost.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
 from vn_agent.agents.state import AgentState
+from vn_agent.agents.writer_orchestrator import compute_waves, group_scenes_by_chapter
 from vn_agent.config import get_settings
 from vn_agent.prompts.templates import strip_thinking
 from vn_agent.schema.script import CallbackItem, Scene, SceneThinking, VNScript
@@ -127,15 +129,55 @@ async def run_thinking_fanout(state: AgentState) -> dict:
         )
         return {}
 
-    logger.info(
-        f"thinking_fanout: planning {len(script.scenes)} scenes "
-        f"(sequential, Step 4 will parallelize)"
-    )
-
-    updated_scenes: list[Scene] = []
     world_state_trail: dict = {
         v.name: v.initial_value for v in script.world_variables
     }
+
+    # Phase 13-2 Step 4c: dispatch on writer_max_concurrent. Both phases
+    # share the same Sonnet key pool sequentially (thinking finishes
+    # before Writer starts), so reusing the Writer's concurrency bound
+    # avoids a redundant settings knob. Sequential path is byte-
+    # identical to Step 2; parallel path uses the same wave-barrier +
+    # Semaphore framework as Writer (4b-4 onward) including the 4b-7
+    # script-positional sparse-array fix for chronological correctness.
+    if settings.writer_max_concurrent > 1:
+        logger.info(
+            f"thinking_fanout: planning {len(script.scenes)} scenes "
+            f"(parallel, max_concurrent={settings.writer_max_concurrent})"
+        )
+        updated_scenes, filled = await _run_thinking_parallel(
+            script=script,
+            world_state_trail=world_state_trail,
+            settings=settings,
+        )
+    else:
+        logger.info(
+            f"thinking_fanout: planning {len(script.scenes)} scenes (sequential)"
+        )
+        updated_scenes, filled = await _run_thinking_sequential(
+            script=script,
+            world_state_trail=world_state_trail,
+            settings=settings,
+        )
+
+    logger.info(
+        f"thinking_fanout: produced thinking for {filled}/{len(script.scenes)} scenes"
+    )
+
+    return {
+        "vn_script": script.model_copy(update={"scenes": updated_scenes}),
+    }
+
+
+async def _run_thinking_sequential(
+    *, script: VNScript, world_state_trail: dict, settings,
+) -> tuple[list[Scene], int]:
+    """Phase 13-2 Step 4c: sequential thinking_fanout path.
+
+    Byte-identical to the pre-4c loop body. Default path
+    (writer_max_concurrent=1) and fallback for short demos.
+    """
+    updated_scenes: list[Scene] = []
     filled = 0
     for scene in script.scenes:
         thinking = await _think_scene(
@@ -149,18 +191,124 @@ async def run_thinking_fanout(state: AgentState) -> dict:
             scene = scene.model_copy(update={"thinking": thinking})
             filled += 1
         updated_scenes.append(scene)
-        # Walk world_state forward so the next scene's thinking call sees
-        # the correct effective state at its own start.
         for var, val in scene.state_writes.items():
             world_state_trail[var] = val
+    return updated_scenes, filled
 
-    logger.info(
-        f"thinking_fanout: produced thinking for {filled}/{len(script.scenes)} scenes"
-    )
 
-    return {
-        "vn_script": script.model_copy(update={"scenes": updated_scenes}),
-    }
+async def _run_thinking_parallel(
+    *, script: VNScript, world_state_trail: dict, settings,
+) -> tuple[list[Scene], int]:
+    """Phase 13-2 Step 4c: parallel thinking_fanout path.
+
+    Same chapter-barrier + DAG-wave + Semaphore structure as
+    _run_scenes_parallel (writer.py), with the 4b-7 sparse-positional
+    fix baked in from the start so script-discontinuous waves
+    (backward deps) don't reorder output.
+
+    Topology:
+      - Chapter barrier: chapter N's thinking + Director-declared
+        state_writes land before chapter N+1 starts.
+      - Wave barrier: scenes within a wave see the SAME
+        world_state_trail snapshot. They don't see each other's
+        prior thinking either — within-wave invisibility is the
+        whole point of using compute_waves' DAG topology.
+      - Within-wave: asyncio.gather under
+        Semaphore(writer_max_concurrent). _think_scene is already
+        non-blocking (catches all exceptions, returns None) so the
+        gather collects (SceneThinking | None) — return_exceptions
+        is belt-and-suspenders for any future hardening.
+
+    state_writes are Director-declared, applied at the wave barrier
+    in script-position order. Thinking failure (LLM/parsing) leaves
+    scene.thinking=None — same fallback semantics as sequential.
+    """
+    n_scenes = len(script.scenes)
+    updated_scenes_sparse: list[Scene | None] = [None] * n_scenes
+    filled = 0
+    sem = asyncio.Semaphore(settings.writer_max_concurrent)
+    scene_pos = {s.id: i for i, s in enumerate(script.scenes)}
+    chapter_buckets = group_scenes_by_chapter(script)
+
+    async def _worker(scene: Scene, prior: list[Scene],
+                      snap: dict) -> SceneThinking | None:
+        async with sem:
+            return await _think_scene(
+                scene=scene, script=script,
+                prior_scenes=prior,
+                world_state_at_entry=snap,
+                settings=settings,
+            )
+
+    for chapter_scenes in chapter_buckets:
+        waves = compute_waves(chapter_scenes)
+        logger.debug(
+            f"thinking_fanout parallel: chapter with "
+            f"{len(chapter_scenes)} scenes → {len(waves)} waves "
+            f"(sizes={[len(w) for w in waves]})"
+        )
+
+        for wave in waves:
+            state_snapshot = dict(world_state_trail)
+
+            tasks = []
+            for scene in wave:
+                idx = scene_pos[scene.id]
+                # Chronologically correct prior_scenes: slice the sparse
+                # positional array up to idx and drop Nones (peers in
+                # this wave + scenes in later waves).
+                prior_slice = updated_scenes_sparse[:idx]
+                prior_scenes_for_this = [s for s in prior_slice if s is not None]
+                tasks.append(_worker(
+                    scene, prior_scenes_for_this, state_snapshot,
+                ))
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Apply in script-position order so state_writes accumulate
+            # deterministically regardless of which task finished first.
+            ordered = sorted(
+                zip(wave, results, strict=True),
+                key=lambda pair: scene_pos[pair[0].id],
+            )
+
+            for scene, result in ordered:
+                idx = scene_pos[scene.id]
+                if isinstance(result, Exception):
+                    # _think_scene already catches; this is defensive.
+                    logger.debug(
+                        f"thinking for {scene.id} raised in wave: {result}"
+                    )
+                    updated_scenes_sparse[idx] = scene
+                elif result is None:
+                    # Non-fatal failure inside _think_scene; scene
+                    # keeps thinking=None.
+                    updated_scenes_sparse[idx] = scene
+                else:
+                    updated_scenes_sparse[idx] = scene.model_copy(
+                        update={"thinking": result},
+                    )
+                    filled += 1
+                # Director-declared state_writes apply regardless of
+                # thinking success — Director owns state authority,
+                # same rule as Writer parallel path's 4b-8 fix.
+                for var, val in scene.state_writes.items():
+                    world_state_trail[var] = val
+
+    # Concretize sparse array. Any remaining None (compute_waves bug)
+    # falls back to the input scene with thinking=None so the
+    # downstream pipeline doesn't see a None-typed Scene.
+    updated_scenes: list[Scene] = []
+    for i, s in enumerate(updated_scenes_sparse):
+        if s is None:
+            logger.warning(
+                f"thinking_fanout parallel: scene at position {i} "
+                f"({script.scenes[i].id}) was never processed"
+            )
+            updated_scenes.append(script.scenes[i])
+        else:
+            updated_scenes.append(s)
+    return updated_scenes, filled
 
 
 async def _think_scene(

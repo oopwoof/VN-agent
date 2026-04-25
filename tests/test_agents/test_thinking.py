@@ -169,6 +169,7 @@ class TestThinkingFanoutExecution:
             mock_s.return_value.enable_thinking_fanout = True
             mock_s.return_value.thinking_fanout_min_scenes = 1
             mock_s.return_value.llm_thinking_model = "claude-sonnet-4-6"
+            mock_s.return_value.writer_max_concurrent = 1
 
             result = await run_thinking_fanout(_state(script))
 
@@ -202,6 +203,7 @@ class TestThinkingFanoutExecution:
             mock_s.return_value.enable_thinking_fanout = True
             mock_s.return_value.thinking_fanout_min_scenes = 1
             mock_s.return_value.llm_thinking_model = "claude-sonnet-4-6"
+            mock_s.return_value.writer_max_concurrent = 1
 
             result = await run_thinking_fanout(_state(script))
 
@@ -223,10 +225,225 @@ class TestThinkingFanoutExecution:
             mock_s.return_value.enable_thinking_fanout = True
             mock_s.return_value.thinking_fanout_min_scenes = 1
             mock_s.return_value.llm_thinking_model = "claude-sonnet-4-6"
+            mock_s.return_value.writer_max_concurrent = 1
 
             result = await run_thinking_fanout(_state(script))
 
         assert result["vn_script"].scenes[0].thinking is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 13-2 Step 4c: parallel thinking_fanout path.
+# Dispatched on settings.writer_max_concurrent (shared with Writer parallel).
+# ---------------------------------------------------------------------------
+
+
+class TestThinkingFanoutParallel:
+    """Same wave-barrier topology as Writer's parallel path. Inherits the
+    4b-7 sparse-positional fix from day one — so script-discontinuous
+    waves don't reorder output."""
+
+    def _patch_settings(self, mock_s, max_concurrent: int = 5):
+        mock_s.return_value.enable_thinking_fanout = True
+        mock_s.return_value.thinking_fanout_min_scenes = 1
+        mock_s.return_value.llm_thinking_model = "claude-sonnet-4-6"
+        mock_s.return_value.writer_max_concurrent = max_concurrent
+
+    @pytest.mark.asyncio
+    async def test_parallel_path_runs_when_concurrent_gt_1(self, mocker):
+        """writer_max_concurrent>1 must dispatch to _run_thinking_parallel."""
+        scenes = [_scene(f"s{i:02d}") for i in range(4)]
+        script = _script(scenes)
+
+        mock_ainvoke = AsyncMock(return_value=_FakeResponse(_VALID_THINKING_JSON))
+
+        parallel_spy = mocker.spy(
+            __import__("vn_agent.agents.thinking",
+                       fromlist=["_run_thinking_parallel"]),
+            "_run_thinking_parallel",
+        )
+        sequential_spy = mocker.spy(
+            __import__("vn_agent.agents.thinking",
+                       fromlist=["_run_thinking_sequential"]),
+            "_run_thinking_sequential",
+        )
+
+        with patch("vn_agent.agents.thinking.get_settings") as mock_s, \
+             patch("vn_agent.agents.thinking.ainvoke_llm", mock_ainvoke):
+            self._patch_settings(mock_s, max_concurrent=3)
+
+            result = await run_thinking_fanout(_state(script))
+
+        assert parallel_spy.call_count == 1
+        assert sequential_spy.call_count == 0
+        # Every scene still gets thinking populated.
+        for scene in result["vn_script"].scenes:
+            assert isinstance(scene.thinking, SceneThinking)
+
+    @pytest.mark.asyncio
+    async def test_script_order_preserved_on_discontinuous_waves(self, mocker):
+        """Backward dep s1→s2 → wave 0=[s0,s2,s3], wave 1=[s1].
+        Output must be in script order [s0,s1,s2,s3] regardless. Same
+        BLOCKER class as 4b-7 fixed for Writer; we get it for free here
+        because _run_thinking_parallel uses sparse positional storage
+        from the start."""
+        scenes = [
+            _scene("s0"),
+            _scene("s1", deps=[
+                SceneContextRef(ref_type="scene", ref_id="s2",
+                                link_type="callback", reason="t"),
+            ]),
+            _scene("s2"),
+            _scene("s3"),
+        ]
+        script = _script(scenes)
+
+        mock_ainvoke = AsyncMock(return_value=_FakeResponse(_VALID_THINKING_JSON))
+
+        with patch("vn_agent.agents.thinking.get_settings") as mock_s, \
+             patch("vn_agent.agents.thinking.ainvoke_llm", mock_ainvoke):
+            self._patch_settings(mock_s, max_concurrent=4)
+            result = await run_thinking_fanout(_state(script))
+
+        out_ids = [s.id for s in result["vn_script"].scenes]
+        assert out_ids == ["s0", "s1", "s2", "s3"], (
+            f"Expected script-order [s0,s1,s2,s3]; got {out_ids}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_intra_wave_peers_invisible_to_each_other(self, mocker):
+        """Within a wave, scenes don't see each other's thinking via
+        prior_scenes. Capture the prior_scenes arg passed to _think_scene;
+        for wave-0 scenes (no deps) prior_scenes is always []."""
+        scenes = [_scene(f"s{i}") for i in range(3)]
+        script = _script(scenes)
+
+        captured: dict[str, list[str]] = {}
+
+        async def _fake_think(scene, *, script, prior_scenes,
+                              world_state_at_entry, settings):
+            captured[scene.id] = [s.id for s in prior_scenes]
+            return SceneThinking(writing_intent="ok")
+
+        with patch("vn_agent.agents.thinking.get_settings") as mock_s, \
+             patch("vn_agent.agents.thinking._think_scene",
+                   side_effect=_fake_think):
+            self._patch_settings(mock_s, max_concurrent=3)
+            await run_thinking_fanout(_state(script))
+
+        # All 3 scenes are in wave 0 (no deps); none see each other.
+        assert captured["s0"] == []
+        assert captured["s1"] == []
+        assert captured["s2"] == []
+
+    @pytest.mark.asyncio
+    async def test_late_wave_sees_chronologically_correct_priors(self, mocker):
+        """For wave 1's scene, prior_scenes is built from sparse positional
+        list filtered for None — so it's chronological (script order),
+        not completion order. Backward dep makes s1 land in wave 1 even
+        though s2/s3 (script positions 2/3) finished earlier in wave 0."""
+        scenes = [
+            _scene("s0"),
+            _scene("s1", deps=[
+                SceneContextRef(ref_type="scene", ref_id="s2",
+                                link_type="callback", reason="t"),
+            ]),
+            _scene("s2"),
+            _scene("s3"),
+        ]
+        script = _script(scenes)
+
+        captured: dict[str, list[str]] = {}
+
+        async def _fake_think(scene, *, script, prior_scenes,
+                              world_state_at_entry, settings):
+            captured[scene.id] = [s.id for s in prior_scenes]
+            return SceneThinking(writing_intent="ok")
+
+        with patch("vn_agent.agents.thinking.get_settings") as mock_s, \
+             patch("vn_agent.agents.thinking._think_scene",
+                   side_effect=_fake_think):
+            self._patch_settings(mock_s, max_concurrent=4)
+            await run_thinking_fanout(_state(script))
+
+        # s1 at script-pos 1: only s0 is at a lower position AND filled
+        # by wave 0; s2/s3 are at higher positions so they're skipped
+        # even though completed earlier. Critically NOT [s0, s2, s3]
+        # (which would be the bug if we used completion-order list).
+        assert captured["s1"] == ["s0"]
+        # Wave 0 scenes saw no priors (their positions had nothing before
+        # them or before them was s0 at position 0).
+        assert captured["s0"] == []
+        assert captured["s2"] == []  # wave 0; s0 at position 0 was None at wave start
+        assert captured["s3"] == []  # same
+
+    @pytest.mark.asyncio
+    async def test_thinking_failure_in_one_scene_non_blocking(self, mocker):
+        """One scene's thinking returns None; siblings still succeed."""
+        scenes = [_scene(f"s{i}") for i in range(3)]
+        script = _script(scenes)
+
+        async def _fake_think(scene, *, script, prior_scenes,
+                              world_state_at_entry, settings):
+            if scene.id == "s1":
+                return None
+            return SceneThinking(writing_intent="ok")
+
+        with patch("vn_agent.agents.thinking.get_settings") as mock_s, \
+             patch("vn_agent.agents.thinking._think_scene",
+                   side_effect=_fake_think):
+            self._patch_settings(mock_s, max_concurrent=3)
+            result = await run_thinking_fanout(_state(script))
+
+        out = {s.id: s for s in result["vn_script"].scenes}
+        assert out["s0"].thinking is not None
+        assert out["s1"].thinking is None  # failed gracefully
+        assert out["s2"].thinking is not None
+
+    @pytest.mark.asyncio
+    async def test_director_state_writes_applied_in_parallel_too(self, mocker):
+        """Director-declared state_writes accumulate across waves at the
+        wave barrier. Verify world_state_at_entry passed to wave 1 reflects
+        wave 0's writes."""
+        from vn_agent.schema.script import Scene
+        scenes = [
+            Scene(id="s0", title="S0", description="d", background_id="bg",
+                  characters_present=["alice"], state_writes={"a": 1}),
+            Scene(id="s1", title="S1", description="d", background_id="bg",
+                  characters_present=["alice"],
+                  state_writes={"b": 2},
+                  context_deps=[
+                      SceneContextRef(ref_type="scene", ref_id="s0",
+                                      link_type="callback", reason="t"),
+                  ]),
+        ]
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s0", scenes=scenes,
+            world_variables=[
+                WorldVariable(name="a", type="int", initial_value=0,
+                              description=""),
+                WorldVariable(name="b", type="int", initial_value=0,
+                              description=""),
+            ],
+        )
+
+        captured: dict[str, dict] = {}
+
+        async def _fake_think(scene, *, script, prior_scenes,
+                              world_state_at_entry, settings):
+            captured[scene.id] = dict(world_state_at_entry)
+            return SceneThinking(writing_intent="ok")
+
+        with patch("vn_agent.agents.thinking.get_settings") as mock_s, \
+             patch("vn_agent.agents.thinking._think_scene",
+                   side_effect=_fake_think):
+            self._patch_settings(mock_s, max_concurrent=2)
+            await run_thinking_fanout(_state(script))
+
+        assert captured["s0"] == {"a": 0, "b": 0}
+        # s1 in wave 1 sees post-wave-0 state (a=1)
+        assert captured["s1"] == {"a": 1, "b": 0}
 
 
 # ---------------------------------------------------------------------------
@@ -357,6 +574,7 @@ class TestWorldStateThreading:
             mock_s.return_value.enable_thinking_fanout = True
             mock_s.return_value.thinking_fanout_min_scenes = 1
             mock_s.return_value.llm_thinking_model = "claude-sonnet-4-6"
+            mock_s.return_value.writer_max_concurrent = 1
 
             await run_thinking_fanout(_state(script))
 
