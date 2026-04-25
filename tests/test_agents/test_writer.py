@@ -1127,3 +1127,262 @@ class TestStateTimelineOrderingParallel:
         assert ts["s01"] == {"a": 1, "b": 2, "c": 0}
         assert ts["s02"] == {"a": 1, "b": 2, "c": 3}
         assert ts["s03"] == {"a": 1, "b": 2, "c": 3}
+
+
+# ---------------------------------------------------------------------------
+# Phase 13-2 Step 4b-7 (Gemini review fix): regressions for the script-order
+# / prior-context BLOCKERs and chapter-rollup-into-prompt MAJOR.
+#
+# Pre-fix: when compute_waves produces a script-discontinuous wave (e.g.
+# a backward dep s1→s2 yields wave 0 = [s0, s2, s3], wave 1 = [s1]), the
+# parallel orchestrator appended results in wave order, leaving
+# vn_script.scenes permanently reordered. Existing TestParallelWriterPath
+# tests dodged this with diamond DAGs that produced position-contiguous
+# waves by accident.
+# ---------------------------------------------------------------------------
+
+
+class TestParallelWriterScriptDiscontinuousWaves:
+    """Pathological DAG: backward declared deps cause script-discontiguous
+    wave 0. Final output must still be in script order."""
+
+    def _scene(self, sid: str, deps=None, state_writes=None):
+        from vn_agent.schema.script import Scene, SceneContextRef
+        refs = []
+        for ref_type, ref_id in deps or []:
+            refs.append(SceneContextRef(
+                ref_type=ref_type, ref_id=ref_id,
+                link_type="callback", reason="t",
+            ))
+        return Scene(
+            id=sid, title=sid.upper(), description="d",
+            background_id="bg", characters_present=["a"],
+            context_deps=refs, state_writes=state_writes or {},
+        )
+
+    def _settings(self, max_concurrent: int = 4):
+        from vn_agent.config import Settings
+        return Settings(
+            writer_max_concurrent=max_concurrent,
+            enable_thinking_fanout=True,
+            writer_consume_thinking=True,
+            enable_scene_summarization=False,
+            enable_chapter_rollup=False,
+            writer_context_window=2,  # >0 to exercise prior-scene slicing
+        )
+
+    @pytest.mark.asyncio
+    async def test_final_scene_order_matches_script_order(
+        self, mocker, tmp_path,
+    ):
+        """Backward dep s1→s2 forces wave 0=[s0,s2,s3], wave 1=[s1].
+        Pre-fix, output ended up [s0,s2,s3,s1]. Post-fix: [s0,s1,s2,s3]."""
+        from vn_agent.agents.state import initial_state
+        from vn_agent.agents.writer import run_writer
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import VNScript
+
+        async def _fake_write(scene, *args, **kwargs):
+            return scene
+
+        mocker.patch("vn_agent.agents.writer._write_scene", side_effect=_fake_write)
+        mocker.patch("vn_agent.agents.writer._write_scene_snapshot")
+        mocker.patch(
+            "vn_agent.agents.writer.get_settings",
+            return_value=self._settings(max_concurrent=4),
+        )
+
+        # s1 declares a SCENE dep on s2 — backward in script order.
+        # compute_waves resolves: s0/s2/s3 have no scene deps -> wave 0;
+        # s1 waits on s2 -> wave 1.
+        scenes = [
+            self._scene("s0"),
+            self._scene("s1", deps=[("scene", "s2")]),
+            self._scene("s2"),
+            self._scene("s3"),
+        ]
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s0", scenes=scenes, world_variables=[],
+        )
+        chars = {"a": CharacterProfile(id="a", name="A", role="p",
+                                       personality="", background="")}
+
+        state = initial_state(theme="th", output_dir=str(tmp_path),
+                              max_scenes=4, num_characters=1)
+        state["vn_script"] = script
+        state["characters"] = chars
+        state["output_dir"] = str(tmp_path)
+
+        result = await run_writer(state)
+        out_ids = [s.id for s in result["vn_script"].scenes]
+        assert out_ids == ["s0", "s1", "s2", "s3"], (
+            f"Expected script-order output [s0,s1,s2,s3]; got {out_ids}. "
+            "Pre-4b-7 the parallel path appended in wave-completion order, "
+            "yielding [s0,s2,s3,s1]."
+        )
+        # state_timeline must also be in script order.
+        timeline_ids = [e.scene_id for e in result["vn_script"].state_timeline]
+        assert timeline_ids == ["s0", "s1", "s2", "s3"]
+
+    @pytest.mark.asyncio
+    async def test_prior_scenes_in_chronological_order_for_late_wave(
+        self, mocker, tmp_path,
+    ):
+        """When s1 (wave 1) gets its prior_scenes built, the slice must
+        be chronologically correct: only [s0] (s2,s3 are at later script
+        positions, even though they completed in earlier wave)."""
+        from vn_agent.agents.state import initial_state
+        from vn_agent.agents.writer import run_writer
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import VNScript
+
+        captured_priors: dict[str, list[str]] = {}
+
+        async def _fake_write(scene, *args, **kwargs):
+            captured_priors[scene.id] = [
+                s.id for s in (kwargs.get("prior_scenes") or [])
+            ]
+            return scene
+
+        mocker.patch("vn_agent.agents.writer._write_scene", side_effect=_fake_write)
+        mocker.patch("vn_agent.agents.writer._write_scene_snapshot")
+        mocker.patch(
+            "vn_agent.agents.writer.get_settings",
+            return_value=self._settings(max_concurrent=4),
+        )
+
+        scenes = [
+            self._scene("s0"),
+            self._scene("s1", deps=[("scene", "s2")]),
+            self._scene("s2"),
+            self._scene("s3"),
+        ]
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s0", scenes=scenes, world_variables=[],
+        )
+        chars = {"a": CharacterProfile(id="a", name="A", role="p",
+                                       personality="", background="")}
+
+        state = initial_state(theme="th", output_dir=str(tmp_path),
+                              max_scenes=4, num_characters=1)
+        state["vn_script"] = script
+        state["characters"] = chars
+        state["output_dir"] = str(tmp_path)
+
+        await run_writer(state)
+
+        # window=2. For s1 at idx=1, prior_slice = [idx-2 : idx] = [None?, s0].
+        # Filter Nones -> [s0]. Pre-fix the slice was [completed_so_far[-1:1]]
+        # which would have been [s0] at position 0 (lucky case) but for s3
+        # (idx=3, slice [1:3]) it would have grabbed completion-order
+        # neighbors out of script order.
+        assert captured_priors["s1"] == ["s0"]
+        # s3 (wave 0, idx=3): nobody completed yet -> []
+        assert captured_priors["s3"] == []
+        # s2 (wave 0, idx=2): nobody completed yet -> []
+        assert captured_priors["s2"] == []
+
+
+class TestChapterRollupRebuildsPrefix:
+    """Phase 13-2 Step 4b-7: chapter rollup must reach Writer prompt.
+
+    Pre-fix, build_monolithic_prefix was called once with
+    finalized_chapters=None and the rebuilt rollups never re-entered
+    the cached prefix. Post-fix, rebuild_prefix is called after each
+    chapter barrier and the new prefix flows into subsequent scenes.
+    """
+
+    @pytest.mark.asyncio
+    async def test_prefix_rebuilt_after_chapter_rollup_lands(
+        self, mocker, tmp_path,
+    ):
+        """Spy build_monolithic_prefix; assert it's called more than once
+        when chapters complete and rollup is enabled."""
+        from vn_agent.agents.state import initial_state
+        from vn_agent.agents.writer import run_writer
+        from vn_agent.config import Settings
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import Chapter, Scene, VNScript
+
+        # Custom Settings with rollup enabled; sequential path so we
+        # exercise the simpler chapter-barrier code path. Rollup every
+        # 2 scenes, min 4 scenes total -> rollups fire at scene 2 + 4.
+        settings = Settings(
+            writer_max_concurrent=1,
+            enable_scene_summarization=False,
+            enable_chapter_rollup=True,
+            chapter_rollup_every=2,
+            chapter_rollup_min_scenes=2,
+            writer_context_window=0,
+        )
+        mocker.patch("vn_agent.agents.writer.get_settings", return_value=settings)
+
+        async def _fake_write(scene, *args, **kwargs):
+            return scene
+
+        async def _fake_rollup(*args, **kwargs):
+            # Return a finalized Chapter so rebuild_prefix sees new content.
+            return "rolled-up summary"
+
+        mocker.patch("vn_agent.agents.writer._write_scene", side_effect=_fake_write)
+        mocker.patch("vn_agent.agents.writer._write_scene_snapshot")
+        mocker.patch(
+            "vn_agent.agents.summarizer.rollup_chapter",
+            side_effect=_fake_rollup,
+        )
+
+        # Spy on build_monolithic_prefix
+        from vn_agent.prompts import cached_prefix as cached_prefix_mod
+        spy = mocker.spy(cached_prefix_mod, "build_monolithic_prefix")
+
+        scenes = [
+            Scene(id=f"s{i}", title=f"S{i}", description="x",
+                  background_id="bg", characters_present=["a"])
+            for i in range(4)
+        ]
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s0", scenes=scenes, world_variables=[],
+        )
+        chars = {"a": CharacterProfile(id="a", name="A", role="p",
+                                       personality="", background="")}
+
+        state = initial_state(theme="th", output_dir=str(tmp_path),
+                              max_scenes=4, num_characters=1)
+        state["vn_script"] = script
+        state["characters"] = chars
+        state["output_dir"] = str(tmp_path)
+
+        result = await run_writer(state)
+
+        # Expect: 1 initial build + ≥1 rebuild after rollups land.
+        # 4 scenes / rollup_every=2 → 2 rollups; rebuild fires at
+        # the next chapter barrier (loop top), so for sequential the
+        # rebuilds happen at the start of scenes 3 and 5 (latter doesn't
+        # exist; only 1 rebuild observable inside the run + 1 final-
+        # barrier no-rebuild). At minimum: ≥2 calls total.
+        assert spy.call_count >= 2, (
+            f"Expected build_monolithic_prefix to be re-called after "
+            f"chapter rollup; got {spy.call_count} call(s) total. "
+            f"Pre-fix this was always 1 (called once at run_writer init "
+            f"with finalized_chapters=None)."
+        )
+        # The first call has finalized_chapters=None; later calls must
+        # carry the actual list with at least one Chapter.
+        first = spy.call_args_list[0]
+        assert first.kwargs.get("finalized_chapters") is None
+        later_with_chapters = [
+            c for c in spy.call_args_list[1:]
+            if c.kwargs.get("finalized_chapters")
+            and any(isinstance(ch, Chapter)
+                    for ch in c.kwargs["finalized_chapters"])
+        ]
+        assert later_with_chapters, (
+            "No rebuild call carried a non-empty finalized_chapters list."
+        )
+
+        # Sanity: chapters_list in the output reflects the rollups.
+        assert len(result["vn_script"].chapters) >= 1
+

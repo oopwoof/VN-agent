@@ -135,14 +135,27 @@ async def run_writer(state: AgentState) -> dict:
     # lore. Meets Anthropic's 1024-token cache-write threshold (enforced
     # in build_monolithic_prefix; falls back to no-cache on short runs
     # to avoid paying 1.25× write cost with no payoff).
+    #
+    # Phase 13-2 Step 4b-7 (Gemini review fix): expose a closure that
+    # rebuilds the prefix with finalized_chapters injected. Orchestrators
+    # call it after each chapter barrier so chapter rollups actually
+    # reach the Writer prompt — pre-fix, finalized_chapters was always
+    # None and the rollup work landed in JSON only.
     from vn_agent.prompts.cached_prefix import build_monolithic_prefix
 
-    cached_prefix_text, _enable_1h_cache = build_monolithic_prefix(
-        system_prompt=run_system_prompt,
-        always_lore=always_lore_block,
-        chapter_lore=chapter_lore_block,
-        finalized_chapters=None,  # Step 6 will populate
-    )
+    raw_system_prompt = run_system_prompt  # WRITER_SYSTEM + Character Bible
+
+    def _rebuild_prefix(
+        finalized: list[Chapter] | None,
+    ) -> tuple[str, bool]:
+        return build_monolithic_prefix(
+            system_prompt=raw_system_prompt,
+            always_lore=always_lore_block,
+            chapter_lore=chapter_lore_block,
+            finalized_chapters=finalized,
+        )
+
+    cached_prefix_text, _enable_1h_cache = _rebuild_prefix(None)
     # Overwrite run_system_prompt with the monolithic prefix so all Writer
     # calls downstream (_write_scene, _regenerate_short_dialogue) see the
     # same text. Whether it actually caches is governed by _enable_1h_cache.
@@ -170,6 +183,7 @@ async def run_writer(state: AgentState) -> dict:
             lore_index=lore_index,
             run_system_prompt=run_system_prompt,
             enable_1h_cache=_enable_1h_cache,
+            rebuild_prefix=_rebuild_prefix,
             char_desc=char_desc, revision_feedback=revision_feedback,
             structure_issues=structure_issues,
             rollup_enabled=rollup_enabled,
@@ -182,6 +196,7 @@ async def run_writer(state: AgentState) -> dict:
             corpus=corpus, embedding_index=embedding_index,
             lore_index=lore_index,
             run_system_prompt=run_system_prompt,
+            rebuild_prefix=_rebuild_prefix,
             enable_1h_cache=_enable_1h_cache,
             char_desc=char_desc, revision_feedback=revision_feedback,
             structure_issues=structure_issues,
@@ -254,6 +269,7 @@ async def _run_scenes_sequential(
     lore_index: Any,
     run_system_prompt: str,
     enable_1h_cache: bool,
+    rebuild_prefix: Any,
     char_desc: str,
     revision_feedback: str,
     structure_issues: list,
@@ -270,23 +286,35 @@ async def _run_scenes_sequential(
     This is the default path (writer_max_concurrent=1) and stays the
     fallback for short demos / revision loops where concurrency buys
     nothing. No thinking_fanout required.
+
+    Phase 13-2 Step 4b-7 (Gemini review fix): after each chapter
+    barrier (rollups awaited), call rebuild_prefix(chapters_list) so
+    finalized chapter summaries reach the Writer prompt prefix on
+    subsequent scenes.
     """
     updated_scenes: list[Scene] = []
     state_timeline: list[StateTimelineEntry] = []
     chapters_list: list[Chapter] = []
     pending_rollup_tasks: list[asyncio.Task] = []
+    current_prefix = run_system_prompt
+    current_enable_cache = enable_1h_cache
 
     for idx, scene in enumerate(script.scenes):
         # Await any pending rollups from the previous chapter boundary
         # before this scene's Writer call.
         if pending_rollup_tasks:
             done = await asyncio.gather(*pending_rollup_tasks, return_exceptions=True)
+            new_finalized = False
             for result in done:
                 if isinstance(result, Chapter):
                     chapters_list.append(result)
+                    new_finalized = True
                 elif isinstance(result, Exception):
                     logger.debug(f"Chapter rollup task raised: {result}")
             pending_rollup_tasks.clear()
+            # 4b-7: rebuild prefix so chapter rollup lands in next scene's prompt.
+            if new_finalized and rebuild_prefix is not None:
+                current_prefix, current_enable_cache = rebuild_prefix(chapters_list)
 
         window = settings.writer_context_window
         prior_scenes = (
@@ -314,8 +342,8 @@ async def _run_scenes_sequential(
             corpus=corpus,
             embedding_index=embedding_index,
             lore_index=lore_index,
-            system_prompt=run_system_prompt,
-            enable_1h_cache=enable_1h_cache,
+            system_prompt=current_prefix,
+            enable_1h_cache=current_enable_cache,
             settings=settings,
         )
         updated_scenes.append(updated_scene)
@@ -369,28 +397,41 @@ async def _run_scenes_parallel(
     lore_index: Any,
     run_system_prompt: str,
     enable_1h_cache: bool,
+    rebuild_prefix: Any,
     char_desc: str,
     revision_feedback: str,
     structure_issues: list,
     rollup_enabled: bool,
 ) -> tuple[list[Scene], list[StateTimelineEntry], list[Chapter]]:
-    """Phase 13-2 Step 4b-4: parallel Writer path (fanout-sync-fanout).
+    """Phase 13-2 Step 4b-4 + 4b-7 (Gemini review fix): parallel Writer
+    path (fanout-sync-fanout).
 
     Structure: chapter barrier outer loop → wave barrier inner loop →
     intra-wave asyncio.gather under Semaphore(writer_max_concurrent).
 
       - Chapter barrier: await prior chapter's rollup before the next
         chapter begins. Cross-chapter context_deps are satisfied by the
-        barrier (all prior-chapter scenes + state_writes landed before
-        this chapter's first wave starts).
+        barrier. After the barrier, rebuild_prefix(chapters_list) is
+        called so finalized chapter summaries reach subsequent Writer
+        prompts (4b-7 fix; pre-fix the rollup work landed in JSON only).
       - Wave barrier: intra-chapter scene dependencies are satisfied
         wave-by-wave. Scenes within a wave see the SAME world_state
         snapshot (no intra-wave peer visibility — that coordination
         happens upstream via thinking_fanout + cross_ref_sync).
-      - Scene-order state_writes: at each wave barrier, results are
-        merged in script.scenes positional order (not completion order),
-        so updated_scenes / state_timeline / world_state are
-        deterministic regardless of task scheduling.
+
+    Sparse positional storage (4b-7 fix): updated_scenes is allocated
+    as list[Scene | None] of len(script.scenes) and indexed by
+    scene_pos. Same for state_timeline. This guarantees:
+      (a) Final vn_script.scenes is in script order even when
+          compute_waves produces script-discontinuous waves (e.g.
+          wave 0 = [s0, s2], wave 1 = [s1] from a backward dep s1→s2).
+      (b) prior_scenes for scene at position idx is built by slicing
+          updated_scenes[idx-W:idx] then filtering Nones — gets the
+          chronologically-correct prior context regardless of wave
+          ordering.
+      Pre-fix, both invariants broke whenever waves weren't position-
+      contiguous; existing tests dodged this with diamond DAGs that
+      produced contiguous waves by accident.
 
     Coupling enforced at Settings construction: writer_max_concurrent>1
     requires enable_thinking_fanout + writer_consume_thinking so parallel
@@ -399,9 +440,20 @@ async def _run_scenes_parallel(
     Failure policy: asyncio.gather(return_exceptions=True) so one scene's
     LLM failure does not cancel sibling waves. Failed scene falls back
     to its input (no dialogue) and is logged; the pipeline continues.
+    NOTE: failed scene's state_writes are NOT applied — pre-existing
+    inconsistency where scene.state_writes records "would have"
+    semantics while world_state reflects "actually did". Tracked as
+    follow-up; not fixed here to keep this commit scoped to Gemini's
+    BLOCKERs.
+
+    Rollup trigger (4b-7 hardening): count-based as in sequential, but
+    only fires when the chunk's positional range is contiguously filled
+    (no None gaps from scenes still pending in later waves). Tracked
+    via next_rollup_at watermark.
     """
-    updated_scenes: list[Scene] = []
-    state_timeline: list[StateTimelineEntry] = []
+    n_scenes = len(script.scenes)
+    updated_scenes_sparse: list[Scene | None] = [None] * n_scenes
+    state_timeline_sparse: list[StateTimelineEntry | None] = [None] * n_scenes
     chapters_list: list[Chapter] = []
     pending_rollup_tasks: list[asyncio.Task] = []
     sem = asyncio.Semaphore(settings.writer_max_concurrent)
@@ -409,8 +461,14 @@ async def _run_scenes_parallel(
     scene_pos: dict[str, int] = {s.id: i for i, s in enumerate(script.scenes)}
     chapter_buckets = group_scenes_by_chapter(script)
 
+    completed_count = 0
+    next_rollup_at = settings.chapter_rollup_every if rollup_enabled else 0
+    current_prefix = run_system_prompt
+    current_enable_cache = enable_1h_cache
+
     async def _worker(scene: Scene, prior: list[Scene],
-                      older: list[tuple[str, str]], snap: dict) -> Scene:
+                      older: list[tuple[str, str]], snap: dict,
+                      sys_prompt: str, enable_cache: bool) -> Scene:
         async with sem:
             return await _process_scene(
                 scene=scene, script=script, char_desc=char_desc,
@@ -421,23 +479,28 @@ async def _run_scenes_parallel(
                 state_constraints=state_constraints,
                 output_dir=output_dir, corpus=corpus,
                 embedding_index=embedding_index, lore_index=lore_index,
-                system_prompt=run_system_prompt,
-                enable_1h_cache=enable_1h_cache, settings=settings,
+                system_prompt=sys_prompt,
+                enable_1h_cache=enable_cache, settings=settings,
             )
 
     for chapter_scenes in chapter_buckets:
         # Chapter barrier: await all rollups from earlier chapters so
         # their Chapter entries land in chapters_list before this
-        # chapter starts (a future Writer prefix rebuild would see
-        # them; within this run it keeps ordering deterministic).
+        # chapter starts.
         if pending_rollup_tasks:
             done = await asyncio.gather(*pending_rollup_tasks, return_exceptions=True)
+            new_finalized = False
             for result in done:
                 if isinstance(result, Chapter):
                     chapters_list.append(result)
+                    new_finalized = True
                 elif isinstance(result, Exception):
                     logger.debug(f"Chapter rollup task raised: {result}")
             pending_rollup_tasks.clear()
+            # 4b-7: rebuild prefix so finalized chapter rollups reach
+            # subsequent Writer calls in this chapter and beyond.
+            if new_finalized and rebuild_prefix is not None:
+                current_prefix, current_enable_cache = rebuild_prefix(chapters_list)
 
         waves = compute_waves(chapter_scenes)
         logger.info(
@@ -449,85 +512,96 @@ async def _run_scenes_parallel(
         for wave_idx, wave in enumerate(waves):
             window = settings.writer_context_window
 
-            # Snapshot state + context at wave start — all scenes in this
-            # wave see the same inputs (no intra-wave peer visibility).
+            # Snapshot state at wave start — all scenes in this wave see
+            # the same world_state (no intra-wave peer visibility).
             state_snapshot_for_wave = dict(world_state)
-            completed_so_far = list(updated_scenes)
 
             tasks = []
             for scene in wave:
                 idx = scene_pos[scene.id]
-                prior_scenes_for_this = (
-                    completed_so_far[max(0, idx - window):idx]
-                    if window > 0 else []
-                )
-                older_summaries_for_this: list[tuple[str, str]] = []
+                # Build prior context from sparse positional list — drop
+                # Nones (current-wave peers + future waves), preserve
+                # chronological order.
                 if window > 0:
+                    prior_slice = updated_scenes_sparse[max(0, idx - window):idx]
+                    prior_scenes_for_this = [s for s in prior_slice if s is not None]
+                    older_slice = updated_scenes_sparse[:max(0, idx - window)]
                     older_summaries_for_this = [
                         (s.id, s.summary)
-                        for s in completed_so_far[:max(0, idx - window)]
-                        if s.summary
+                        for s in older_slice
+                        if s is not None and s.summary
                     ]
+                else:
+                    prior_scenes_for_this = []
+                    older_summaries_for_this = []
                 tasks.append(_worker(
                     scene, prior_scenes_for_this,
                     older_summaries_for_this, state_snapshot_for_wave,
+                    current_prefix, current_enable_cache,
                 ))
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Merge in script-positional order so output is deterministic
-            # regardless of which task finished first.
+            # Apply in script-positional order so state_writes land
+            # deterministically regardless of which task finished first.
             ordered = sorted(
                 zip(wave, results, strict=True),
                 key=lambda pair: scene_pos[pair[0].id],
             )
 
             for scene, result in ordered:
+                idx = scene_pos[scene.id]
                 if isinstance(result, Exception):
                     logger.warning(
                         f"Writer[{scene.id}] failed in wave "
                         f"{wave_idx}: {result}; keeping input scene "
                         f"(no dialogue)"
                     )
-                    updated_scenes.append(scene)
-                    state_timeline.append(StateTimelineEntry(
+                    updated_scenes_sparse[idx] = scene
+                    state_timeline_sparse[idx] = StateTimelineEntry(
                         scene_id=scene.id, state_after=dict(world_state),
-                    ))
+                    )
+                    completed_count += 1
                     continue
 
-                updated_scenes.append(result)
+                updated_scenes_sparse[idx] = result
                 for var, value in result.state_writes.items():
                     world_state[var] = value
-                state_timeline.append(StateTimelineEntry(
+                state_timeline_sparse[idx] = StateTimelineEntry(
                     scene_id=result.id, state_after=dict(world_state),
-                ))
+                )
+                completed_count += 1
 
-                # Count-based rollup trigger, matching sequential behavior.
-                if rollup_enabled:
-                    completed = len(updated_scenes)
-                    if completed % settings.chapter_rollup_every == 0:
-                        chapter_start = completed - settings.chapter_rollup_every
-                        rollup_scenes = updated_scenes[chapter_start:completed]
-                        chapter_id = (
-                            f"ch{len(chapters_list) + len(pending_rollup_tasks) + 1:02d}"
-                        )
-                        rollup_scene_id_set = {s.id for s in rollup_scenes}
-                        last_pos = scene_pos.get(rollup_scenes[-1].id, -1)
-                        pinned: set[str] = set()
-                        for future_scene in script.scenes[last_pos + 1:]:
-                            for dep in getattr(future_scene, "context_deps", None) or []:
-                                if (
-                                    dep.ref_type == "scene"
-                                    and dep.ref_id in rollup_scene_id_set
-                                ):
-                                    pinned.add(dep.ref_id)
-                        ch_state = dict(world_state)
-                        pending_rollup_tasks.append(asyncio.create_task(
-                            _rollup_task(
-                                chapter_id, rollup_scenes, sorted(pinned),
-                                characters, ch_state, settings,
-                            ),
-                        ))
+            # After applying the whole wave, check rollup boundaries.
+            # Only fire when the positional chunk is fully filled so
+            # we never roll up a partial range.
+            if rollup_enabled:
+                while next_rollup_at <= completed_count:
+                    chunk_start = next_rollup_at - settings.chapter_rollup_every
+                    chunk = updated_scenes_sparse[chunk_start:next_rollup_at]
+                    if any(s is None for s in chunk):
+                        break  # gap — wait for later wave to fill
+                    rollup_scenes_concrete = [s for s in chunk if s is not None]
+                    chapter_id = (
+                        f"ch{len(chapters_list) + len(pending_rollup_tasks) + 1:02d}"
+                    )
+                    rollup_scene_id_set = {s.id for s in rollup_scenes_concrete}
+                    pinned: set[str] = set()
+                    for future_scene in script.scenes[next_rollup_at:]:
+                        for dep in getattr(future_scene, "context_deps", None) or []:
+                            if (
+                                dep.ref_type == "scene"
+                                and dep.ref_id in rollup_scene_id_set
+                            ):
+                                pinned.add(dep.ref_id)
+                    ch_state = dict(world_state)
+                    pending_rollup_tasks.append(asyncio.create_task(
+                        _rollup_task(
+                            chapter_id, rollup_scenes_concrete, sorted(pinned),
+                            characters, ch_state, settings,
+                        ),
+                    ))
+                    next_rollup_at += settings.chapter_rollup_every
 
     # Final barrier: await any rollups still pending from the last chapter.
     if pending_rollup_tasks:
@@ -538,6 +612,32 @@ async def _run_scenes_parallel(
             elif isinstance(result, Exception):
                 logger.debug(f"Final chapter rollup task raised: {result}")
         pending_rollup_tasks.clear()
+
+    # Concretize sparse arrays. Any remaining None means a scene was
+    # never reached — shouldn't happen if compute_waves covers every
+    # scene, but defensive: substitute the input scene + an empty
+    # timeline entry rather than raising.
+    updated_scenes: list[Scene] = []
+    state_timeline: list[StateTimelineEntry] = []
+    for i, s in enumerate(updated_scenes_sparse):
+        if s is None:
+            logger.warning(
+                f"Writer parallel: scene at position {i} "
+                f"({script.scenes[i].id}) was never processed; "
+                f"using input scene as fallback"
+            )
+            updated_scenes.append(script.scenes[i])
+            state_timeline.append(StateTimelineEntry(
+                scene_id=script.scenes[i].id, state_after=dict(world_state),
+            ))
+        else:
+            updated_scenes.append(s)
+            entry = state_timeline_sparse[i]
+            if entry is None:
+                entry = StateTimelineEntry(
+                    scene_id=s.id, state_after=dict(world_state),
+                )
+            state_timeline.append(entry)
 
     return updated_scenes, state_timeline, chapters_list
 
