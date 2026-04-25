@@ -15,6 +15,28 @@
 
 ## [Unreleased]
 
+### 2026-04-24 | 测试 - 2026-04-24 17:19
+
+**变更文件** (3 个):
+**测试变更** (2 文件):
+  - `tests/test_scripts/__init__.py`
+  - `tests/test_scripts/test_smoke_longvn.py`
+
+**其他变更** (1 文件):
+  - `scripts/smoke_longvn.py`
+
+**变更统计**:
+```
+scripts/smoke_longvn.py                 | 170 +++++++++++++++++++++++++++++++-
+ tests/test_scripts/__init__.py          |   0
+ tests/test_scripts/test_smoke_longvn.py |  79 +++++++++++++++
+ 3 files changed, 244 insertions(+), 5 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-24 | 实现 - 2026-04-24 16:55
 
 **变更文件** (2 个):
