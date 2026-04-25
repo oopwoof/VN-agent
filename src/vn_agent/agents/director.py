@@ -920,12 +920,17 @@ def _format_retry_feedback(findings: list) -> str:
     by_cat: dict[str, list] = {}
     for f in actionable:
         by_cat.setdefault(f.category, []).append(f)
+    # Phase 13-2 Step 4e/4 (Gemini hardening NIT #d): explicit "modify
+    # ONLY flagged" language. Pre-fix Sonnet would helpfully rewrite
+    # adjacent unflagged scenes too, which silently regressed
+    # well-formed parts of the outline. This wording anchors stability.
     parts = [
         "## RETRY FEEDBACK (Phase 13-2 Step 4e)",
         "",
         "The previous outline had structural issues that must be addressed in",
-        "this revision. Re-emit the FULL JSON with these issues fixed; keep",
-        "everything else stable.",
+        "this revision. Re-emit the FULL JSON, modifying ONLY the scenes or",
+        "fields flagged below. Preserve all other scenes, characters, IDs,",
+        "world variables, and macro_reference exactly as they were.",
         "",
     ]
     for cat, items in by_cat.items():

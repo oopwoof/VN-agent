@@ -66,6 +66,27 @@ _VALID_CATEGORIES = frozenset({
     "advisory",
 })
 
+# Phase 13-2 Step 4e/4 (Gemini hardening NIT #c): strict subset the LLM is
+# allowed to emit. Categories like "branch_target_invalid",
+# "unreachable_scene", "world_var_undeclared_use", "character_undeclared_use"
+# are reserved for the deterministic _local_structural_audit (~0% false
+# positives). If Sonnet hallucinates one of those, we'd accept a
+# subjective LLM judgment as if it were a hard graph defect — and since
+# unreachable_scene routes to step2_only (vs step1_step2 for roster_unused),
+# the behavior would still trigger a Director retry, just on noisier
+# evidence. Coerce LLM-emitted deterministic categories down to "advisory"
+# so the routing helper sees them as low-confidence and skips the retry
+# (Tier-2 LLM cap) on round 2+.
+_LLM_VALID_CATEGORIES = frozenset({
+    "branch_intent_misalign",
+    "strategy_distribution_gap",
+    "branch_bypass",
+    "tone_inconsistent",
+    "macro_pacing_misaligned",
+    "foreshadow_payoff_missing",
+    "advisory",
+})
+
 logger = logging.getLogger(__name__)
 
 
@@ -230,7 +251,18 @@ async def run_structure_reviewer(state: AgentState) -> dict:
     # audit findings are advisory/retry-eligible by design. Keeping the two
     # separate fixes the smoke harness's confusing "[PASS] but 7 errors"
     # display (Gemini smoke-review #C reframed).
-    warnings = list(state.get("warnings", []))
+    #
+    # Phase 13-2 Step 4e/4 (Gemini hardening BLOCKER #e): filter previous-
+    # round StructureReviewer entries before appending. The retry loop
+    # re-runs structure_reviewer 1-3 times, and without this dedup
+    # state["warnings"] would accumulate duplicates exponentially —
+    # round 3 ends up with 3× copies of any persistent finding, blowing
+    # up Writer's advisory-context block via the legacy
+    # structure_review_issues path.
+    warnings = [
+        w for w in (state.get("warnings") or [])
+        if not w.startswith("StructureReviewer[")
+    ]
     for f in result.findings:
         warnings.append(f"StructureReviewer[{f.category}]: {f.message}")
 
@@ -510,9 +542,16 @@ def _build_audit_prompt(script: VNScript, characters: dict) -> str:
 
 
 def _normalize_finding_dict(d: dict) -> StructureFinding | None:
-    """Coerce an LLM-emitted dict into a StructureFinding. Unknown
-    categories fall back to 'advisory' rather than raising — Sonnet
-    sometimes invents labels and we'd rather log than fail the audit."""
+    """Coerce an LLM-emitted dict into a StructureFinding.
+
+    Two layers of normalization:
+      1. Unknown categories (Sonnet inventing labels) -> "advisory".
+      2. Phase 13-2 Step 4e/4: categories the LLM is NOT allowed to emit
+         (deterministic-only ones like `branch_target_invalid`) also -> "advisory".
+         The deterministic audit owns those; allowing LLM to emit them
+         would let Sonnet's subjective judgment masquerade as hard graph
+         evidence and trigger expensive retries on noisy signals.
+    """
     msg = (d.get("message") or "").strip()
     if not msg:
         return None
@@ -521,6 +560,13 @@ def _normalize_finding_dict(d: dict) -> StructureFinding | None:
         logger.debug(
             f"StructureReviewer: unknown LLM category '{category}', "
             f"falling back to 'advisory'"
+        )
+        category = "advisory"
+    elif category not in _LLM_VALID_CATEGORIES:
+        logger.debug(
+            f"StructureReviewer: LLM emitted deterministic-only category "
+            f"'{category}' — coercing to 'advisory'. Use the deterministic "
+            f"audit for that category instead."
         )
         category = "advisory"
     requires_retry = bool(d.get("requires_retry", category != "advisory"))

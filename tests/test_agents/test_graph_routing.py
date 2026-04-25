@@ -204,3 +204,304 @@ class TestDirectorRedoNodes:
         assert outline["scenes"][0]["id"] == "s0"
         assert outline["characters"][0]["id"] == "alice"
         assert outline["world_variables"][0]["name"] == "trust"
+
+
+# ---------------------------------------------------------------------------
+# Phase 13-2 Step 4e/4 (Gemini hardening): end-to-end retry lifecycle test.
+# Walks the full state machine via the routing helper, asserting we hit
+# step1_step2 -> step2_only -> accept across 3 rounds with appropriate
+# findings each time.
+# ---------------------------------------------------------------------------
+
+
+class TestEndToEndRetryLifecycle:
+    """Pin the routing decisions across a realistic 3-round retry sequence.
+
+    Round 0: structure_reviewer surfaces a step1-class finding
+             (roster_unused) -> route to step1_step2
+    Round 1: structure_reviewer surfaces a step2-class finding only
+             (branch_intent_misalign, LLM source) -> route to step2_only
+    Round 2: structure_reviewer surfaces only LLM-judged findings ->
+             tier-2 cap accepts (LLM signal didn't help, rolling dice
+             on round 2 is wasteful)
+    """
+
+    def test_lifecycle_routing_sequence(self):
+        """Walk a representative 3-round retry: deterministic step1-class
+        finding → step1_step2 escalation; deterministic step2-class
+        finding remains → step2_only retry; only LLM findings left →
+        tier-2 cap accepts."""
+        from vn_agent.agents.routing import decide_retry_target
+        max_rev = 2
+
+        # Round 0: roster_unused (deterministic, step1-class)
+        round0 = [_f("roster_unused")]
+        d0 = decide_retry_target(round0, revision_count=0, max_revisions=max_rev)
+        assert d0.target == "step1_step2", (
+            f"Round 0 with roster_unused must escalate to step1_step2; "
+            f"got {d0.target} ({d0.reason})"
+        )
+
+        # Round 1: roster_unused fixed; a step2-class deterministic
+        # finding was uncovered (e.g. branch_target_invalid that wasn't
+        # caught the first time). Deterministic findings get the full
+        # max_revisions budget.
+        round1 = [_f("branch_target_invalid", source="deterministic")]
+        d1 = decide_retry_target(round1, revision_count=1, max_revisions=max_rev)
+        assert d1.target == "step2_only", (
+            f"Round 1 with deterministic step2-class finding must retry "
+            f"step2_only; got {d1.target} ({d1.reason})"
+        )
+
+        # Round 2: budget exhausted -> accept regardless of findings.
+        round2 = [_f("branch_target_invalid", source="deterministic")]
+        d2 = decide_retry_target(round2, revision_count=2, max_revisions=max_rev)
+        assert d2.target == "accept", (
+            f"Round 2 must accept (max_revisions hit); "
+            f"got {d2.target} ({d2.reason})"
+        )
+
+    def test_lifecycle_llm_only_round1_hits_tier2_cap(self):
+        """Tier-2 cap regression: round 0 retries on LLM-only findings,
+        round 1 accepts because Sonnet-on-Sonnet didn't help."""
+        from vn_agent.agents.routing import decide_retry_target
+        max_rev = 2
+
+        round0 = [_f("branch_intent_misalign", source="llm")]
+        d0 = decide_retry_target(round0, revision_count=0, max_revisions=max_rev)
+        assert d0.target == "step2_only", (
+            f"Round 0 must retry on LLM-only findings (full benefit of "
+            f"the doubt); got {d0.target} ({d0.reason})"
+        )
+
+        # Round 1: same LLM finding persisting -> accept (tier-2 cap)
+        round1 = [_f("branch_intent_misalign", source="llm")]
+        d1 = decide_retry_target(round1, revision_count=1, max_revisions=max_rev)
+        assert d1.target == "accept", (
+            f"Round 1 with only LLM findings must hit tier-2 cap; "
+            f"got {d1.target} ({d1.reason})"
+        )
+        assert "LLM signal didn't help" in d1.reason
+
+    def test_lifecycle_revision_count_increments_through_loop(self, mocker):
+        """Verify the redo nodes actually bump director_revision_count
+        when they execute end-to-end (mocking out the LLM)."""
+        from vn_agent.agents.director import (
+            run_director_full_redo,
+            run_director_step2_redo,
+        )
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import Scene, VNScript
+
+        # Mock _step1_outline / _step2_details to return minimal valid
+        # plan_data so _build_from_plan succeeds.
+        async def _fake_step1(*args, **kwargs):
+            return {
+                "title": "T", "description": "d", "art_direction": "x",
+                "start_scene_id": "s0",
+                "scenes": [{
+                    "id": "s0", "title": "S0", "description": "d",
+                    "background_id": "bg", "characters_present": ["alice"],
+                }],
+                "characters": [{
+                    "id": "alice", "name": "A", "color": "#ffffff",
+                    "personality": "p", "background": "b", "role": "main",
+                }],
+                "world_variables": [],
+            }
+
+        async def _fake_step2(outline, output_dir, settings, **kwargs):
+            return {
+                "scenes": [{
+                    "id": "s0",
+                    "next_scene_id": None,
+                    "branches": [],
+                    "music_mood": "peaceful",
+                    "music_description": "",
+                    "emotional_arc": "",
+                }],
+            }
+
+        mocker.patch("vn_agent.agents.director._step1_outline",
+                     side_effect=_fake_step1)
+        mocker.patch("vn_agent.agents.director._step2_details",
+                     side_effect=_fake_step2)
+        mocker.patch("vn_agent.agents.director._save_checkpoint")
+
+        # Initial state with a script (for step2_redo) and revision_count=0
+        scenes = [Scene(
+            id="s0", title="S0", description="d", background_id="bg",
+            characters_present=["alice"],
+        )]
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s0", scenes=scenes, world_variables=[],
+        )
+        chars = {"alice": CharacterProfile(
+            id="alice", name="A", role="main",
+            personality="p", background="b",
+        )}
+
+        import asyncio
+        state = {
+            "theme": "th", "output_dir": ".",
+            "max_scenes": 1, "num_characters": 1,
+            "art_direction": "x",
+            "vn_script": script, "characters": chars,
+            "structure_review_findings": [_f("roster_unused")],
+            "director_revision_count": 0,
+        }
+
+        # Execute step1_step2 redo (round 0 -> 1)
+        result1 = asyncio.run(run_director_full_redo(state))
+        assert result1["director_revision_count"] == 1
+        assert "vn_script" in result1
+
+        # Now execute step2 redo (round 1 -> 2)
+        state2 = {**state, **result1, "structure_review_findings": [
+            _f("branch_intent_misalign", source="llm"),
+        ]}
+        result2 = asyncio.run(run_director_step2_redo(state2))
+        assert result2["director_revision_count"] == 2
+
+
+class TestWarningsDedup:
+    """Phase 13-2 Step 4e/4 (Gemini hardening BLOCKER #e):
+    structure_reviewer must filter previous-round StructureReviewer[
+    entries before appending new ones, so the retry loop doesn't
+    accumulate exponential duplicates."""
+
+    @pytest.mark.asyncio
+    async def test_round2_warnings_does_not_duplicate_round1(self, mocker):
+        from unittest.mock import AsyncMock
+
+        from vn_agent.agents.structure_reviewer import run_structure_reviewer
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import (
+            BranchOption,
+            Scene,
+            VNScript,
+        )
+
+        # Script with one unused character so _local_structural_audit
+        # produces a roster_unused finding consistently across rounds.
+        scenes = [
+            Scene(id="s0", title="S0", description="d", background_id="bg",
+                  characters_present=["alice"], branches=[
+                      BranchOption(text="go", next_scene_id="s1"),
+                  ]),
+            Scene(id="s1", title="S1", description="d", background_id="bg",
+                  characters_present=["alice"]),
+        ]
+        chars = {
+            "alice": CharacterProfile(id="alice", name="A", role="p",
+                                      personality="", background=""),
+            "ghost": CharacterProfile(id="ghost", name="G", role="x",
+                                      personality="", background=""),
+        }
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s0", scenes=scenes, world_variables=[],
+        )
+
+        import json as _json
+
+        class _Resp:
+            content = _json.dumps({
+                "verdict": "FAIL",
+                "branch_alignment_score": 0.9,
+                "aligned_branches": [],
+                "narrative_findings": [],
+                "summary": "x",
+            })
+
+        mock_settings = mocker.patch(
+            "vn_agent.agents.structure_reviewer.get_settings",
+        )
+        mock_settings.return_value.llm_structure_reviewer_model = "claude-sonnet-4-6"
+        mock_settings.return_value.structure_review_strict = False
+        mocker.patch(
+            "vn_agent.agents.structure_reviewer.ainvoke_llm",
+            AsyncMock(return_value=_Resp()),
+        )
+
+        # Round 1: empty warnings -> populated with roster_unused
+        state_round1 = {"vn_script": script, "characters": chars,
+                        "warnings": [], "errors": ["pre-existing pipeline error"]}
+        result1 = await run_structure_reviewer(state_round1)
+        round1_sr_warnings = [
+            w for w in result1["warnings"] if w.startswith("StructureReviewer[")
+        ]
+        assert len(round1_sr_warnings) >= 1
+        # Pre-existing non-StructureReviewer warning is preserved if
+        # already present in state — but we passed in state["warnings"]=[]
+        # so it shouldn't be there.
+
+        # Round 2: simulate the retry loop where state["warnings"]
+        # already contains round 1's StructureReviewer entries.
+        state_round2 = {
+            "vn_script": script, "characters": chars,
+            "warnings": list(result1["warnings"]),
+            "errors": [],
+        }
+        result2 = await run_structure_reviewer(state_round2)
+        round2_sr_warnings = [
+            w for w in result2["warnings"] if w.startswith("StructureReviewer[")
+        ]
+        # Critical: round 2 warnings list is NOT round 1 entries + new
+        # entries. It's just round 2's entries (round 1 dropped via filter).
+        assert len(round2_sr_warnings) == len(round1_sr_warnings), (
+            f"Round 2 must not accumulate: round 1 had "
+            f"{len(round1_sr_warnings)} StructureReviewer warnings; "
+            f"round 2 has {len(round2_sr_warnings)}. They should be "
+            f"equal (round 1 dropped via filter)."
+        )
+
+    @pytest.mark.asyncio
+    async def test_writer_does_not_extend_with_warnings(self, mocker, tmp_path):
+        """Phase 13-2 Step 4e/4: writer.py reads ONLY structure_review_issues,
+        not state["warnings"], to prevent advisory duplication."""
+        from vn_agent.agents.state import initial_state
+        from vn_agent.agents.writer import run_writer
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import Scene, VNScript
+
+        captured_structure_issues: list = []
+
+        async def _fake_write(scene, *args, **kwargs):
+            captured_structure_issues.append(kwargs.get("structure_issues") or [])
+            return scene
+
+        mocker.patch("vn_agent.agents.writer._write_scene", side_effect=_fake_write)
+        mocker.patch("vn_agent.agents.writer._write_scene_snapshot")
+
+        scenes = [Scene(id="s0", title="S0", description="d",
+                        background_id="bg", characters_present=["alice"])]
+        script = VNScript(title="T", description="d", theme="th",
+                          start_scene_id="s0", scenes=scenes, world_variables=[])
+        chars = {"alice": CharacterProfile(
+            id="alice", name="A", role="p", personality="", background="",
+        )}
+
+        state = initial_state(theme="th", output_dir=str(tmp_path),
+                              max_scenes=1, num_characters=1)
+        state["vn_script"] = script
+        state["characters"] = chars
+        state["output_dir"] = str(tmp_path)
+        state["structure_review_issues"] = ["finding A", "finding B"]
+        # Stuff state["warnings"] with overlapping content to ensure
+        # writer.py does NOT append it.
+        state["warnings"] = [
+            "StructureReviewer[advisory]: finding A",
+            "StructureReviewer[advisory]: finding B",
+            "StructureReviewer[advisory]: finding A",  # duplicate from prior round
+        ]
+
+        await run_writer(state)
+        # Each scene's structure_issues should match input length, NOT
+        # input + warnings (which would be 5 entries).
+        assert captured_structure_issues
+        assert all(len(issues) == 2 for issues in captured_structure_issues), (
+            f"writer.py must read ONLY structure_review_issues (len 2); "
+            f"got per-scene lengths {[len(i) for i in captured_structure_issues]}"
+        )

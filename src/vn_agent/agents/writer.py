@@ -61,14 +61,16 @@ async def run_writer(state: AgentState) -> dict:
     # Sprint 7-5: StructureReviewer feedback (outline-level issues, especially
     # branch intent misalignment) surfaced so Writer can be more careful when
     # setting up choice points.
-    # Phase 13-2 Step 4e: also consume state["warnings"]. After the
-    # structure_reviewer→Director retry loop, surviving warnings are
-    # things Director couldn't fix (advisory findings, or budget
-    # exhausted). Writer can't fix scene-graph defects, but it CAN
-    # compensate at the dialogue level — e.g. inject extra tension into
-    # a scene flagged for "tone feels flat" (Gemini design review #e).
+    # Phase 13-2 Step 4e/4 (Gemini hardening BLOCKER #e): read ONLY
+    # structure_review_issues (the latest snapshot). state["warnings"]
+    # accumulates across retry rounds + advisory findings; concatenating
+    # both would feed Writer up to 4× duplicate messages and blow up
+    # the per-scene prompt budget. structure_review_issues already
+    # contains every advisory finding from the LATEST audit (it's
+    # `[f.message for f in result.findings]` in structure_reviewer.py
+    # which doesn't filter by requires_retry), so Writer still sees
+    # advisory context — just without duplicates.
     structure_issues = list(state.get("structure_review_issues", []) or [])
-    structure_issues.extend(state.get("warnings", []) or [])
     # Sprint 9-3 + Gemini-review fix: seed symbolic state from the
     # declared initial_values on EVERY Writer invocation so a revision
     # loop doesn't inherit the end-of-story state from the previous
