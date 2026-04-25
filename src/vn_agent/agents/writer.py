@@ -1509,56 +1509,211 @@ async def _regenerate_short_dialogue(
         return []
 
 
-def _parse_dialogue(content: str, scene: Scene) -> list[DialogueLine]:
-    """Parse JSON dialogue from LLM response."""
-    # 1. Try markdown code block for array
-    arr_block_match = re.search(r'```(?:json)?\s*(\[.*?\])\s*```', content, re.DOTALL)
-    if arr_block_match:
-        try:
-            lines_data = json.loads(arr_block_match.group(1))
-            return [
-                DialogueLine(
-                    character_id=d.get("character_id"),
-                    text=d.get("text", ""),
-                    emotion=d.get("emotion", "neutral"),
-                )
-                for d in lines_data
-            ]
-        except (json.JSONDecodeError, KeyError):
-            pass
+def _to_dialogue_line(d: dict) -> DialogueLine | None:
+    """Convert a parsed dict to a DialogueLine. Returns None if the dict
+    doesn't carry a usable 'text' value — silently dropping malformed
+    entries beats inserting a confusing placeholder mid-scene."""
+    text = d.get("text")
+    if not text or not isinstance(text, str):
+        return None
+    return DialogueLine(
+        character_id=d.get("character_id"),
+        text=text,
+        emotion=d.get("emotion", "neutral") or "neutral",
+    )
 
-    # 2. Try raw_decode from first [
-    start = content.find('[')
-    if start != -1:
-        try:
-            obj, _ = json.JSONDecoder().raw_decode(content, start)
-            if isinstance(obj, list):
-                return [
-                    DialogueLine(
-                        character_id=d.get("character_id"),
-                        text=d.get("text", ""),
-                        emotion=d.get("emotion", "neutral"),
-                    )
-                    for d in obj
-                ]
-        except (json.JSONDecodeError, KeyError):
-            pass
 
-    # 3. Try full content as JSON array
+def _try_parse_array(text: str) -> list[DialogueLine] | None:
+    """Try to parse `text` as a JSON array of DialogueLine dicts. Returns
+    None if it's not a valid array; returns [] if it parsed but had no
+    usable entries (caller decides whether that's acceptable)."""
     try:
-        lines_data = json.loads(content)
-        if isinstance(lines_data, list):
-            return [
-                DialogueLine(
-                    character_id=d.get("character_id"),
-                    text=d.get("text", ""),
-                    emotion=d.get("emotion", "neutral"),
-                )
-                for d in lines_data
-            ]
-    except (json.JSONDecodeError, KeyError):
-        pass
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, list):
+        return None
+    out = [_to_dialogue_line(d) for d in data if isinstance(d, dict)]
+    return [d for d in out if d is not None]
 
-    # Fallback: create placeholder
+
+def _extract_balanced_array(content: str, start: int) -> str | None:
+    """Scan forward from `content[start]` (which must be '[') and return
+    the substring up to and including the matching ']', tracking string
+    state so brackets inside JSON strings don't confuse the balance count.
+
+    Returns None if no balanced array is found before content ends — i.e.
+    the model truncated mid-array.
+    """
+    if start < 0 or start >= len(content) or content[start] != "[":
+        return None
+    depth = 0
+    in_str = False
+    escape = False
+    for i in range(start, len(content)):
+        ch = content[i]
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return content[start:i + 1]
+    return None  # truncated
+
+
+def _recover_objects(content: str, start: int) -> list[DialogueLine]:
+    """Last-resort recovery: walk forward from `start` (typically the
+    position of the array's '['), extract each top-level JSON object
+    (`{...}`) that's bracket-balanced, and parse it independently.
+
+    Tolerates a truncated final object — returns whatever objects we
+    successfully parsed before the truncation point. This is what saves
+    a scene when Sonnet hits max_tokens mid-dialogue: instead of losing
+    all 14 lines because line 15's JSON is unclosed, we keep 14.
+    """
+    out: list[DialogueLine] = []
+    i = start
+    n = len(content)
+    while i < n:
+        if content[i] != "{":
+            i += 1
+            continue
+        depth = 0
+        in_str = False
+        escape = False
+        end = -1
+        for j in range(i, n):
+            ch = content[j]
+            if in_str:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = j
+                    break
+        if end < 0:
+            break  # truncated mid-object
+        try:
+            obj = json.loads(content[i:end + 1])
+            if isinstance(obj, dict):
+                line = _to_dialogue_line(obj)
+                if line is not None:
+                    out.append(line)
+        except json.JSONDecodeError:
+            pass  # skip malformed individual object, keep going
+        i = end + 1
+    return out
+
+
+def _parse_dialogue(content: str, scene: Scene) -> list[DialogueLine]:
+    """Parse JSON dialogue from LLM response.
+
+    Phase 13-2 Step 4d (Gemini smoke-review BLOCKER #B): the prior parser
+    was a single-stage best-of-three regex+raw_decode chain. When Sonnet
+    output had ANY of the following, all three fell through to a 1-line
+    placeholder, triggering Reviewer's mechanical_check (line count) and
+    a wasteful revision loop:
+
+      - multiple ```json...``` code blocks (model emitting "draft" then
+        "final version" — first match could be a malformed early draft)
+      - prose preamble between the array's opening '[' and the first '{'
+      - a single malformed entry (e.g. unescaped quote in dialogue)
+        invalidating the WHOLE array
+      - max_tokens truncation mid-array (no closing ']')
+
+    New strategy is a 5-stage cascade, each stage strictly more permissive
+    than the last, terminating in object-by-object recovery so we keep
+    every successfully parseable line even from a truncated array:
+
+      Stage 1: every ```json...``` fenced array block, in order. First
+               that parses wins. Beats the previous single-match regex.
+      Stage 2: bracket-balanced extraction from the first '[' that
+               actually starts a parseable array. Tolerates prose before
+               and after, including '[neutral]' style emotion tags in
+               narration.
+      Stage 3: full content as JSON.
+      Stage 4: object-by-object recovery from the first '['. Salvages
+               truncated arrays and arrays with one bad entry.
+      Stage 5: placeholder. Returned only when literally zero objects
+               parsed.
+
+    Each stage filters out None text via _to_dialogue_line so the
+    placeholder is the LAST resort, not a fallback for any single-bad-
+    entry case.
+    """
+    # Stage 1: every ```json...``` fenced block in order. Use bracket-
+    # balanced extraction inside each so nested arrays in narration don't
+    # break us. Pattern matches both ```json and bare ```.
+    for fence_match in re.finditer(r"```(?:json|JSON)?\s*\n", content):
+        body_start = fence_match.end()
+        # Find the closing ``` (allow it to be missing — model may have
+        # truncated; fall through to balanced extraction on body).
+        close = content.find("```", body_start)
+        body = content[body_start:close] if close != -1 else content[body_start:]
+        # Inside the body, find a balanced array.
+        arr_start = body.find("[")
+        if arr_start != -1:
+            balanced = _extract_balanced_array(body, arr_start)
+            if balanced is not None:
+                lines = _try_parse_array(balanced)
+                if lines:
+                    return lines
+
+    # Stage 2: scan content for any '[' that starts a parseable
+    # balanced array, ignoring '[neutral]' / '[scared]' single-token
+    # bracket pairs that show up in Sonnet's prose draft.
+    pos = 0
+    while True:
+        bracket = content.find("[", pos)
+        if bracket == -1:
+            break
+        balanced = _extract_balanced_array(content, bracket)
+        if balanced is not None:
+            lines = _try_parse_array(balanced)
+            if lines:
+                return lines
+        pos = bracket + 1
+
+    # Stage 3: full content as JSON array (legacy fallback).
+    full = _try_parse_array(content)
+    if full:
+        return full
+
+    # Stage 4: object-by-object recovery from the first '['. Saves
+    # truncated arrays and arrays with one bad entry.
+    arr_start = content.find("[")
+    if arr_start != -1:
+        recovered = _recover_objects(content, arr_start + 1)
+        if recovered:
+            logger.info(
+                f"Scene {scene.id}: array parse failed, recovered "
+                f"{len(recovered)} dialogue line(s) via per-object "
+                f"fallback"
+            )
+            return recovered
+
+    # Stage 5: placeholder. Reviewer's mechanical_check will reject this
+    # as too short — by design. The continuation regen path then fires a
+    # second LLM call to fill in lines.
     logger.warning(f"Could not parse dialogue for scene {scene.id}, using placeholder")
     return [DialogueLine(character_id=None, text=f"[Scene: {scene.title}]", emotion="neutral")]

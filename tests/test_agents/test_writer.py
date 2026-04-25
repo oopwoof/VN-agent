@@ -110,6 +110,188 @@ class TestRegenerateShortDialogue:
 
 
 # ---------------------------------------------------------------------------
+# Phase 13-2 Step 4d (Gemini smoke-review BLOCKER #B):
+# _parse_dialogue must tolerate the Sonnet output drift patterns the
+# 2026-04-24 smoke run hit:
+#   - multiple ```json...``` blocks (model emitting "draft" then "final")
+#   - prose preamble with [neutral]/[scared] style emotion tags
+#   - truncated arrays (max_tokens mid-dialogue)
+#   - one bad entry inside an otherwise valid array
+# Pre-fix: any of these dropped the entire scene to a 1-line placeholder
+# and triggered Reviewer.mechanical_check failure → revision loop.
+# ---------------------------------------------------------------------------
+
+
+class TestParseDialogueRobust:
+
+    def _scene(self):
+        return Scene(
+            id="s1", title="Test", description="x",
+            background_id="bg", characters_present=["alice"],
+        )
+
+    def test_clean_single_json_block(self):
+        """Sane case stays sane — regression guard."""
+        from vn_agent.agents.writer import _parse_dialogue
+        content = (
+            "```json\n"
+            '[{"character_id": "alice", "text": "Hello.", "emotion": "neutral"},\n'
+            ' {"character_id": null, "text": "She turned.", "emotion": "thoughtful"}]\n'
+            "```"
+        )
+        result = _parse_dialogue(content, self._scene())
+        assert len(result) == 2
+        assert result[0].text == "Hello."
+        assert result[0].character_id == "alice"
+        assert result[1].character_id is None
+
+    def test_multiple_json_blocks_picks_first_valid(self):
+        """Sonnet emits a 'draft' block then 'final version' block. The
+        OLD parser's regex-find-first happened to grab the first if both
+        were intact, but failed if the first had any oddity. Now we walk
+        every fenced block until one parses."""
+        from vn_agent.agents.writer import _parse_dialogue
+        content = (
+            "Here's a draft:\n"
+            "```json\n"
+            '[{"character_id": "alice", "text": "Draft line.", "emotion": "neutral"}]\n'
+            "```\n"
+            "\n"
+            "And the final version:\n"
+            "```json\n"
+            '[{"character_id": "alice", "text": "Final line.", "emotion": "happy"}]\n'
+            "```"
+        )
+        result = _parse_dialogue(content, self._scene())
+        assert len(result) == 1
+        # First well-formed block wins (the draft, in this case). That's
+        # acceptable — Sonnet's drafts are usually similar in quality.
+        # The contract is just "don't drop the scene to placeholder".
+        assert result[0].text == "Draft line."
+
+    def test_prose_preamble_with_emotion_brackets(self):
+        """The 2026-04-24 smoke failure mode: Sonnet preamble has
+        '[neutral]' / '[scared]' style annotations before the actual
+        JSON array. The OLD non-greedy regex matched '[neutral]' as
+        the array, choked, and fell to placeholder."""
+        from vn_agent.agents.writer import _parse_dialogue
+        content = (
+            "Final draft:\n\n"
+            '1. NULL (narration) - "She turned." [neutral]\n'
+            '2. ALICE - "Are you sure?" [scared]\n\n'
+            "```json\n"
+            '[{"character_id": null, "text": "She turned.", "emotion": "neutral"},\n'
+            ' {"character_id": "alice", "text": "Are you sure?", "emotion": "scared"}]\n'
+            "```"
+        )
+        result = _parse_dialogue(content, self._scene())
+        assert len(result) == 2
+        assert result[0].text == "She turned."
+
+    def test_no_fence_bare_array_with_prose(self):
+        """Some Sonnet outputs skip the markdown fence entirely. Our
+        Stage 2 (bracket-balanced from any '[') must catch it, ignoring
+        '[neutral]'-style narration brackets."""
+        from vn_agent.agents.writer import _parse_dialogue
+        content = (
+            "Here's the dialogue [neutral tone throughout]:\n\n"
+            '[\n'
+            '  {"character_id": "alice", "text": "One.", "emotion": "neutral"},\n'
+            '  {"character_id": "alice", "text": "Two.", "emotion": "neutral"}\n'
+            ']\n\n'
+            "End."
+        )
+        result = _parse_dialogue(content, self._scene())
+        assert len(result) == 2
+
+    def test_truncated_array_recovers_complete_objects(self):
+        """Sonnet hit max_tokens partway through line 4. Pre-fix lost
+        all 3 valid lines too because no closing ']' meant json.loads
+        failed on the array. Per-object recovery (Stage 4) keeps them."""
+        from vn_agent.agents.writer import _parse_dialogue
+        content = (
+            "```json\n"
+            '[\n'
+            '  {"character_id": "alice", "text": "One.", "emotion": "neutral"},\n'
+            '  {"character_id": "alice", "text": "Two.", "emotion": "neutral"},\n'
+            '  {"character_id": "alice", "text": "Three.", "emotion": "happy"},\n'
+            '  {"character_id": "alice", "text": "Fou'  # truncated mid-string
+        )
+        result = _parse_dialogue(content, self._scene())
+        # 3 complete objects recovered; the truncated 4th dropped silently.
+        assert len(result) == 3
+        assert [d.text for d in result] == ["One.", "Two.", "Three."]
+
+    def test_single_bad_entry_does_not_kill_array(self):
+        """If one entry has a JSON syntax error (e.g. unescaped quote),
+        the WHOLE array used to fail json.loads. Recovery walks objects
+        independently so we keep the good ones."""
+        from vn_agent.agents.writer import _parse_dialogue
+        content = (
+            "```json\n"
+            '[\n'
+            '  {"character_id": "alice", "text": "Good line.", "emotion": "neutral"},\n'
+            '  {"character_id": "alice", "text": "He said "hello"", "emotion": "neutral"},\n'  # noqa: E501  unescaped quote
+            '  {"character_id": "alice", "text": "Another good line.", "emotion": "happy"}\n'
+            ']\n'
+            "```"
+        )
+        result = _parse_dialogue(content, self._scene())
+        # The malformed middle entry is dropped; the two good lines survive.
+        assert len(result) == 2
+        assert result[0].text == "Good line."
+        assert result[1].text == "Another good line."
+
+    def test_total_garbage_falls_to_placeholder(self):
+        """No JSON at all → placeholder remains the last resort. Reviewer
+        will then trigger continuation regen via _regenerate_short_dialogue."""
+        from vn_agent.agents.writer import _parse_dialogue
+        result = _parse_dialogue("Just prose, no JSON anywhere.", self._scene())
+        assert len(result) == 1
+        assert result[0].text.startswith("[Scene:")
+
+    def test_real_smoke_failure_ch1_arrival(self):
+        """Regression test using the actual debug file from the 2026-04-24
+        smoke run that fell to placeholder. Must now parse 13 lines."""
+        from pathlib import Path
+
+        from vn_agent.agents.writer import _parse_dialogue
+        from vn_agent.prompts.templates import strip_thinking
+        path = (
+            Path(__file__).resolve().parents[2]
+            / "demo_output" / "smoke_longvn_20260425_022120"
+            / "debug" / "writer_ch1_arrival.txt"
+        )
+        if not path.exists():
+            pytest.skip(f"smoke debug file missing: {path}")
+        content = strip_thinking(path.read_text(encoding="utf-8"))
+        result = _parse_dialogue(content, self._scene())
+        # Pre-fix: 1 (placeholder). Post-fix: ≥10 (the actual array
+        # has 13 lines; we accept anything ≥10 as a clear non-placeholder).
+        assert len(result) >= 10, (
+            f"Expected ≥10 dialogue lines from real smoke output; got "
+            f"{len(result)}. Pre-fix this returned 1 (placeholder)."
+        )
+
+    def test_real_smoke_failure_ch3_tide_turns(self):
+        """Same regression for the second scene that hit placeholder."""
+        from pathlib import Path
+
+        from vn_agent.agents.writer import _parse_dialogue
+        from vn_agent.prompts.templates import strip_thinking
+        path = (
+            Path(__file__).resolve().parents[2]
+            / "demo_output" / "smoke_longvn_20260425_022120"
+            / "debug" / "writer_ch3_tide_turns.txt"
+        )
+        if not path.exists():
+            pytest.skip(f"smoke debug file missing: {path}")
+        content = strip_thinking(path.read_text(encoding="utf-8"))
+        result = _parse_dialogue(content, self._scene())
+        assert len(result) >= 10
+
+
+# ---------------------------------------------------------------------------
 # Phase 13-2 Step 1 (AUDITS §2 piggyback):
 # run_writer must snapshot state_constraints onto each scene's
 # state_constraints_seen before calling _write_scene.
