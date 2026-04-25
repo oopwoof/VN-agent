@@ -8,9 +8,14 @@ from collections.abc import Awaitable, Callable
 from langgraph.graph import END, StateGraph
 
 from vn_agent.agents.character_designer import run_character_designer
-from vn_agent.agents.director import run_director
+from vn_agent.agents.director import (
+    run_director,
+    run_director_full_redo,
+    run_director_step2_redo,
+)
 from vn_agent.agents.music_director import run_music_director
 from vn_agent.agents.reviewer import run_reviewer
+from vn_agent.agents.routing import decide_retry_target
 from vn_agent.agents.scene_artist import run_scene_artist
 from vn_agent.agents.state import AgentState
 from vn_agent.agents.state_orchestrator import run_state_orchestrator
@@ -80,6 +85,46 @@ async def _run_assets_parallel(state: AgentState) -> dict:
             merged.update(r)
     merged["errors"] = errors
     return merged
+
+
+def _after_structure_review(state: AgentState) -> str:
+    """Phase 13-2 Step 4e: route on structure_reviewer findings.
+
+    Calls vn_agent.agents.routing.decide_retry_target with the typed
+    findings + revision_count + max_director_revisions cap. Returns the
+    edge label graph.add_conditional_edges dispatches on:
+
+      "accept"       -> state_orchestrator (proceed normally)
+      "step2_only"   -> director_step2_redo (re-run step2 only)
+      "step1_step2"  -> director_full_redo  (re-run both steps)
+
+    Pre-Step-4e topology: structure_reviewer -> state_orchestrator
+    (advisory only). Now structural failures actually cycle back to
+    Director instead of being silently passed through to Writer (which
+    can't fix scene-graph defects anyway — Gemini smoke-review #C).
+    """
+    settings = get_settings()
+    findings = state.get("structure_review_findings", []) or []
+    revision_count = state.get("director_revision_count", 0)
+    decision = decide_retry_target(
+        findings,
+        revision_count=revision_count,
+        max_revisions=settings.max_director_revisions,
+    )
+    if decision.target == "accept":
+        if findings:
+            logger.info(
+                f"StructureReviewer findings accepted "
+                f"(rev={revision_count}/{settings.max_director_revisions}): "
+                f"{decision.reason}"
+            )
+        return "accept"
+    logger.info(
+        f"StructureReviewer triggering Director {decision.target} "
+        f"(rev={revision_count} -> {revision_count + 1}): "
+        f"{decision.reason}"
+    )
+    return decision.target
 
 
 def _should_revise(state: AgentState) -> str:
@@ -157,6 +202,16 @@ def build_graph():  # type: ignore[return]
         "structure_reviewer",
         _make_traced_node("structure_reviewer", run_structure_reviewer),
     )
+    # Phase 13-2 Step 4e: Director retry nodes triggered by routing
+    # decision after structure_reviewer flags actionable findings.
+    graph.add_node(  # type: ignore[call-overload]
+        "director_step2_redo",
+        _make_traced_node("director_step2_redo", run_director_step2_redo),
+    )
+    graph.add_node(  # type: ignore[call-overload]
+        "director_full_redo",
+        _make_traced_node("director_full_redo", run_director_full_redo),
+    )
     graph.add_node(  # type: ignore[call-overload]
         "state_orchestrator",
         _make_traced_node("state_orchestrator", run_state_orchestrator),
@@ -176,9 +231,23 @@ def build_graph():  # type: ignore[return]
     graph.add_node("asset_generation", _run_assets_parallel)  # type: ignore[call-overload]
 
     # Linear flow: director → structure → state → thinking → sync → writer → reviewer
+    # Phase 13-2 Step 4e: structure_reviewer now has a conditional edge
+    # that can route back to a Director redo node when actionable
+    # findings are present. Redo nodes loop back to structure_reviewer
+    # to re-audit; the routing helper accepts after max_director_revisions.
     graph.set_entry_point("director")
     graph.add_edge("director", "structure_reviewer")
-    graph.add_edge("structure_reviewer", "state_orchestrator")
+    graph.add_conditional_edges(
+        "structure_reviewer",
+        _after_structure_review,
+        {
+            "accept": "state_orchestrator",
+            "step2_only": "director_step2_redo",
+            "step1_step2": "director_full_redo",
+        },
+    )
+    graph.add_edge("director_step2_redo", "structure_reviewer")
+    graph.add_edge("director_full_redo", "structure_reviewer")
     graph.add_edge("state_orchestrator", "thinking_fanout")
     graph.add_edge("thinking_fanout", "cross_ref_sync")
     graph.add_edge("cross_ref_sync", "writer")

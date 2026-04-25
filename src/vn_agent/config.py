@@ -117,6 +117,13 @@ class Settings(BaseSettings):
 
     max_scenes: int = 20
     max_revision_rounds: int = 3
+    # Phase 13-2 Step 4e: how many Director retries triggered by
+    # structure_reviewer findings the pipeline will allow before
+    # accepting the outline as-is. Default 2 covers Gemini's "whack-a-
+    # mole" risk: round 1 fixes the structural issue but may drop a
+    # different field (scene_brief / context_deps); round 2 catches
+    # the regression. Beyond that returns are diminishing.
+    max_director_revisions: int = 2
     min_dialogue_lines: int = 5
     max_dialogue_lines: int = 20
     reviewer_skip_llm: bool = False

@@ -142,7 +142,8 @@ async def run_director(state: AgentState) -> dict:
 
 
 async def _step1_outline(
-    theme: str, max_scenes: int, num_characters: int, output_dir: str, settings
+    theme: str, max_scenes: int, num_characters: int, output_dir: str, settings,
+    *, retry_feedback: str = "",
 ) -> dict:
     """Step 1: generate scene outlines + characters (no branches/music)."""
     small = _is_small_model(settings.llm_director_model)
@@ -282,7 +283,18 @@ For short/simple stories (≤6 scenes), set foreshadow_plan=[] and \
 tone_register=""; they don't need this scaffolding and paying for \
 unused tokens is wasteful."""
 
-    response = await ainvoke_llm(system, user_prompt, model=settings.llm_director_model, caller="director/step1")
+    # Phase 13-2 Step 4e: APPEND retry feedback at the very end so the
+    # cached prefix (system + main user_prompt body) stays byte-identical
+    # to the first call. Anthropic's prefix cache is strictly front-to-
+    # back — prepending feedback would invalidate the entire cache and
+    # cost ~$0.27 per retry instead of ~$0.05 (Gemini design review #f).
+    if retry_feedback:
+        user_prompt += "\n\n" + retry_feedback
+
+    response = await ainvoke_llm(
+        system, user_prompt, model=settings.llm_director_model,
+        caller="director/step1", cache_ttl="1h", force_cache=True,
+    )
     content = response.content if hasattr(response, "content") else str(response)
     _save_debug_raw(output_dir, "director_step1_raw.txt", content)
     content = strip_thinking(content)
@@ -294,7 +306,10 @@ unused tokens is wasteful."""
         raise
 
 
-async def _step2_details(outline: dict, output_dir: str, settings) -> dict:
+async def _step2_details(
+    outline: dict, output_dir: str, settings,
+    *, retry_feedback: str = "",
+) -> dict:
     """Step 2: add navigation (next_scene_id/branches) and music mood to each scene."""
     small = _is_small_model(settings.llm_director_model)
     scene_ids = [s["id"] for s in (outline.get("scenes") or [])]
@@ -431,8 +446,13 @@ character in characters_present
 will inflate beats into actual dialogue; they need the skeleton, not your \
 draft."""
 
+    # Phase 13-2 Step 4e: APPEND retry feedback (cache-safe; see _step1_outline).
+    if retry_feedback:
+        user_prompt += "\n\n" + retry_feedback
+
     response = await ainvoke_llm(
-        system, user_prompt, model=settings.llm_director_model, caller="director/step2",
+        system, user_prompt, model=settings.llm_director_model,
+        caller="director/step2", cache_ttl="1h", force_cache=True,
     )
     content = response.content if hasattr(response, "content") else str(response)
     _save_debug_raw(output_dir, "director_step2_raw.txt", content)
@@ -861,3 +881,255 @@ def _build_from_plan(plan: dict, theme: str) -> tuple[VNScript, dict[str, Charac
         macro_reference=macro_ref,
     )
     return script, characters
+
+
+# ---------------------------------------------------------------------------
+# Phase 13-2 Step 4e: Director retry nodes
+#
+# Re-invoked after structure_reviewer flags actionable findings AND the
+# routing helper (vn_agent.agents.routing.decide_retry_target) decides
+# Director should re-run. Two flavors:
+#
+#   run_director_step2_redo: re-runs step2 only, reusing step1's outline
+#     + chapters + characters + world_vars + macro_reference. Cheaper
+#     (~$0.27 vs $0.35 full retry); fixes per-scene wiring issues
+#     (branch wiring, strategy assignment, branch_intent_misalign).
+#
+#   run_director_full_redo: re-runs both step1 and step2 from scratch
+#     with feedback. Used when findings include step1-class issues
+#     (roster_unused, macro_pacing_misaligned, foreshadow_payoff_missing,
+#     world_var_unused) where step2-only retry would either fail or
+#     produce a forced cameo.
+#
+# Both APPEND feedback to the user_prompt (cache-safe; see _step1_outline
+# / _step2_details for the rationale on why prepending breaks the
+# Anthropic prefix cache).
+# ---------------------------------------------------------------------------
+
+
+def _format_retry_feedback(findings: list) -> str:
+    """Render StructureFinding[] as an APPEND-safe block for Director's
+    next user_prompt. Groups by category so Director can address each
+    family in one pass instead of treating every finding independently.
+    Drops requires_retry=False findings — those are advisory, no point
+    asking Director to "fix" them.
+    """
+    actionable = [f for f in findings if getattr(f, "requires_retry", False)]
+    if not actionable:
+        return ""
+    by_cat: dict[str, list] = {}
+    for f in actionable:
+        by_cat.setdefault(f.category, []).append(f)
+    parts = [
+        "## RETRY FEEDBACK (Phase 13-2 Step 4e)",
+        "",
+        "The previous outline had structural issues that must be addressed in",
+        "this revision. Re-emit the FULL JSON with these issues fixed; keep",
+        "everything else stable.",
+        "",
+    ]
+    for cat, items in by_cat.items():
+        parts.append(f"### {cat} ({len(items)} finding{'s' if len(items) > 1 else ''})")
+        for f in items:
+            scene_marker = (
+                f"[scene={f.target_scene_id}] " if getattr(f, "target_scene_id", None)
+                else ""
+            )
+            parts.append(f"  - {scene_marker}{f.message}")
+        parts.append("")
+    return "\n".join(parts)
+
+
+def _outline_dict_from_script(
+    script: VNScript, characters: dict[str, CharacterProfile],
+    art_direction: str,
+) -> dict:
+    """Reconstruct the step1 `outline` dict from an existing VNScript +
+    characters. Used by step2_redo to feed _step2_details without
+    re-running step1.
+    """
+    return {
+        "title": script.title,
+        "description": script.description,
+        "art_direction": art_direction,
+        "start_scene_id": script.start_scene_id,
+        "scenes": [
+            {
+                "id": s.id,
+                "title": s.title,
+                "description": s.description,
+                "background_id": s.background_id,
+                "characters_present": list(s.characters_present),
+                "narrative_strategy": s.narrative_strategy,
+            }
+            for s in script.scenes
+        ],
+        "characters": [
+            {
+                "id": c.id,
+                "name": c.name,
+                "color": getattr(c, "color", "#aabbcc"),
+                "personality": c.personality,
+                "background": c.background,
+                "role": c.role,
+            }
+            for c in characters.values()
+        ],
+        "world_variables": [
+            {
+                "name": v.name,
+                "type": v.type,
+                "initial_value": v.initial_value,
+                "description": v.description,
+            }
+            for v in script.world_variables
+        ],
+        "macro_reference": (
+            script.macro_reference.model_dump() if script.macro_reference else None
+        ),
+    }
+
+
+async def run_director_step2_redo(state: AgentState) -> dict:
+    """Phase 13-2 Step 4e: re-run Director step2 only with feedback.
+
+    Triggered by routing.decide_retry_target("step2_only") when
+    structure_reviewer flagged step2-class issues (per-scene wiring:
+    branch_intent_misalign, branch_target_invalid, etc.). Reuses
+    step1's outline + chapters + characters + macro_reference, just
+    re-emits per-scene navigation/branches/scene_brief with feedback
+    appended to the user prompt.
+    """
+    settings = get_settings()
+    output_dir = state.get("output_dir", ".")
+    theme = state["theme"]
+    script: VNScript | None = state.get("vn_script")
+    characters = state.get("characters", {}) or {}
+    art_direction = state.get("art_direction", "")
+    findings = state.get("structure_review_findings", []) or []
+    rev = state.get("director_revision_count", 0)
+
+    if script is None:
+        logger.warning("director_step2_redo: no vn_script in state, skipping")
+        return {"director_revision_count": rev + 1}
+
+    feedback = _format_retry_feedback(findings)
+    logger.info(
+        f"Director step2 redo (revision {rev + 1}): feedback "
+        f"covers {sum(1 for f in findings if f.requires_retry)} actionable "
+        f"finding(s)"
+    )
+
+    outline = _outline_dict_from_script(script, characters, art_direction)
+    detail_data = await _step2_details(
+        outline, output_dir, settings, retry_feedback=feedback,
+    )
+    plan_data = _merge_outline_details(outline, detail_data)
+
+    try:
+        new_script, new_characters = _build_from_plan(plan_data, theme)
+    except Exception as e:
+        logger.warning(
+            f"Director step2 redo build failed, attempting LLM repair: {e}"
+        )
+        repaired = await _attempt_repair(plan_data, str(e), output_dir, settings)
+        if repaired:
+            new_script, new_characters = _build_from_plan(repaired, theme)
+        else:
+            logger.error(
+                f"Director step2 redo failed; keeping prior script: {e}"
+            )
+            return {"director_revision_count": rev + 1}
+
+    branch_issues = _validate_branch_structure(new_script)
+    if branch_issues:
+        logger.warning(
+            f"director_step2_redo: branch issues after retry "
+            f"({len(branch_issues)}) — degrading"
+        )
+        _degrade_invalid_branches(new_script, branch_issues)
+
+    _save_checkpoint(output_dir, new_script, new_characters)
+
+    # world_state stays seeded from new_script.world_variables (step1
+    # outputs are reused via the outline reconstruction, so initial values
+    # are unchanged from the prior run; explicit reseed keeps the contract).
+    world_state: dict = {v.name: v.initial_value for v in new_script.world_variables}
+
+    return {
+        "vn_script": new_script,
+        "characters": new_characters,
+        "world_state": world_state,
+        "director_revision_count": rev + 1,
+    }
+
+
+async def run_director_full_redo(state: AgentState) -> dict:
+    """Phase 13-2 Step 4e: re-run Director step1 AND step2 with feedback.
+
+    Triggered by routing.decide_retry_target("step1_step2") when
+    structure_reviewer flagged step1-class issues (roster_unused,
+    world_var_unused, macro_pacing_misaligned, foreshadow_payoff_missing).
+    These can't be fixed by step2-only retry — declarations live in step1.
+    """
+    settings = get_settings()
+    output_dir = state.get("output_dir", ".")
+    theme = state["theme"]
+    max_scenes = state.get("max_scenes", 10)
+    num_characters = state.get("num_characters", 3)
+    findings = state.get("structure_review_findings", []) or []
+    rev = state.get("director_revision_count", 0)
+
+    feedback = _format_retry_feedback(findings)
+    logger.info(
+        f"Director full redo (revision {rev + 1}): feedback covers "
+        f"{sum(1 for f in findings if f.requires_retry)} actionable finding(s)"
+    )
+
+    outline_data = await _step1_outline(
+        theme, max_scenes, num_characters, output_dir, settings,
+        retry_feedback=feedback,
+    )
+    detail_data = await _step2_details(
+        outline_data, output_dir, settings, retry_feedback=feedback,
+    )
+    plan_data = _merge_outline_details(outline_data, detail_data)
+
+    try:
+        script, characters = _build_from_plan(plan_data, theme)
+    except Exception as e:
+        logger.warning(f"Director full redo build failed, attempting repair: {e}")
+        repaired = await _attempt_repair(plan_data, str(e), output_dir, settings)
+        if repaired:
+            script, characters = _build_from_plan(repaired, theme)
+        else:
+            logger.error(
+                f"Director full redo failed; keeping prior script: {e}"
+            )
+            return {"director_revision_count": rev + 1}
+
+    branch_issues = _validate_branch_structure(script)
+    if branch_issues:
+        logger.warning(
+            f"director_full_redo: branch issues after retry "
+            f"({len(branch_issues)}) — degrading"
+        )
+        _degrade_invalid_branches(script, branch_issues)
+
+    _save_checkpoint(output_dir, script, characters)
+
+    art_direction = plan_data.get("art_direction") or state.get("art_direction", "")
+    if not art_direction:
+        art_direction = (
+            "painterly anime style, consistent color palette, atmospheric lighting"
+        )
+
+    world_state: dict = {v.name: v.initial_value for v in script.world_variables}
+
+    return {
+        "vn_script": script,
+        "characters": characters,
+        "art_direction": art_direction,
+        "world_state": world_state,
+        "director_revision_count": rev + 1,
+    }

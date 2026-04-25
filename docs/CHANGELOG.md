@@ -15,6 +15,32 @@
 
 ## [Unreleased]
 
+### 2026-04-24 | 实现 - 2026-04-24 22:47
+
+**变更文件** (5 个):
+**源码变更** (4 文件):
+  - `src/vn_agent/agents/director.py`
+  - `src/vn_agent/agents/graph.py`
+  - `src/vn_agent/agents/writer.py`
+  - `src/vn_agent/config.py`
+
+**测试变更** (1 文件):
+  - `tests/test_agents/test_graph_routing.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/director.py         | 280 +++++++++++++++++++++++++++++++-
+ src/vn_agent/agents/graph.py            |  73 ++++++++-
+ src/vn_agent/agents/writer.py           |   9 +-
+ src/vn_agent/config.py                  |   7 +
+ tests/test_agents/test_graph_routing.py | 206 +++++++++++++++++++++++
+ 5 files changed, 568 insertions(+), 7 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-24 | 实现 - 2026-04-24 22:20
 
 **变更文件** (5 个):
