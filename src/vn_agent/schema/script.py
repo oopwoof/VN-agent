@@ -444,6 +444,69 @@ class StateTimelineEntry(BaseModel):
     )
 
 
+# Phase 13-2 Step 4e: structured findings produced by structure_reviewer.
+# Replaces plain-string `issues` so the routing helper can decide which
+# Director step to retry (step1 vs step2 vs accept) without re-parsing
+# the message text.
+StructureFindingCategory = Literal[
+    # Step1-class (declaration-level): roster / world_vars / macro_reference
+    "roster_unused",
+    "world_var_unused",
+    "macro_pacing_misaligned",
+    "foreshadow_payoff_missing",
+    # Step2-class (per-scene wiring): branches / strategies / characters_present
+    "branch_target_invalid",
+    "unreachable_scene",
+    "branch_dead_end",
+    "branch_intent_misalign",
+    "strategy_distribution_gap",
+    "branch_bypass",
+    "tone_inconsistent",
+    "world_var_undeclared_use",
+    "character_undeclared_use",
+    # Catch-all: surfaced as warning, never auto-retry. Use for stylistic
+    # / subjective LLM judgments that aren't fixable by regenerating.
+    "advisory",
+]
+
+
+class StructureFinding(BaseModel):
+    """One finding from structure_reviewer (Phase 13-2 Step 4e).
+
+    Routing helper (vn_agent/agents/routing.py) reads `category` +
+    `source` + `requires_retry` to decide whether this finding triggers
+    a Director retry, and if so which step to re-run.
+    """
+    category: StructureFindingCategory = Field(
+        description="Issue type. Step1-class categories trigger step1+step2 "
+                    "escalation; step2-class trigger step2-only retry; "
+                    "'advisory' is logged as a warning only.",
+    )
+    source: Literal["deterministic", "llm"] = Field(
+        description="Where the finding came from. 'deterministic' = pure-Python "
+                    "static check (~0% false positive). 'llm' = Sonnet audit "
+                    "(may be subjective; routing caps LLM-only retries at 1).",
+    )
+    message: str = Field(
+        description="Human-readable description of the issue. Forms the "
+                    "user-facing log entry + Director retry prompt feedback.",
+    )
+    requires_retry: bool = Field(
+        default=True,
+        description="False for advisory findings that should NOT trigger a "
+                    "retry even if max_director_revisions allows it.",
+    )
+    target_scene_id: str | None = Field(
+        default=None,
+        description="Optional pointer to the offending scene_id, for future "
+                    "surgical-fix designs.",
+    )
+    target_character_id: str | None = Field(
+        default=None,
+        description="Optional pointer to the offending character_id.",
+    )
+
+
 class VNScript(BaseModel):
     title: str = Field(description="Visual novel title")
     description: str = Field(description="Story premise and overview")
