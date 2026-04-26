@@ -1329,6 +1329,11 @@ Story context: {script.description}
 {older_summaries_block}{prior_context_block}
 {thinking_block}
 Write {settings.min_dialogue_lines}-{settings.max_dialogue_lines} dialogue/narration lines.
+Target 800-1500 words total dialogue/narration for this scene — aim for the
+shorter end on transitional scenes, the longer end on emotional turning
+points or revelations. Avoid repeating beats; every line should advance
+the scene.
+
 Return JSON array:
 [
   {{"character_id": "char_id_or_null", "text": "dialogue text", "emotion": "neutral"}},
@@ -1414,12 +1419,18 @@ After dialogue, if branches exist, the player will choose:
     # cache_ttl="1h" when the monolithic prefix meets the 1024-token
     # threshold (see prompts/cached_prefix.build_monolithic_prefix).
     effective_system = system_prompt if system_prompt else SYSTEM_PROMPT
+    # Phase 13-3 M0-1: hard cap per-scene output to bound cost. Without
+    # this, Writer is unbounded and the long tail (observed: 7205 tokens
+    # at n=6 smoke) drives 50-scene cost past the $15 north star. The
+    # word-count guidance baked into user_prompt biases the model toward
+    # the typical band; max_tokens is the safety net.
     response = await ainvoke_llm(
         effective_system, user_prompt,
         model=settings.llm_writer_model,
         caller=f"writer/{scene.id}",
         cache_ttl=cache_ttl,
         force_cache=force_cache,
+        max_tokens=settings.writer_max_tokens_per_scene,
     )
     content = response.content if hasattr(response, 'content') else str(response)
 

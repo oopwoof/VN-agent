@@ -257,6 +257,22 @@ class Settings(BaseSettings):
     # permitted when thinking is enabled AND writer consumes it
     # (validated below in _require_thinking_for_parallel_writer).
     writer_max_concurrent: int = 1
+    # Phase 13-3 M0-1 (Gemini review BLOCKER pre-M1): per-scene Writer
+    # output budget hard cap. Without this, Writer cost is unbounded —
+    # napkin math shows 50 scenes × 5K avg output ≈ $7-9, but with right-
+    # tail spikes (observed: single scene 7205 tokens at n=6) the average
+    # can drift to 6-8K and total blows past the $15 north star. This
+    # cap is per-call, applied via langchain ChatAnthropic max_tokens at
+    # construction time (cached per-(model, max_tokens) tuple in
+    # _get_llm_cached, so different callers can use different caps without
+    # losing cache hits within their own caller bucket).
+    #
+    # Default 5000: empirical median Writer output is ~3K, p95 ~5K — this
+    # caps the long tail without truncating typical scenes. Scene-type
+    # adaptive budgets (open=4K, climax=6K) deferred until M1 data justifies.
+    # If Writer regularly hits this cap, M1 report will surface it and we
+    # raise per scene_brief.tension_target.
+    writer_max_tokens_per_scene: int = 5000
     # Phase 13-2 Step 3.5 (post-Gemini-review): Tier 2 Director arbitration.
     # When ON, conflicts that Tier 1 (deterministic) had to fall back to
     # "latest claimant wins" get re-arbitrated by a second Director LLM

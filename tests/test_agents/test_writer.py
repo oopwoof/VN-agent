@@ -1670,3 +1670,117 @@ class TestParallelFailureAppliesStateWrites:
         # And: world_state returned from run_writer reflects all three.
         assert result["world_state"] == {"a": 1, "b": 2, "c": 3}
 
+
+# ---------------------------------------------------------------------------
+# Phase 13-3 M0-1: Writer output budget hard cap (Gemini review BLOCKER)
+#
+# Per-scene Writer output is now capped via ainvoke_llm(..., max_tokens=...)
+# to bound 50-scene cost. Without this, a single right-tail scene (observed
+# 7205 tokens at n=6) drives total cost past the $15 north star.
+# ---------------------------------------------------------------------------
+
+
+class TestWriterMaxTokensHardCap:
+    @pytest.mark.asyncio
+    async def test_write_scene_passes_max_tokens_kwarg(self, mocker, tmp_path):
+        """_write_scene must forward settings.writer_max_tokens_per_scene
+        to ainvoke_llm so the per-call output budget is enforced."""
+        from unittest.mock import AsyncMock
+
+        from vn_agent.agents.writer import _write_scene
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import Scene, VNScript
+
+        # Capture kwargs so we can assert on them
+        captured_kwargs: dict = {}
+
+        class _FakeResp:
+            content = '[{"character_id": null, "text": "x", "emotion": "neutral"}]'
+
+        async def _fake_invoke(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            return _FakeResp()
+
+        mocker.patch("vn_agent.agents.writer.ainvoke_llm", side_effect=_fake_invoke)
+
+        # Stub out RAG / lore / state_orchestrator side-paths
+        mocker.patch("vn_agent.agents.writer._append_rag_record",
+                     new=AsyncMock(return_value=None))
+
+        scene = Scene(
+            id="s1", title="S1", description="x",
+            background_id="bg", characters_present=["a"],
+        )
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s1", scenes=[scene], world_variables=[],
+        )
+        chars = {"a": CharacterProfile(
+            id="a", name="A", role="p", personality="", background="",
+        )}
+        char_descriptions = "A: friendly"
+
+        await _write_scene(
+            scene, script, char_descriptions, "",
+            output_dir=str(tmp_path),
+        )
+
+        # The per-scene output cap must arrive as the `max_tokens` kwarg.
+        assert "max_tokens" in captured_kwargs, (
+            f"Writer must pass max_tokens to ainvoke_llm; "
+            f"got kwargs={list(captured_kwargs.keys())}"
+        )
+        # And it must come from settings.writer_max_tokens_per_scene
+        # (default 5000 — so the test is robust to future tuning).
+        from vn_agent.config import get_settings
+        expected_cap = get_settings().writer_max_tokens_per_scene
+        assert captured_kwargs["max_tokens"] == expected_cap
+        _ = chars  # quiet linter — chars unused on this fast path
+
+    @pytest.mark.asyncio
+    async def test_write_scene_prompt_has_word_count_guidance(self, mocker, tmp_path):
+        """Phase 13-3 M0-1 hardening: prompt-level word target steers the
+        model toward the typical 800-1500 word band BEFORE max_tokens
+        kicks in as the safety net. Without this, max_tokens alone would
+        produce truncated prose at the upper bound rather than well-formed
+        shorter prose."""
+        captured_user_prompts: list[str] = []
+
+        class _FakeResp:
+            content = '[{"character_id": null, "text": "x", "emotion": "neutral"}]'
+
+        async def _fake_invoke(system, user, *args, **kwargs):
+            captured_user_prompts.append(user)
+            return _FakeResp()
+
+        mocker.patch("vn_agent.agents.writer.ainvoke_llm", side_effect=_fake_invoke)
+        from unittest.mock import AsyncMock
+        mocker.patch("vn_agent.agents.writer._append_rag_record",
+                     new=AsyncMock(return_value=None))
+
+        from vn_agent.agents.writer import _write_scene
+        from vn_agent.schema.character import CharacterProfile
+        from vn_agent.schema.script import Scene, VNScript
+
+        scene = Scene(
+            id="s1", title="S1", description="x",
+            background_id="bg", characters_present=["a"],
+        )
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s1", scenes=[scene], world_variables=[],
+        )
+        chars = {"a": CharacterProfile(
+            id="a", name="A", role="p", personality="", background="",
+        )}
+        await _write_scene(
+            scene, script, "A: friendly", "",
+            output_dir=str(tmp_path),
+        )
+
+        assert captured_user_prompts, "Writer prompt should have been captured"
+        prompt = captured_user_prompts[0]
+        # The word-count steering line — must mention the explicit band
+        assert "800-1500 words" in prompt
+        _ = chars  # quiet linter
+

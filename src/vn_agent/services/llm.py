@@ -271,8 +271,13 @@ def _infer_provider_from_model(model: str) -> str | None:
     return None
 
 
-def get_llm(model: str | None = None, *, api_key_override: str | None = None):
-    """Get configured LLM instance (cached per model + api_key).
+def get_llm(
+    model: str | None = None,
+    *,
+    api_key_override: str | None = None,
+    max_tokens_override: int | None = None,
+):
+    """Get configured LLM instance (cached per model + api_key + max_tokens).
 
     Sprint 8-1 fix: when `model` is an OpenAI name (gpt-*, o1-*) but the
     pipeline provider is Anthropic (or vice versa), override the provider
@@ -284,6 +289,11 @@ def get_llm(model: str | None = None, *, api_key_override: str | None = None):
     specific key (from `_KeyPool.pick()`). Different keys yield different
     `_get_llm_cached` cache entries, so key rotation naturally creates a
     fresh ChatAnthropic instance per key.
+
+    Phase 13-3 M0-1: max_tokens_override lets callers (e.g. Writer) pin a
+    per-call output budget. _get_llm_cached's lru_cache is keyed on
+    max_tokens, so distinct callers using distinct caps still each get a
+    cached instance (no perf regression).
     """
     settings = get_settings()
     resolved_model = model or settings.llm_model
@@ -308,11 +318,16 @@ def get_llm(model: str | None = None, *, api_key_override: str | None = None):
     else:
         api_key = settings.openai_api_key
 
+    resolved_max_tokens = (
+        max_tokens_override if max_tokens_override is not None
+        else settings.llm_max_tokens
+    )
+
     return _get_llm_cached(
         effective_provider,
         resolved_model,
         settings.llm_temperature,
-        settings.llm_max_tokens,
+        resolved_max_tokens,
         api_key,
         settings.llm_base_url,
     )
@@ -323,9 +338,14 @@ def get_structured_llm(
     model: str | None = None,
     *,
     api_key_override: str | None = None,
+    max_tokens_override: int | None = None,
 ) -> Any:
     """Get LLM with structured output bound to a Pydantic schema."""
-    return get_llm(model, api_key_override=api_key_override).with_structured_output(schema)
+    return get_llm(
+        model,
+        api_key_override=api_key_override,
+        max_tokens_override=max_tokens_override,
+    ).with_structured_output(schema)
 
 
 def _log_stop_reason(result: Any, caller: str) -> None:
@@ -412,6 +432,7 @@ async def _invoke_once_async(
     api_key_override: str | None,
     cache_ttl: str = "5m",
     force_cache: bool = False,
+    max_tokens_override: int | None = None,
 ) -> T | str:
     """Single invocation attempt with inner tenacity retry (conn errors / 5xx).
     RateLimitError is NOT caught here — the outer pool-rotation loop owns it.
@@ -430,9 +451,17 @@ async def _invoke_once_async(
         )
         messages = [sys_msg, HumanMessage(content=user_prompt)]
         if schema is not None:
-            llm = get_structured_llm(schema, model, api_key_override=api_key_override)
+            llm = get_structured_llm(
+                schema, model,
+                api_key_override=api_key_override,
+                max_tokens_override=max_tokens_override,
+            )
         else:
-            llm = get_llm(model, api_key_override=api_key_override)
+            llm = get_llm(
+                model,
+                api_key_override=api_key_override,
+                max_tokens_override=max_tokens_override,
+            )
         result = await llm.ainvoke(messages)
         _log_stop_reason(result, caller)
         return result
@@ -449,6 +478,7 @@ def _invoke_once_sync(
     api_key_override: str | None,
     cache_ttl: str = "5m",
     force_cache: bool = False,
+    max_tokens_override: int | None = None,
 ) -> T | str:
     """Sync counterpart to _invoke_once_async."""
     from langchain_core.messages import HumanMessage
@@ -465,9 +495,17 @@ def _invoke_once_sync(
         )
         messages = [sys_msg, HumanMessage(content=user_prompt)]
         if schema is not None:
-            llm = get_structured_llm(schema, model, api_key_override=api_key_override)
+            llm = get_structured_llm(
+                schema, model,
+                api_key_override=api_key_override,
+                max_tokens_override=max_tokens_override,
+            )
         else:
-            llm = get_llm(model, api_key_override=api_key_override)
+            llm = get_llm(
+                model,
+                api_key_override=api_key_override,
+                max_tokens_override=max_tokens_override,
+            )
         result = llm.invoke(messages)
         _log_stop_reason(result, caller)
         return result
@@ -484,6 +522,7 @@ async def ainvoke_llm(
     *,
     cache_ttl: str = "5m",
     force_cache: bool = False,
+    max_tokens: int | None = None,
 ) -> T | str:
     """Invoke LLM with system+user prompts, optionally with structured output.
 
@@ -498,6 +537,10 @@ async def ainvoke_llm(
     prompts/cached_prefix.build_monolithic_prefix) pass force_cache=True
     and cache_ttl="1h" to enable the 1-hour cache tier with the caller's
     own threshold decision (not the legacy 1500-char heuristic).
+
+    Phase 13-3 M0-1: callers can pass `max_tokens` to pin a per-call
+    output cap, overriding settings.llm_max_tokens. Used by Writer to
+    bound per-scene cost (writer_max_tokens_per_scene).
     """
     settings = get_settings()
     resolved_model = model or settings.llm_model
@@ -512,6 +555,7 @@ async def ainvoke_llm(
             return await _invoke_once_async(
                 system_prompt, user_prompt, schema, resolved_model,
                 caller, key_override, cache_ttl, force_cache,
+                max_tokens_override=max_tokens,
             )
         except _RATE_LIMIT_TYPES as e:
             last_err = e
@@ -538,6 +582,7 @@ def invoke_llm(
     *,
     cache_ttl: str = "5m",
     force_cache: bool = False,
+    max_tokens: int | None = None,
 ) -> T | str:
     """Synchronous LLM invocation. Same pool + backoff + cache semantics as async."""
     settings = get_settings()
@@ -553,6 +598,7 @@ def invoke_llm(
             return _invoke_once_sync(
                 system_prompt, user_prompt, schema, resolved_model,
                 caller, key_override, cache_ttl, force_cache,
+                max_tokens_override=max_tokens,
             )
         except _RATE_LIMIT_TYPES as e:
             last_err = e
