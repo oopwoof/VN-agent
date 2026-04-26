@@ -366,9 +366,10 @@ def test_ainvoke_llm_with_schema_preserves_cache_control_in_messages(monkeypatch
 
     async def _record_invoke(messages):
         seen_messages.extend(messages)
-        result = MagicMock()
-        result.response_metadata = {}  # _log_stop_reason needs this
-        return result
+        # Phase 13-3 M0-3: include_raw=True returns a dict, not a Message.
+        raw = MagicMock()
+        raw.response_metadata = {}  # _log_stop_reason consumes this
+        return {"raw": raw, "parsed": _Schema(), "parsing_error": None}
 
     fake_wrapped = MagicMock()
     fake_wrapped.ainvoke = AsyncMock(side_effect=_record_invoke)
@@ -418,8 +419,143 @@ def test_ainvoke_llm_with_schema_preserves_cache_control_in_messages(monkeypatch
     assert block["cache_control"]["type"] == "ephemeral"
     assert block["cache_control"]["ttl"] == "1h"
 
-    # Sanity: with_structured_output was called with our schema
-    fake_base.with_structured_output.assert_called_once_with(_Schema)
+    # Sanity: with_structured_output called with schema + include_raw=True (M0-3)
+    fake_base.with_structured_output.assert_called_once_with(
+        _Schema, include_raw=True,
+    )
+
+
+def test_structured_output_logs_stop_reason_from_raw(monkeypatch, caplog):
+    """Phase 13-3 M0-3: include_raw=True restores stop_reason / token logging
+    that Step 4f's structured-output path silently lost. Without this fix,
+    director/step2 logs `stop_reason='unknown' tokens: in=0 out=0` even on
+    successful runs, leaving M1 stress test blind to step2's real cost."""
+    import logging
+    from unittest.mock import AsyncMock, MagicMock
+
+    from pydantic import BaseModel
+
+    class _Schema(BaseModel):
+        x: str = "y"
+
+    async def _fake_invoke(_messages):
+        # Mimic Anthropic's response_metadata shape
+        raw = MagicMock()
+        raw.response_metadata = {
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 1234, "output_tokens": 567},
+            "model": "claude-sonnet-4-6",
+        }
+        return {"raw": raw, "parsed": _Schema(), "parsing_error": None}
+
+    fake_wrapped = MagicMock()
+    fake_wrapped.ainvoke = AsyncMock(side_effect=_fake_invoke)
+    fake_base = MagicMock()
+    fake_base.with_structured_output = MagicMock(return_value=fake_wrapped)
+
+    monkeypatch.setattr(
+        "vn_agent.services.llm._get_llm_cached",
+        lambda *a, **k: fake_base,
+    )
+
+    with patch("vn_agent.services.llm.get_settings") as mock_settings:
+        s = mock_settings.return_value
+        s.llm_provider = "anthropic"
+        s.llm_model = "claude-sonnet-4-6"
+        s.llm_temperature = 0.2
+        s.llm_max_tokens = 16000
+        s.llm_max_retries = 1
+        s.anthropic_max_retries = 1
+        s.anthropic_api_key = "sk-test"
+        s.openai_api_key = ""
+        s.llm_api_key = ""
+        s.llm_base_url = ""
+        s.anthropic_api_keys = []
+        s.anthropic_api_keys_sonnet = []
+        s.anthropic_api_keys_haiku = []
+        s.enable_prompt_caching = True
+        s.anthropic_backoff_base = 1
+        s.anthropic_backoff_cap = 30
+        s.anthropic_backoff_jitter = 0
+
+        from vn_agent.services.llm import _reset_pools, ainvoke_llm
+        _reset_pools()
+
+        with caplog.at_level(logging.INFO, logger="vn_agent.services.llm"):
+            asyncio.run(ainvoke_llm(
+                "system", "user", schema=_Schema, caller="test/m0_3",
+            ))
+
+    msgs = [r.message for r in caplog.records]
+    # The Step 4f bug was: stop_reason='unknown' tokens: in=0 out=0 — verify
+    # M0-3 surfaces real values from the raw BaseMessage
+    assert any(
+        "[test/m0_3]" in m and "stop_reason='tool_use'" in m
+        and "in=1234" in m and "out=567" in m
+        for m in msgs
+    ), f"Expected stop_reason / tokens to be logged from raw; got: {msgs}"
+
+
+def test_structured_output_propagates_parsing_error(monkeypatch):
+    """Phase 13-3 M0-3: parsing_error from include_raw flows to the caller
+    instead of being silently dropped. Director step2's existing
+    ValidationError handler catches it (and logs with exc_info=True)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from pydantic import BaseModel, ValidationError
+
+    class _Schema(BaseModel):
+        x: int  # required, no default
+
+    # Build a real ValidationError to propagate
+    try:
+        _Schema(x="not an int")  # type: ignore[arg-type]
+        verr: ValidationError | None = None
+    except ValidationError as e:
+        verr = e
+    assert verr is not None
+
+    async def _fake_invoke(_messages):
+        raw = MagicMock()
+        raw.response_metadata = {}
+        return {"raw": raw, "parsed": None, "parsing_error": verr}
+
+    fake_wrapped = MagicMock()
+    fake_wrapped.ainvoke = AsyncMock(side_effect=_fake_invoke)
+    fake_base = MagicMock()
+    fake_base.with_structured_output = MagicMock(return_value=fake_wrapped)
+    monkeypatch.setattr(
+        "vn_agent.services.llm._get_llm_cached",
+        lambda *a, **k: fake_base,
+    )
+
+    with patch("vn_agent.services.llm.get_settings") as mock_settings:
+        s = mock_settings.return_value
+        s.llm_provider = "anthropic"
+        s.llm_model = "claude-sonnet-4-6"
+        s.llm_temperature = 0.2
+        s.llm_max_tokens = 16000
+        s.llm_max_retries = 1
+        s.anthropic_max_retries = 1
+        s.anthropic_api_key = "sk-test"
+        s.openai_api_key = ""
+        s.llm_api_key = ""
+        s.llm_base_url = ""
+        s.anthropic_api_keys = []
+        s.anthropic_api_keys_sonnet = []
+        s.anthropic_api_keys_haiku = []
+        s.enable_prompt_caching = True
+        s.anthropic_backoff_base = 1
+        s.anthropic_backoff_cap = 30
+        s.anthropic_backoff_jitter = 0
+
+        from vn_agent.services.llm import _reset_pools, ainvoke_llm
+        _reset_pools()
+
+        with pytest.raises(ValidationError):
+            asyncio.run(ainvoke_llm(
+                "system", "user", schema=_Schema, caller="test/m0_3_error",
+            ))
 
 
 def test_get_structured_llm_uses_same_base_for_different_schemas():

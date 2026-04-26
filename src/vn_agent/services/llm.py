@@ -340,12 +340,20 @@ def get_structured_llm(
     api_key_override: str | None = None,
     max_tokens_override: int | None = None,
 ) -> Any:
-    """Get LLM with structured output bound to a Pydantic schema."""
+    """Get LLM with structured output bound to a Pydantic schema.
+
+    Phase 13-3 M0-3: uses `include_raw=True` so we get back
+    `{"raw": BaseMessage, "parsed": SchemaInstance, "parsing_error": ...}`.
+    The raw BaseMessage carries `response_metadata` (stop_reason, usage)
+    that token tracking + max_tokens warnings depend on. Without this,
+    Step 4f's structured-output path silently lost stop_reason / token
+    counts (langchain's Pydantic-only return path strips metadata).
+    """
     return get_llm(
         model,
         api_key_override=api_key_override,
         max_tokens_override=max_tokens_override,
-    ).with_structured_output(schema)
+    ).with_structured_output(schema, include_raw=True)
 
 
 def _log_stop_reason(result: Any, caller: str) -> None:
@@ -456,15 +464,25 @@ async def _invoke_once_async(
                 api_key_override=api_key_override,
                 max_tokens_override=max_tokens_override,
             )
+            # Phase 13-3 M0-3: include_raw=True returns
+            # {"raw": BaseMessage, "parsed": Schema, "parsing_error": Exception | None}.
+            # Use raw for stop_reason/token logging, propagate parsing_error,
+            # return parsed so callers see a Pydantic instance just like before.
+            result = await llm.ainvoke(messages)
+            _log_stop_reason(result.get("raw"), caller)
+            err = result.get("parsing_error")
+            if err is not None:
+                raise err
+            return result.get("parsed")
         else:
             llm = get_llm(
                 model,
                 api_key_override=api_key_override,
                 max_tokens_override=max_tokens_override,
             )
-        result = await llm.ainvoke(messages)
-        _log_stop_reason(result, caller)
-        return result
+            result = await llm.ainvoke(messages)
+            _log_stop_reason(result, caller)
+            return result
 
     return await _call()
 
@@ -500,15 +518,23 @@ def _invoke_once_sync(
                 api_key_override=api_key_override,
                 max_tokens_override=max_tokens_override,
             )
+            # Phase 13-3 M0-3: include_raw=True returns
+            # {"raw": BaseMessage, "parsed": Schema, "parsing_error": Exception | None}.
+            result = llm.invoke(messages)
+            _log_stop_reason(result.get("raw"), caller)
+            err = result.get("parsing_error")
+            if err is not None:
+                raise err
+            return result.get("parsed")
         else:
             llm = get_llm(
                 model,
                 api_key_override=api_key_override,
                 max_tokens_override=max_tokens_override,
             )
-        result = llm.invoke(messages)
-        _log_stop_reason(result, caller)
-        return result
+            result = llm.invoke(messages)
+            _log_stop_reason(result, caller)
+            return result
 
     return _call()
 
