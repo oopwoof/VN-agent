@@ -106,6 +106,52 @@ def _estimate_cost(n_scenes: int, text_only: bool) -> float:
     return round(scene_cost + image_cost + fixed, 2)
 
 
+def _compute_health_signals(
+    n_rotations: int, scene_count: int, wall_minutes: float,
+) -> tuple[list[str], str]:
+    """Phase 13-3 M0-4: pure helper for stress-test health gating.
+
+    Inputs are post-run observables; returns (signals, status) where
+    `status` is "green" (no signals), "yellow" (advisory only), or "red"
+    (operator should abort downstream tiers).
+
+    Thresholds chosen for M1's tiered runner (12 → 25 → 50). When a
+    cheap tier (12) trips red, skipping the expensive 50-scene tier
+    saves ~$10-15.
+    """
+    signals: list[str] = []
+
+    if n_rotations > 5:
+        signals.append(
+            f"retry_count={n_rotations} exceeds threshold 5 — Anthropic"
+            f" rate-limit pressure too high; recommend reducing concurrent"
+            f" or waiting before next tier"
+        )
+
+    if scene_count > 0 and n_rotations > scene_count:
+        signals.append(
+            f"key_rotation_density={n_rotations}/{scene_count} > 1.0 — "
+            f"sustained 429 pressure observed"
+        )
+
+    expected_minutes = max(1.5, scene_count * 0.3)  # ~18s/scene baseline
+    if wall_minutes > expected_minutes * 2:
+        signals.append(
+            f"wall_minutes={wall_minutes} > 2x expected "
+            f"({expected_minutes:.1f}) — runtime degradation"
+        )
+
+    # Status: red if a "hard" signal trips, yellow if any signal trips,
+    # green otherwise. Hard signals = retry_count threshold + wall blow-up.
+    # Density alone is yellow (advisory; not an abort).
+    is_red = any(
+        ("exceeds threshold" in s) or ("> 2x expected" in s)
+        for s in signals
+    )
+    status = "red" if is_red else ("yellow" if signals else "green")
+    return signals, status
+
+
 def _apply_concurrency_overrides(settings, concurrent: int) -> None:
     """Phase 13-2 Step 4b-6: in-process Settings override for benchmark
     mode, where we re-run the same theme at different concurrency tiers
@@ -224,11 +270,45 @@ async def _run(args: argparse.Namespace, *, concurrent: int | None = None,
             assertions.append(f"FAIL: total_cost_usd={total_cost} > $15")
     report["assertions"] = assertions
 
+    # Phase 13-3 M0-4: stability/health signals so M1's tiered stress runner
+    # (12 → 25 → 50) can gate on cumulative dirtiness across runs.
+    rotations_path = Path.cwd() / "api_key_rotations.jsonl"
+    n_rotations = 0
+    if rotations_path.exists():
+        try:
+            with rotations_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        n_rotations += 1
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Could not read api_key_rotations.jsonl: {e}")
+    report["key_rotation_count"] = n_rotations
+
+    degradation_signals, health_status = _compute_health_signals(
+        n_rotations=n_rotations,
+        scene_count=args.scenes,
+        wall_minutes=report["wall_minutes"],
+    )
+    report["degradation_signals"] = degradation_signals
+    report["health_status"] = health_status
+
     # Persist run metrics
     (output_dir / "run_metrics.json").write_text(
         json.dumps(report, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+
+    # Phase 13-3 M0-4: respect --abort-on-degradation by exiting non-zero
+    # so a tier-runner shell loop (M1) can `break` on first red signal
+    # without parsing JSON.
+    if (
+        getattr(args, "abort_on_degradation", False)
+        and report["health_status"] == "red"
+    ):
+        logger.error(
+            f"[abort] degradation signals tripped: {degradation_signals}"
+        )
+        raise SystemExit(3)
 
     return report
 
@@ -339,6 +419,13 @@ def main() -> None:
     )
     parser.add_argument("--confirm", action="store_true",
                         help="Actually run. Without this, prints cost estimate and exits.")
+    parser.add_argument(
+        "--abort-on-degradation", action="store_true",
+        help="(Phase 13-3 M0-4) Exit non-zero (code 3) if post-run health "
+             "signals tripped: retry_count > 5, key_rotation_density > 1, or "
+             "wall_minutes > 2x expected. Used by M1 stress-test tier-runner "
+             "to skip subsequent tiers when the current one shows instability.",
+    )
     args = parser.parse_args()
 
     if args.concurrent < 1:
@@ -377,6 +464,14 @@ def main() -> None:
     report = asyncio.run(_run(args))
     print("\n=== Results ===")
     print(json.dumps(report, indent=2, ensure_ascii=False))
+    # Phase 13-3 M0-4: surface degradation signals visibly so M1 tier-runner
+    # operators see them at-a-glance without parsing JSON.
+    health = report.get("health_status", "green")
+    if health != "green":
+        signals = report.get("degradation_signals", []) or []
+        print(f"\n[{health.upper()}] Health signals:")
+        for s in signals:
+            print(f"  - {s}")
     if report.get("assertions"):
         print("\n[FAIL] Acceptance assertions violated:")
         for msg in report["assertions"]:
