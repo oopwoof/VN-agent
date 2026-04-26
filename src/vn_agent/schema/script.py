@@ -429,7 +429,27 @@ class DirectorStep2Output(BaseModel):
       - Replaces _salvage_truncated_json hack with strict schema validation
       - Keeps temperature=0.2 (Extended Thinking would force temp=1.0,
         risking graph-wiring drift)
+
+    Phase 13-3 M0-2 (Gemini review BLOCKER): `reasoning` field is the FIRST
+    attribute so it appears first in the tool's JSON Schema → Anthropic's
+    structured-output mode sees it first → model fills it first. This
+    restores the "scratchpad / chain-of-thought" capacity that pure Tool
+    Use would otherwise suppress (PydanticToolsParser discards any text
+    content before the tool_use block, so without an in-schema reasoning
+    field the model knows its planning text will be thrown away and skips
+    it). Bounded by max_length=800 so it doesn't reintroduce the
+    `<thinking>` token-budget tax we just eliminated.
     """
+    reasoning: str = Field(
+        default="",
+        max_length=800,
+        description=(
+            "Brief planning scratchpad: which scenes are turning points, "
+            "where to wire branches/state for narrative impact, which "
+            "characters appear where. Fill this BEFORE filling `scenes`. "
+            "Keep concise (≤800 chars) — this is planning, not prose."
+        ),
+    )
     scenes: list[DirectorStep2SceneOutput] = Field(
         default_factory=list,
         description="One DirectorStep2SceneOutput per scene from step1 outline.",

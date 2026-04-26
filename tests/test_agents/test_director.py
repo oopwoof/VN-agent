@@ -530,6 +530,40 @@ class TestDirectorStep2OutputWrapper:
         }
         assert expected.issubset(scene_keys)
 
+    def test_reasoning_field_default_empty(self):
+        """Phase 13-3 M0-2: reasoning field exists with default empty string
+        so legacy code paths that don't fill it stay valid."""
+        from vn_agent.schema.script import DirectorStep2Output
+
+        out = DirectorStep2Output()
+        assert out.reasoning == ""
+
+    def test_reasoning_field_first_in_schema(self):
+        """Phase 13-3 M0-2: reasoning MUST be the FIRST field in the schema —
+        Anthropic Tool Use forces field-emission order to follow JSON Schema
+        property order, so reasoning-first means model fills it first
+        (restoring CoT before structural commit)."""
+        from vn_agent.schema.script import DirectorStep2Output
+
+        # Pydantic preserves declaration order in model_fields (Python 3.7+ ordered dicts)
+        field_names = list(DirectorStep2Output.model_fields.keys())
+        assert field_names[0] == "reasoning", (
+            f"reasoning must be first field, got order: {field_names}"
+        )
+
+    def test_reasoning_field_max_length_800(self):
+        """Bounded scratchpad — without a cap we'd reintroduce the
+        token-budget tax we eliminated in Step 4f."""
+        from pydantic import ValidationError
+
+        from vn_agent.schema.script import DirectorStep2Output
+
+        # 800 chars exact: pass
+        DirectorStep2Output(reasoning="x" * 800)
+        # 801 chars: ValidationError
+        with pytest.raises(ValidationError):
+            DirectorStep2Output(reasoning="x" * 801)
+
 
 class _FakeStep2Settings:
     """Minimal settings stub used by the step2 agent-level tests below.
@@ -732,6 +766,22 @@ class TestStep2PromptShape:
                       "branches", "entry_context"):
             assert field in user
 
+    def test_prompt_instructs_using_reasoning_field(self, monkeypatch, tmp_path):
+        """Phase 13-3 M0-2: prompt must explicitly tell the model to fill
+        the `reasoning` field BEFORE `scenes`. Without this hint the model
+        can still skip it (Pydantic default ='' is schema-legal)."""
+        outline = {
+            "start_scene_id": "s1",
+            "scenes": [{"id": "s1", "title": "A", "description": "x"}],
+            "world_variables": [],
+        }
+        captured = self._capture_prompt(monkeypatch, outline, tmp_path)
+        user = captured["user"]
+        assert "reasoning" in user.lower()
+        # Must be sequenced BEFORE scenes (instruction order matters for
+        # tool-use field-emission order)
+        assert "BEFORE filling `scenes`" in user or "before filling" in user.lower()
+
 
 class TestStep2ObservabilityLogs:
     """Silent-failure guards from GPT review (#1, #3)."""
@@ -791,7 +841,8 @@ class TestStep2ObservabilityLogs:
 
     def test_logs_observability_stats_on_success(self, monkeypatch, tmp_path, caplog):
         """Structure stats line must be emitted for grep-friendly silent-
-        degradation detection (e.g. branches_total=0)."""
+        degradation detection (e.g. branches_total=0). Phase 13-3 M0-2:
+        reasoning_chars also appears in the line for CoT-usage tracking."""
         import asyncio
         import logging
         from unittest.mock import AsyncMock
@@ -805,13 +856,14 @@ class TestStep2ObservabilityLogs:
 
         mock_invoke = AsyncMock(
             return_value=DirectorStep2Output(
+                reasoning="brief plan: s1 is opener, s2 is resolution",
                 scenes=[
                     DirectorStep2SceneOutput(
                         id="s1",
                         branches=[BranchOption(text="a", next_scene_id="s2")],
                     ),
                     DirectorStep2SceneOutput(id="s2"),
-                ]
+                ],
             )
         )
         monkeypatch.setattr("vn_agent.agents.director.ainvoke_llm", mock_invoke)
@@ -826,3 +878,10 @@ class TestStep2ObservabilityLogs:
             "tool_use ok: scenes=2" in m and "branches_total=1" in m
             for m in msgs
         )
+        # Phase 13-3 M0-2: reasoning_chars must appear so M1 can detect
+        # whether the model is actually using the scratchpad. 0 across
+        # many runs would signal the field isn't restoring CoT and we'd
+        # need to escalate the prompt.
+        assert any("reasoning_chars=" in m for m in msgs)
+        # And the actual length should match (42 chars for our fixture)
+        assert any("reasoning_chars=42" in m for m in msgs)

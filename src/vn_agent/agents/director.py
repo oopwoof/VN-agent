@@ -404,6 +404,19 @@ Call the `DirectorStep2Output` tool exactly once with one entry per scene
 above. For EACH scene, specify navigation, music, transition cards, state
 I/O, narrative graph deps, and a creative scene_brief.
 
+## Plan first via the `reasoning` field (Phase 13-3 M0-2)
+
+BEFORE filling `scenes`, fill the `reasoning` field with a brief plan
+(≤800 chars, prose paragraph form, NOT bullets):
+- Which scenes are turning points (need branches), which are linear
+- Where to wire `state_reads` / `state_writes` for narrative impact
+- Which characters appear physically vs by reference in each scene
+- Where to plant foreshadow / arc beats via `context_deps`
+
+The `reasoning` field is YOUR scratchpad — use it to think coherently
+before committing to the structural choices in `scenes`. Keep it tight;
+this is planning, not prose drafting.
+
 ## What every scene MUST include
 
 Each entry in the `scenes` list MUST include:
@@ -521,10 +534,15 @@ Each entry in the `scenes` list MUST include:
     total_state_writes = sum(len(s.state_writes) for s in result.scenes)
     total_briefs = sum(1 for s in result.scenes if s.scene_brief is not None)
     total_deps = sum(len(s.context_deps) for s in result.scenes)
+    # Phase 13-3 M0-2: reasoning_chars tracks whether model uses the
+    # scratchpad. If consistently == 0, the field isn't restoring CoT and
+    # we'll need to escalate (e.g. raise its priority, add prompt examples).
+    reasoning_chars = len(result.reasoning or "")
     logger.info(
         f"[director/step2] tool_use ok: scenes={actual_count} "
         f"branches_total={total_branches} state_writes_total={total_state_writes} "
-        f"scene_briefs={total_briefs} context_deps_total={total_deps}"
+        f"scene_briefs={total_briefs} context_deps_total={total_deps} "
+        f"reasoning_chars={reasoning_chars}"
     )
 
     return result.model_dump()
