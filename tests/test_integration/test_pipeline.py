@@ -98,6 +98,8 @@ class MockMessage:
 
 @pytest.fixture
 def mock_ainvoke(mocker):
+    import json as _json
+
     from vn_agent.services.mock_llm import _dispatch
 
     async def side_effect(system, user, schema=None, model=None, caller="llm", **kwargs):
@@ -121,6 +123,21 @@ def mock_ainvoke(mocker):
             content = WRITER_MOCK_RESPONSE
         else:
             content = WRITER_MOCK_RESPONSE
+
+        # Phase 13-2 Step 4f: when caller asks for structured output (Tool
+        # Use), the real ainvoke_llm returns a Pydantic instance, NOT a
+        # message with .content. The mock must mirror that contract or
+        # downstream code will hit AttributeError on attribute access.
+        if schema is not None:
+            try:
+                payload = _json.loads(content)
+                return schema.model_validate(payload)
+            except Exception:
+                # Schema-validated mocks should always succeed; if they
+                # don't, surfacing the error is more useful than silently
+                # falling back to MockMessage which won't satisfy the
+                # caller's type expectations.
+                raise
 
         return MockMessage(content)
 

@@ -4,6 +4,9 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import cast
+
+from pydantic import ValidationError
 
 from vn_agent.agents.state import AgentState
 from vn_agent.config import get_settings
@@ -16,6 +19,7 @@ from vn_agent.schema.character import CharacterProfile
 from vn_agent.schema.music import Mood, MusicCue
 from vn_agent.schema.script import (
     BranchOption,
+    DirectorStep2Output,
     MacroReference,
     Scene,
     SceneBrief,
@@ -310,7 +314,13 @@ async def _step2_details(
     outline: dict, output_dir: str, settings,
     *, retry_feedback: str = "",
 ) -> dict:
-    """Step 2: add navigation (next_scene_id/branches) and music mood to each scene."""
+    """Step 2: add navigation (next_scene_id/branches) and music mood to each scene.
+
+    Phase 13-2 Step 4f: migrated from raw-text-JSON-parsing to Anthropic
+    Tool Use via DirectorStep2Output schema. The prior path emitted Sonnet
+    `<thinking>` segments that ate ~7K of the 16K output budget; Tool Use
+    suppresses those and returns a strictly-validated Pydantic instance.
+    """
     small = _is_small_model(settings.llm_director_model)
     scene_ids = [s["id"] for s in (outline.get("scenes") or [])]
     scene_list = "\n".join(
@@ -319,8 +329,10 @@ async def _step2_details(
     )
 
     if small:
+        # Small models (local 7B-class) don't reliably support Anthropic
+        # Tool Use; keep them on the legacy raw-JSON path with simplified
+        # schema. They were not the source of the max_tokens truncation.
         system = _SYSTEM_DETAILS_SIMPLE
-        # Small model: require only emotional_arc (lightweight transition signal)
         example = (
             '{{"scenes":[{{"id":"scene_id","next_scene_id":"next_or_null",'
             '"branches":[],"music_mood":"peaceful","music_description":"soft piano",'
@@ -335,134 +347,187 @@ Last scene has next_scene_id=null. Add branches (choices) to at least 1 scene.
 Return JSON: {example}
 
 Output ONLY JSON."""
-    else:
-        system = _SYSTEM_DETAILS
-        # Sprint 9-2: thread world_variables through so Director can wire
-        # each scene's state_reads / state_writes / branch.requires to the
-        # variables it declared in step1.
-        world_vars = outline.get("world_variables") or []
-        world_vars_block = ""
-        if world_vars:
-            world_vars_lines = [
-                f"  - {v['name']} ({v['type']}, starts {v.get('initial_value')!r}): "
-                f"{v.get('description', '')[:80]}"
-                for v in world_vars
-            ]
-            world_vars_block = (
-                "\n\nWorld variables declared in step1 (use these in state_reads / "
-                "state_writes / branch.requires):\n" + "\n".join(world_vars_lines)
-            )
+        if retry_feedback:
+            user_prompt += "\n\n" + retry_feedback
 
-        user_prompt = f"""You have this scene list:
+        response = await ainvoke_llm(
+            system, user_prompt, model=settings.llm_director_model,
+            caller="director/step2", cache_ttl="1h", force_cache=True,
+        )
+        content = response.content if hasattr(response, "content") else str(response)
+        _save_debug_raw(output_dir, "director_step2_raw.txt", content)
+        content = strip_thinking(content)
+        try:
+            return _extract_json(content)
+        except Exception as e:
+            logger.warning(
+                f"Director step2 (small model) parse error: {e}\n"
+                f"Raw (first 300): {content[:300]}"
+            )
+            return {"scenes": []}
+
+    # ── Sonnet-class path: Anthropic Tool Use (Phase 13-2 Step 4f) ─────────
+    logger.info(
+        "[director/step2] using structured-output (Tool Use) — Phase 13-2 Step 4f"
+    )
+
+    system = _SYSTEM_DETAILS
+    # Sprint 9-2: thread world_variables through so Director can wire
+    # each scene's state_reads / state_writes / branch.requires to the
+    # variables it declared in step1.
+    world_vars = outline.get("world_variables") or []
+    world_vars_block = ""
+    if world_vars:
+        world_vars_lines = [
+            f"  - {v['name']} ({v['type']}, starts {v.get('initial_value')!r}): "
+            f"{v.get('description', '')[:80]}"
+            for v in world_vars
+        ]
+        world_vars_block = (
+            "\n\nWorld variables declared in step1 (use these in state_reads / "
+            "state_writes / branch.requires):\n" + "\n".join(world_vars_lines)
+        )
+
+    # Tool Use prompt: NO JSON example (the schema delivers structure via
+    # the tool definition). Field-level prose constraints retained because
+    # the Pydantic schema can't express "this field is REQUIRED in semantics
+    # even though it's Optional in the schema" — Director step1 outline has
+    # default_factory on most fields, so LLM omitting them is schema-legal
+    # but breaks downstream consumption.
+    user_prompt = f"""You have this scene list:
 {scene_list}
 
 All valid scene IDs: {json.dumps(scene_ids)}
 Start scene: {outline.get("start_scene_id", "")}{world_vars_block}
 
-For EACH scene, specify navigation, music, transition cards, AND state I/O. Return this JSON:
-{{
-  "scenes": [
-    {{
-      "id": "ch1_opening",
-      "next_scene_id": "ch1_next_or_null",
-      "branches": [
-        {{"text": "Choice text", "next_scene_id": "valid_scene_id",
-          "requires": {{}}}}
-      ],
-      "music_mood": "peaceful",
-      "music_description": "soft piano",
-      "emotional_arc": "curiosity -> unease",
-      "entry_context": "What the player just experienced (for non-start scenes)",
-      "exit_hook": "How this scene should end to set up the next",
-      "state_reads": [],
-      "state_writes": {{}},
-      "context_deps": [],
-      "scene_brief": {{
-        "beats": [
-          "yui arrives at the lighthouse unannounced",
-          "the lamp flickers — first sign of the storm",
-          "she finds the letter from her father"
-        ],
-        "character_blocking": {{
-          "yui": "stands near the window, back to the lamp",
-          "ren": "approaches from the stairs, stops at the doorway"
-        }},
-        "emotional_curve": ["apprehension", "recognition", "grief"],
-        "tension_target": "medium",
-        "subtext_notes": "yui knows ren knows about the letter; neither acknowledges it until the last line"
-      }}
-    }}
-  ]
-}}
+Call the `DirectorStep2Output` tool exactly once with one entry per scene
+above. For EACH scene, specify navigation, music, transition cards, state
+I/O, narrative graph deps, and a creative scene_brief.
 
-Rules:
-- Use ONLY scene IDs from the list above
-- A scene with branches should have next_scene_id=null
-- Terminal scenes: next_scene_id=null, branches=[]
-- Include at least 2 scenes with meaningful branches
-- **Transition cards**: entry_context describes the prior scene's ending mood/event \
-(leave empty "" for the start scene). exit_hook describes what this scene sets up \
-(leave empty "" for terminal scenes with no successor). emotional_arc is short, \
-like "warmth -> anticipation" or "hope -> despair".
-- **State I/O (Sprint 9-1)**: state_reads lists world_variables this scene's \
-dialogue depends on (empty [] if none). state_writes maps variable → new value \
-for changes made by this scene (empty {{}} if none). branch.requires maps \
-variable → expected value as a symbolic visibility guard (empty {{}} = always \
-visible). Only reference variables from the declared list above. If no \
-world_variables were declared, all three stay empty.
-- **Narrative dependency graph (Phase 13-1 Step 5)**: for each scene, \
-declare up to 5 `context_deps` entries — prior scenes this scene strongly \
-depends on, character arcs it advances, world variables it requires, or \
-motifs it invokes. **Be sparing** — list only dependencies you are \
-≥0.7 confident about (explicit callbacks, arc beats, real state reads, \
-motif recurrences). Do NOT list incidental mentions. Early scenes \
-(especially the start scene) typically have context_deps=[]. \
-Each dep has: \
-`ref_type` (one of "scene", "character_arc", "world_var", "motif", "location"), \
-`ref_id` (the target — bare scene id for "scene", "character:{{id}}" for \
-"character_arc", "world_var:{{name}}" for "world_var", "motif:{{tag}}" for \
-"motif", "location:{{bg_id}}" for "location"), \
-`link_type` (one of "callback", "foreshadow_payoff", "arc_beat", \
-"state_dependency", "motif_recurrence"), \
-`reason` (one sentence explaining the dep), \
-`inject_as` (one of "full_dialogue", "summary", "state_snapshot", \
-"character_arc_so_far"). \
-**Backward-only**: scene refs must point to EARLIER scenes in the list, \
-never forward, never self. **state_dependency** refs MUST also appear in \
-that scene's state_reads.
-  Example context_deps for a scene that resolves an earlier confession: \
-`[{{"ref_type": "scene", "ref_id": "s02", "link_type": "callback", \
-"reason": "A's confession in s02 is directly recalled and resolved here", \
-"inject_as": "full_dialogue"}}]`.
-- **scene_brief (Phase 13-2 Step 1, route-4 prep)**: per-scene creative \
-instructions the downstream parallel Writer workers will consume. Required fields:
-  * beats: 3-7 ordered scene events (≤80 chars each) — the creative spine
-  * character_blocking: {{character_id: position/movement/posture}} for each \
-character in characters_present
-  * emotional_curve: 2-5 emotion labels tracking the scene's internal arc
-  * tension_target: one of "low" / "medium" / "high" / "climax"
-  * subtext_notes: what stays UNSAID between lines (≤400 chars)
-  Keep it tight — this is a planning artifact, not prose. Writer workers \
-will inflate beats into actual dialogue; they need the skeleton, not your \
-draft."""
+## What every scene MUST include
+
+Each entry in the `scenes` list MUST include:
+
+1. `id` — must match a scene id from the outline above (use ONLY listed IDs)
+2. `next_scene_id` — null only for terminal scenes (end of route) or
+   branch-only scenes; otherwise the id of the auto-advance target
+3. `branches` — empty list OK for non-turning-point scenes; AT LEAST ONE
+   branch per turning-point scene where player choice changes outcome.
+   Place branches at TURNING POINTS, not cosmetic forks. Each branch:
+   `text` (choice shown to player), `next_scene_id` (valid scene id),
+   `requires` (symbolic guard, see State I/O below; empty dict = always visible)
+4. `music_mood` + `music_description` — required; mood transitions matter
+   (peaceful → tense → melancholic / joyful etc.)
+5. `entry_context` + `exit_hook` — what player just experienced + setup for
+   next scene. 1-2 sentences each, NOT prose. Empty string "" for the
+   start scene's entry_context and terminal scenes' exit_hook.
+6. `emotional_arc` — short trajectory (e.g. "warmth -> anticipation",
+   "hope -> despair")
+7. `state_reads` / `state_writes` — list/dict; empty [] / {{}} if scene
+   reads/writes no symbolic state, but ALWAYS include the keys. Only
+   reference variables from the declared list above. Branch `requires` is
+   the same shape — empty dict means always visible.
+8. `context_deps` — up to 5 references; PREFER `foreshadow_payoff` or
+   `arc_beat` over generic `callback`. Each dep:
+   * `ref_type`: one of "scene" / "character_arc" / "world_var" / "motif" /
+     "location"
+   * `ref_id`: target — bare scene id for "scene"; "character:{{id}}",
+     "world_var:{{name}}", "motif:{{tag}}", "location:{{bg_id}}" for the rest
+   * `link_type`: "callback" / "foreshadow_payoff" / "arc_beat" /
+     "state_dependency" / "motif_recurrence"
+   * `reason`: one sentence
+   * `inject_as`: "full_dialogue" / "summary" / "state_snapshot" /
+     "character_arc_so_far"
+   **Backward-only**: scene refs must point to EARLIER scenes, never forward,
+   never self. `state_dependency` refs MUST also appear in `state_reads`.
+   Be sparing — list only dependencies you are ≥0.7 confident about. Early
+   scenes (especially start) typically have `context_deps=[]`.
+9. `scene_brief` — REQUIRED tight planning artifact (Phase 13-2 Step 1):
+   * `beats`: 3-7 ordered scene events (≤80 chars each) — the creative spine
+   * `character_blocking`: {{character_id: position/movement/posture}} per
+     character in `characters_present` (from the outline)
+   * `emotional_curve`: 2-5 emotion labels tracking the scene's internal arc
+   * `tension_target`: one of "low" / "medium" / "high" / "climax"
+   * `subtext_notes`: what stays UNSAID between lines (≤400 chars)
+   Keep it tight — this is a PLANNING artifact, not prose. Writer workers
+   will inflate beats into actual dialogue; they need the skeleton, not
+   your draft."""
 
     # Phase 13-2 Step 4e: APPEND retry feedback (cache-safe; see _step1_outline).
     if retry_feedback:
         user_prompt += "\n\n" + retry_feedback
 
-    response = await ainvoke_llm(
-        system, user_prompt, model=settings.llm_director_model,
-        caller="director/step2", cache_ttl="1h", force_cache=True,
-    )
-    content = response.content if hasattr(response, "content") else str(response)
-    _save_debug_raw(output_dir, "director_step2_raw.txt", content)
-    content = strip_thinking(content)
+    expected_count = len(outline.get("scenes") or [])
 
     try:
-        return _extract_json(content)
-    except Exception as e:
-        logger.warning(f"Director step2 parse error (will use defaults): {e}\nRaw (first 300): {content[:300]}")
+        # ainvoke_llm's return type is `T | str`; with schema= it's
+        # always the Pydantic instance, but the static signature can't
+        # express that conditional. cast() narrows for the rest of the
+        # function — runtime contract is enforced by the schema kwarg.
+        result = cast(
+            DirectorStep2Output,
+            await ainvoke_llm(
+                system, user_prompt,
+                schema=DirectorStep2Output,
+                model=settings.llm_director_model,
+                caller="director/step2",
+                cache_ttl="1h", force_cache=True,
+            ),
+        )
+    except ValidationError as e:
+        # Don't swallow silently — exc_info=True lets dev locate schema
+        # mismatch quickly. step2 is a graph-critical node so still
+        # graceful-degrade to {"scenes": []} for run continuation.
+        logger.error(
+            f"[director/step2] structured output validation failed: {e}",
+            exc_info=True,
+        )
         return {"scenes": []}
+    except Exception as e:  # noqa: BLE001 — broad catch is intentional for graceful degradation
+        logger.warning(
+            f"[director/step2] tool_use call failed (using defaults): {e}"
+        )
+        return {"scenes": []}
+
+    # Persist a JSON dump for debug parity with the legacy raw-text path.
+    try:
+        _save_debug_raw(
+            output_dir, "director_step2_raw.txt",
+            result.model_dump_json(indent=2),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[director/step2] debug dump failed: {e}")
+
+    actual_count = len(result.scenes)
+
+    # Silent-failure guards — schema validity is NOT the same as semantic
+    # completeness. LLM may produce a schema-legal-but-empty payload, or
+    # skip half the scenes if it interprets the tool spec loosely.
+    if actual_count == 0:
+        logger.warning(
+            f"[director/step2] empty structured output "
+            f"(expected {expected_count} scenes)"
+        )
+    elif actual_count < expected_count:
+        logger.warning(
+            f"[director/step2] scene shrinkage: got {actual_count}, "
+            f"expected {expected_count} — possible Tool Use truncation "
+            f"or model omission"
+        )
+
+    # Observability log: makes "schema passed but LLM skipped fields"
+    # detectable via grep without parsing the dumped JSON.
+    total_branches = sum(len(s.branches) for s in result.scenes)
+    total_state_writes = sum(len(s.state_writes) for s in result.scenes)
+    total_briefs = sum(1 for s in result.scenes if s.scene_brief is not None)
+    total_deps = sum(len(s.context_deps) for s in result.scenes)
+    logger.info(
+        f"[director/step2] tool_use ok: scenes={actual_count} "
+        f"branches_total={total_branches} state_writes_total={total_state_writes} "
+        f"scene_briefs={total_briefs} context_deps_total={total_deps}"
+    )
+
+    return result.model_dump()
 
 
 def _merge_outline_details(outline: dict, details: dict) -> dict:
@@ -533,7 +598,15 @@ def _save_checkpoint(output_dir: str, script, characters: dict) -> None:
 
 
 def _extract_json(content: str) -> dict:
-    """Extract JSON from LLM response, handling truncated responses."""
+    """Extract JSON from LLM response.
+
+    Phase 13-2 Step 4f: removed truncation salvage path. step2 now uses
+    Tool Use (DirectorStep2Output schema) which can't return partial JSON;
+    step1 + _attempt_repair retain raw-text JSON parsing because their
+    payloads are smaller and they don't currently exhibit truncation. If
+    step1 starts truncating, the right fix is migration to Tool Use
+    (DirectorStep1Output), not band-aiding with salvage.
+    """
     import re
 
     # Strip markdown code fences to get raw JSON text
@@ -556,97 +629,7 @@ def _extract_json(content: str) -> dict:
     except json.JSONDecodeError:
         pass
 
-    # 3. Response was truncated mid-JSON — try to salvage it
-    # Find the last complete scene object and close the JSON structure
-    if start != -1:
-        salvaged = _salvage_truncated_json(stripped[start:])
-        if salvaged:
-            logger.warning("LLM response was truncated — salvaged partial JSON. Consider increasing max_tokens.")
-            return salvaged
-
     raise ValueError(f"Could not extract JSON from response: {content[:200]}")
-
-
-def _salvage_truncated_json(text: str) -> dict | None:
-    """
-    Attempt to fix a truncated JSON string using two strategies:
-    1. Backward scan: find the last '}'/']' and close from there.
-    2. Forward scan: find the last root-level comma and close the root object.
-
-    Handles Unicode (e.g. Chinese) text safely — never strips by character value.
-    """
-    closing = {'{': '}', '[': ']'}
-
-    def _close_and_parse(candidate: str) -> dict | None:
-        """Close unclosed brackets on `candidate` and try json.loads."""
-        candidate = candidate.rstrip().rstrip(',').rstrip()
-        open_stack: list[str] = []
-        in_str = False
-        escape = False
-        for ch in candidate:
-            if escape:
-                escape = False
-                continue
-            if ch == '\\' and in_str:
-                escape = True
-                continue
-            if ch == '"':
-                in_str = not in_str
-                continue
-            if in_str:
-                continue
-            if ch in closing:
-                open_stack.append(closing[ch])
-            elif ch in ('}', ']'):
-                if open_stack and open_stack[-1] == ch:
-                    open_stack.pop()
-        suffix = ''.join(reversed(open_stack))
-        try:
-            result = json.loads(candidate + suffix)
-            if isinstance(result, dict):
-                return result
-        except json.JSONDecodeError:
-            pass
-        return None
-
-    # Strategy 1: scan backward for '}' or ']' and attempt to complete from there.
-    # Works when truncation happens inside a nested object/array.
-    for i in range(len(text) - 1, -1, -1):
-        if text[i] in ('}', ']'):
-            result = _close_and_parse(text[:i + 1])
-            if result:
-                return result
-
-    # Strategy 2: scan forward tracking JSON structure to find the last
-    # root-level comma (between top-level fields). Cut there and close.
-    # Works when truncation happens so early that no '}' exists yet.
-    last_root_comma = -1
-    depth = 0
-    in_str = False
-    escape = False
-    for i, ch in enumerate(text):
-        if escape:
-            escape = False
-            continue
-        if ch == '\\' and in_str:
-            escape = True
-            continue
-        if ch == '"':
-            in_str = not in_str
-            continue
-        if in_str:
-            continue
-        if ch in closing:
-            depth += 1
-        elif ch in ('}', ']'):
-            depth -= 1
-        elif ch == ',' and depth == 1:
-            last_root_comma = i
-
-    if last_root_comma > 0:
-        return _close_and_parse(text[:last_root_comma])
-
-    return None
 
 
 def _validate_branch_structure(script: VNScript) -> list[str]:

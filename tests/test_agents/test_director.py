@@ -1,6 +1,8 @@
 """Tests for Director branch structural validation (Sprint 6-6)."""
 from __future__ import annotations
 
+import pytest
+
 from vn_agent.agents.director import (
     _build_from_plan,
     _degrade_invalid_branches,
@@ -390,3 +392,437 @@ class TestBuildFromPlanHydratesSceneBrief:
         assert script.scenes[0].scene_brief is None
         # Scene still valid:
         assert script.scenes[0].id == "s1"
+
+
+# ---------------------------------------------------------------------------
+# Phase 13-2 Step 4f: Director step2 Tool Use migration tests
+#
+# Schema tests for DirectorStep2SceneOutput / DirectorStep2Output, agent-
+# level tests for _step2_details that verify:
+#   - schema=DirectorStep2Output is passed to ainvoke_llm
+#   - returns dict (.model_dump()) for downstream _merge_outline_details
+#   - graceful degradation on ValidationError (with exc_info)
+#   - silent-failure guards (scene shrinkage / empty / observability log)
+#   - prompt no longer contains JSON example, but retains field-level
+#     prose constraints (GPT-review hardening)
+# ---------------------------------------------------------------------------
+
+
+class TestDirectorStep2SceneOutputSchema:
+    """Schema-level checks on DirectorStep2SceneOutput."""
+
+    def test_id_required(self):
+        from pydantic import ValidationError
+
+        from vn_agent.schema.script import DirectorStep2SceneOutput
+
+        with pytest.raises(ValidationError):
+            DirectorStep2SceneOutput()  # type: ignore[call-arg]
+
+    def test_minimal_only_id(self):
+        from vn_agent.schema.script import DirectorStep2SceneOutput
+
+        out = DirectorStep2SceneOutput(id="s1")
+        assert out.id == "s1"
+        assert out.next_scene_id is None
+        assert out.branches == []
+        assert out.music_mood == "neutral"
+        assert out.music_description == ""
+        assert out.emotional_arc is None
+        assert out.entry_context is None
+        assert out.exit_hook is None
+        assert out.state_reads == []
+        assert out.state_writes == {}
+        assert out.context_deps == []
+        assert out.scene_brief is None
+
+    def test_full_shape_validates(self):
+        from vn_agent.schema.script import (
+            BranchOption,
+            DirectorStep2SceneOutput,
+            SceneBrief,
+            SceneContextRef,
+        )
+
+        out = DirectorStep2SceneOutput(
+            id="s1",
+            next_scene_id="s2",
+            branches=[BranchOption(text="go", next_scene_id="s2")],
+            music_mood="tense",
+            music_description="strings",
+            emotional_arc="calm -> alarm",
+            entry_context="prior scene ended at dusk",
+            exit_hook="storm hits in the next scene",
+            state_reads=["weather"],
+            state_writes={"weather": "storm"},
+            context_deps=[
+                SceneContextRef(
+                    ref_type="scene",
+                    ref_id="s0",
+                    link_type="callback",
+                    reason="opening callback",
+                )
+            ],
+            scene_brief=SceneBrief(
+                beats=["a", "b", "c"],
+                tension_target="high",
+            ),
+        )
+        assert out.id == "s1"
+        assert len(out.branches) == 1
+        assert isinstance(out.branches[0], BranchOption)
+        assert out.scene_brief is not None
+        assert out.scene_brief.tension_target == "high"
+
+    def test_branches_compose_branchoption_from_dict(self):
+        """LLM Tool Use returns nested dicts; Pydantic must auto-construct
+        BranchOption instances from them."""
+        from vn_agent.schema.script import BranchOption, DirectorStep2SceneOutput
+
+        out = DirectorStep2SceneOutput(
+            id="s1",
+            branches=[{"text": "go", "next_scene_id": "s2"}],  # type: ignore[list-item]
+        )
+        assert isinstance(out.branches[0], BranchOption)
+        assert out.branches[0].text == "go"
+
+    def test_context_deps_max_5_enforced(self):
+        from pydantic import ValidationError
+
+        from vn_agent.schema.script import DirectorStep2SceneOutput
+
+        deps = [
+            {
+                "ref_type": "scene",
+                "ref_id": f"s{i}",
+                "link_type": "callback",
+                "reason": "x",
+            }
+            for i in range(6)
+        ]
+        with pytest.raises(ValidationError):
+            DirectorStep2SceneOutput(id="s1", context_deps=deps)  # type: ignore[arg-type]
+
+
+class TestDirectorStep2OutputWrapper:
+    """Schema-level checks on DirectorStep2Output."""
+
+    def test_empty_scenes_ok(self):
+        from vn_agent.schema.script import DirectorStep2Output
+
+        out = DirectorStep2Output()
+        assert out.scenes == []
+        # Compatible with graceful-degradation path that returns this shape.
+
+    def test_serialized_dump_has_merge_input_keys(self):
+        """model_dump() must produce dicts that _merge_outline_details
+        consumes — the 11-key contract."""
+        from vn_agent.schema.script import DirectorStep2Output, DirectorStep2SceneOutput
+
+        out = DirectorStep2Output(scenes=[DirectorStep2SceneOutput(id="s1")])
+        dumped = out.model_dump()
+        scene_keys = set(dumped["scenes"][0].keys())
+        expected = {
+            "id", "next_scene_id", "branches", "music_mood",
+            "music_description", "emotional_arc", "entry_context",
+            "exit_hook", "state_reads", "state_writes", "context_deps",
+            "scene_brief",
+        }
+        assert expected.issubset(scene_keys)
+
+
+class _FakeStep2Settings:
+    """Minimal settings stub used by the step2 agent-level tests below.
+    `claude-sonnet-4` triggers the Tool Use branch (NOT the small-model
+    raw-text fallback)."""
+    llm_director_model = "claude-sonnet-4-6"
+    llm_temperature = 0.2
+    llm_max_tokens = 16000
+    llm_provider = "anthropic"
+
+
+class TestStep2ToolUseInvocation:
+    """Verify _step2_details routes through Tool Use (Phase 13-2 Step 4f)."""
+
+    def _outline(self, n_scenes: int = 3):
+        return {
+            "start_scene_id": "s1",
+            "scenes": [
+                {"id": f"s{i+1}", "title": f"S{i+1}", "description": "x"}
+                for i in range(n_scenes)
+            ],
+            "world_variables": [],
+        }
+
+    def test_step2_passes_schema_kwarg(self, monkeypatch, tmp_path):
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from vn_agent.agents.director import _step2_details
+        from vn_agent.schema.script import DirectorStep2Output, DirectorStep2SceneOutput
+
+        mock_invoke = AsyncMock(
+            return_value=DirectorStep2Output(
+                scenes=[DirectorStep2SceneOutput(id="s1"),
+                        DirectorStep2SceneOutput(id="s2"),
+                        DirectorStep2SceneOutput(id="s3")],
+            )
+        )
+        monkeypatch.setattr("vn_agent.agents.director.ainvoke_llm", mock_invoke)
+
+        asyncio.run(_step2_details(self._outline(3), str(tmp_path), _FakeStep2Settings()))
+
+        assert mock_invoke.called
+        kwargs = mock_invoke.call_args.kwargs
+        assert kwargs["schema"] is DirectorStep2Output
+        assert kwargs["caller"] == "director/step2"
+        assert kwargs["cache_ttl"] == "1h"
+        assert kwargs["force_cache"] is True
+
+    def test_step2_returns_dict_from_pydantic(self, monkeypatch, tmp_path):
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from vn_agent.agents.director import _step2_details
+        from vn_agent.schema.script import DirectorStep2Output, DirectorStep2SceneOutput
+
+        mock_invoke = AsyncMock(
+            return_value=DirectorStep2Output(
+                scenes=[
+                    DirectorStep2SceneOutput(id="s1", music_mood="peaceful"),
+                    DirectorStep2SceneOutput(id="s2", music_mood="tense"),
+                    DirectorStep2SceneOutput(id="s3"),
+                ]
+            )
+        )
+        monkeypatch.setattr("vn_agent.agents.director.ainvoke_llm", mock_invoke)
+
+        result = asyncio.run(
+            _step2_details(self._outline(3), str(tmp_path), _FakeStep2Settings())
+        )
+
+        assert isinstance(result, dict)
+        assert len(result["scenes"]) == 3
+        assert result["scenes"][0]["id"] == "s1"
+        assert result["scenes"][0]["music_mood"] == "peaceful"
+        # Confirm key contract for _merge_outline_details
+        for s in result["scenes"]:
+            assert {"id", "next_scene_id", "branches", "scene_brief"}.issubset(s.keys())
+
+    def test_step2_validation_error_returns_empty_with_exc_info(
+        self, monkeypatch, tmp_path, caplog
+    ):
+        import asyncio
+        import logging
+        from unittest.mock import AsyncMock
+
+        from pydantic import BaseModel, ValidationError
+
+        from vn_agent.agents.director import _step2_details
+
+        # Build a real ValidationError to mimic LangChain parser failure
+        class _Stub(BaseModel):
+            x: int
+
+        try:
+            _Stub(x="not an int")  # type: ignore[arg-type]
+            verr: ValidationError | None = None
+        except ValidationError as e:
+            verr = e
+        assert verr is not None
+
+        mock_invoke = AsyncMock(side_effect=verr)
+        monkeypatch.setattr("vn_agent.agents.director.ainvoke_llm", mock_invoke)
+
+        with caplog.at_level(logging.ERROR, logger="vn_agent.agents.director"):
+            result = asyncio.run(
+                _step2_details(self._outline(2), str(tmp_path), _FakeStep2Settings())
+            )
+
+        assert result == {"scenes": []}
+        # GPT review #5: do not silently swallow — exc_info must be logged.
+        validation_records = [
+            r for r in caplog.records
+            if "structured output validation failed" in r.message
+        ]
+        assert validation_records, "Expected validation-failure error log"
+        assert validation_records[0].exc_info is not None
+
+    def test_step2_does_not_invoke_extract_json(self, monkeypatch, tmp_path):
+        """Tool Use returns a Pydantic instance directly; the legacy
+        _extract_json path must NOT be hit on the Sonnet branch."""
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from vn_agent.agents.director import _step2_details
+        from vn_agent.schema.script import DirectorStep2Output, DirectorStep2SceneOutput
+
+        mock_invoke = AsyncMock(
+            return_value=DirectorStep2Output(
+                scenes=[DirectorStep2SceneOutput(id="s1"),
+                        DirectorStep2SceneOutput(id="s2")]
+            )
+        )
+        monkeypatch.setattr("vn_agent.agents.director.ainvoke_llm", mock_invoke)
+
+        # If _extract_json gets called, raise immediately so test fails.
+        def _boom(_content: str) -> dict:
+            raise AssertionError("_extract_json must not be called on Tool Use path")
+
+        monkeypatch.setattr("vn_agent.agents.director._extract_json", _boom)
+
+        # Should complete without hitting _extract_json
+        asyncio.run(
+            _step2_details(self._outline(2), str(tmp_path), _FakeStep2Settings())
+        )
+
+
+class TestStep2PromptShape:
+    """User prompt construction tests for the Tool Use branch."""
+
+    def _capture_prompt(self, monkeypatch, outline, tmp_path):
+        import asyncio
+
+        captured: dict = {}
+
+        async def _fake_invoke(system, user, **kwargs):
+            captured["system"] = system
+            captured["user"] = user
+            captured["kwargs"] = kwargs
+            raise RuntimeError("stop before real LLM call")
+
+        monkeypatch.setattr("vn_agent.agents.director.ainvoke_llm", _fake_invoke)
+
+        from vn_agent.agents.director import _step2_details
+
+        try:
+            asyncio.run(
+                _step2_details(outline, str(tmp_path), _FakeStep2Settings())
+            )
+        except RuntimeError:
+            pass
+        return captured
+
+    def test_prompt_no_longer_contains_json_example(self, monkeypatch, tmp_path):
+        outline = {
+            "start_scene_id": "s1",
+            "scenes": [{"id": "s1", "title": "A", "description": "x"}],
+            "world_variables": [],
+        }
+        captured = self._capture_prompt(monkeypatch, outline, tmp_path)
+        # The legacy prompt had a JSON example block starting with "scenes": [
+        # That block should be GONE in the Tool Use prompt.
+        assert '"scenes": [' not in captured["user"]
+        assert '"music_mood": "peaceful"' not in captured["user"]
+
+    def test_prompt_retains_field_level_constraints(self, monkeypatch, tmp_path):
+        """GPT review #2: deleting JSON examples without keeping
+        prose-level field constraints would let the LLM skip optional
+        fields. The MUST-include block + key field names must remain."""
+        outline = {
+            "start_scene_id": "s1",
+            "scenes": [{"id": "s1", "title": "A", "description": "x"}],
+            "world_variables": [],
+        }
+        captured = self._capture_prompt(monkeypatch, outline, tmp_path)
+        user = captured["user"]
+        assert "Each entry in the `scenes` list MUST include" in user
+        # Key fields the LLM is most likely to skip without explicit prose
+        for field in ("scene_brief", "context_deps", "state_writes",
+                      "branches", "entry_context"):
+            assert field in user
+
+
+class TestStep2ObservabilityLogs:
+    """Silent-failure guards from GPT review (#1, #3)."""
+
+    def _outline(self, n_scenes: int):
+        return {
+            "start_scene_id": "s1",
+            "scenes": [
+                {"id": f"s{i+1}", "title": f"S{i+1}", "description": "x"}
+                for i in range(n_scenes)
+            ],
+            "world_variables": [],
+        }
+
+    def test_logs_warning_on_scene_shrinkage(self, monkeypatch, tmp_path, caplog):
+        import asyncio
+        import logging
+        from unittest.mock import AsyncMock
+
+        from vn_agent.agents.director import _step2_details
+        from vn_agent.schema.script import DirectorStep2Output, DirectorStep2SceneOutput
+
+        # Outline expects 5; LLM returns only 3.
+        mock_invoke = AsyncMock(
+            return_value=DirectorStep2Output(
+                scenes=[DirectorStep2SceneOutput(id=f"s{i+1}") for i in range(3)]
+            )
+        )
+        monkeypatch.setattr("vn_agent.agents.director.ainvoke_llm", mock_invoke)
+
+        with caplog.at_level(logging.WARNING, logger="vn_agent.agents.director"):
+            asyncio.run(
+                _step2_details(self._outline(5), str(tmp_path), _FakeStep2Settings())
+            )
+
+        msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("scene shrinkage" in m and "got 3, expected 5" in m for m in msgs)
+
+    def test_logs_warning_on_empty_scenes(self, monkeypatch, tmp_path, caplog):
+        import asyncio
+        import logging
+        from unittest.mock import AsyncMock
+
+        from vn_agent.agents.director import _step2_details
+        from vn_agent.schema.script import DirectorStep2Output
+
+        mock_invoke = AsyncMock(return_value=DirectorStep2Output(scenes=[]))
+        monkeypatch.setattr("vn_agent.agents.director.ainvoke_llm", mock_invoke)
+
+        with caplog.at_level(logging.WARNING, logger="vn_agent.agents.director"):
+            asyncio.run(
+                _step2_details(self._outline(5), str(tmp_path), _FakeStep2Settings())
+            )
+
+        msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("empty structured output" in m for m in msgs)
+
+    def test_logs_observability_stats_on_success(self, monkeypatch, tmp_path, caplog):
+        """Structure stats line must be emitted for grep-friendly silent-
+        degradation detection (e.g. branches_total=0)."""
+        import asyncio
+        import logging
+        from unittest.mock import AsyncMock
+
+        from vn_agent.agents.director import _step2_details
+        from vn_agent.schema.script import (
+            BranchOption,
+            DirectorStep2Output,
+            DirectorStep2SceneOutput,
+        )
+
+        mock_invoke = AsyncMock(
+            return_value=DirectorStep2Output(
+                scenes=[
+                    DirectorStep2SceneOutput(
+                        id="s1",
+                        branches=[BranchOption(text="a", next_scene_id="s2")],
+                    ),
+                    DirectorStep2SceneOutput(id="s2"),
+                ]
+            )
+        )
+        monkeypatch.setattr("vn_agent.agents.director.ainvoke_llm", mock_invoke)
+
+        with caplog.at_level(logging.INFO, logger="vn_agent.agents.director"):
+            asyncio.run(
+                _step2_details(self._outline(2), str(tmp_path), _FakeStep2Settings())
+            )
+
+        msgs = [r.message for r in caplog.records if r.levelno == logging.INFO]
+        assert any(
+            "tool_use ok: scenes=2" in m and "branches_total=1" in m
+            for m in msgs
+        )

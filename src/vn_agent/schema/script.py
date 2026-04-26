@@ -350,6 +350,92 @@ class Scene(BaseModel):
     )
 
 
+class DirectorStep2SceneOutput(BaseModel):
+    """Phase 13-2 Step 4f: Director step2 LLM Tool Use output (per scene).
+
+    Precisely matches the 11 fields _merge_outline_details (director.py)
+    consumes per scene. Reuses BranchOption / SceneBrief / SceneContextRef
+    component schemas — Pydantic auto-constructs them from dicts when
+    Anthropic's Tool Use returns nested objects.
+
+    Why a separate schema (not Scene): Scene is the runtime end-state
+    schema with dialogue / summary / thinking / state_constraints_seen
+    fields produced downstream. Director step2 is the GRAPH-EMISSION
+    boundary — it must NOT produce those downstream fields. Letting
+    step2's tool schema be Scene would invite the LLM to hallucinate
+    them.
+    """
+    id: str = Field(
+        description="Scene id; must match a scene from the step1 outline.",
+    )
+    next_scene_id: str | None = Field(
+        default=None,
+        description="Auto-advance target. None for terminal scenes or "
+                    "branch-only scenes.",
+    )
+    branches: list[BranchOption] = Field(
+        default_factory=list,
+        description="Player choice options. Empty for non-turning-point scenes.",
+    )
+    music_mood: str = Field(
+        default="neutral",
+        description="High-level mood label. peaceful / tense / melancholic etc.",
+    )
+    music_description: str = Field(
+        default="",
+        description="One-line BGM hint (e.g. 'soft piano, distant strings').",
+    )
+    emotional_arc: str | None = Field(
+        default=None,
+        description="Scene's emotional trajectory (e.g. 'curiosity → unease').",
+    )
+    entry_context: str | None = Field(
+        default=None,
+        description="What the player just experienced before this scene.",
+    )
+    exit_hook: str | None = Field(
+        default=None,
+        description="How this scene should end to set up the next.",
+    )
+    state_reads: list[str] = Field(
+        default_factory=list,
+        description="World variable names this scene's dialogue depends on.",
+    )
+    state_writes: dict[str, Any] = Field(
+        default_factory=dict,
+        description="World-state updates this scene applies on completion.",
+    )
+    context_deps: list[SceneContextRef] = Field(
+        default_factory=list, max_length=5,
+        description="Director-declared narrative dependencies, max 5.",
+    )
+    scene_brief: SceneBrief | None = Field(
+        default=None,
+        description="Per-scene creative planning artifact (Phase 13-2 Step 1).",
+    )
+
+
+class DirectorStep2Output(BaseModel):
+    """Phase 13-2 Step 4f: Director step2 wrapper for Anthropic Tool Use call.
+
+    Single-field wrapper because Anthropic Tool Use requires a top-level
+    object schema. Future metadata (e.g. director_warnings, model_self_check)
+    goes on this wrapper layer, not per-scene, to keep
+    DirectorStep2SceneOutput focused.
+
+    Migrating step2 from raw-text-JSON parsing to Tool Use here:
+      - Suppresses Sonnet's trained <thinking> output blocks (fixes
+        max_tokens=16000 truncation root cause)
+      - Replaces _salvage_truncated_json hack with strict schema validation
+      - Keeps temperature=0.2 (Extended Thinking would force temp=1.0,
+        risking graph-wiring drift)
+    """
+    scenes: list[DirectorStep2SceneOutput] = Field(
+        default_factory=list,
+        description="One DirectorStep2SceneOutput per scene from step1 outline.",
+    )
+
+
 class Chapter(BaseModel):
     """Phase 13-1 / Step 6: chapter-level rollup for long-form VN memory.
 
