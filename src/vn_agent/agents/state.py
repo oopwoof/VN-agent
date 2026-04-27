@@ -37,6 +37,13 @@ class AgentState(dict):
     review_passed: bool
     review_feedback: str
     review_scores: dict | None
+    # Phase 13-3 M0 follow-up: when False, the most recent reviewer FAIL
+    # was driven entirely by graph-class issues (unreachable scene,
+    # dangling next_scene_id, missing start_scene). Writer revisions
+    # cannot fix those — routing should accept the script. Default True
+    # preserves the historical "always retry on FAIL" behavior for
+    # mechanical / dialogue / quality failures.
+    review_can_writer_fix: bool
     # Sprint 7-5: structure-reviewer (pre-Writer audit) results. Informational
     # for Writer context, non-blocking by default.
     # Phase 13-2 Step 4e: structured findings (typed categories) populated
@@ -98,6 +105,7 @@ def initial_state(
         "revision_count": 0,
         "review_passed": False,
         "review_feedback": "",
+        "review_can_writer_fix": True,
         "structure_review_passed": False,
         "structure_review_feedback": "",
         "structure_review_issues": [],

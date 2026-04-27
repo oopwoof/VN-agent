@@ -135,6 +135,19 @@ def _should_revise(state: AgentState) -> str:
         logger.info("Reviewer PASSED - proceeding to asset generation")
         return "proceed"
 
+    # Phase 13-3 M0 follow-up: graph-class issues (unreachable scene,
+    # dangling next_scene_id, missing start_scene) can't be fixed by
+    # Writer revisions — those mutate dialogue, not topology. Director
+    # already had its budget upstream (StructureReviewer + Director rev
+    # loop). Burning Writer cycles here just regenerates dialogue for
+    # an already-broken graph.
+    if not state.get("review_can_writer_fix", True):
+        logger.warning(
+            "Reviewer FAILED with graph-class issues only — Writer cannot "
+            "fix; proceeding without revision (Director's domain)"
+        )
+        return "proceed"
+
     if state.get("revision_count", 0) >= settings.max_revision_rounds:
         logger.warning(
             f"Max revisions ({settings.max_revision_rounds}) reached - proceeding anyway"
@@ -151,9 +164,23 @@ def _after_review(state: AgentState) -> str:
 
     # Check if we should revise first
     revision_count = state.get("revision_count", 0)
-    if not state.get("review_passed") and revision_count < settings.max_revision_rounds:
+    can_writer_fix = state.get("review_can_writer_fix", True)
+    if (
+        not state.get("review_passed")
+        and can_writer_fix
+        and revision_count < settings.max_revision_rounds
+    ):
         logger.info(f"Reviewer FAILED (round {state.get('revision_count', 0)}) - revising")
         return "revise"
+
+    # Phase 13-3 M0 follow-up: graph-class FAIL skips Writer revision —
+    # see _should_revise rationale. Surface a distinct log so operators
+    # can tell "max revs hit" from "graph issues out of Writer's reach".
+    if not state.get("review_passed") and not can_writer_fix:
+        logger.warning(
+            "Reviewer FAILED with graph-class issues only — Writer cannot "
+            "fix; skipping revision loop"
+        )
 
     if state.get("text_only"):
         logger.info("text_only=True - skipping asset generation, going to END")
@@ -161,6 +188,8 @@ def _after_review(state: AgentState) -> str:
 
     if state.get("review_passed"):
         logger.info("Reviewer PASSED - proceeding to asset generation")
+    elif not can_writer_fix:
+        pass  # logged above
     else:
         logger.warning(
             f"Max revisions ({settings.max_revision_rounds}) reached - proceeding anyway"

@@ -23,9 +23,12 @@ def _f(category, *, source="deterministic", requires_retry=True):
     )
 
 
-def _settings_stub(max_revisions: int = 2):
+def _settings_stub(max_revisions: int = 2, max_review_rounds: int = 3):
     class _S:
         max_director_revisions = max_revisions
+        # Phase 13-3 M0 follow-up: _should_revise / _after_review read this
+        # field too; stub both so reviewer-routing tests share the factory.
+        max_revision_rounds = max_review_rounds
     return _S()
 
 
@@ -511,3 +514,88 @@ class TestWarningsDedup:
             f"writer.py must read ONLY structure_review_issues (len 2); "
             f"got per-scene lengths {[len(i) for i in captured_structure_issues]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 13-3 M0 follow-up: DialogueReviewer routing on graph-class issues
+# ---------------------------------------------------------------------------
+
+
+class TestReviewerCanWriterFixRouting:
+    """When the most recent reviewer FAIL was driven entirely by graph-class
+    issues (unreachable scene, dangling next_scene_id, missing start), the
+    revision loop must accept rather than retry — Writer regenerates dialogue,
+    not topology.
+
+    Repro: 2026-04-26 M0 sanity smoke ran 3 Writer revisions trying to fix
+    5 unreachable scenes; all 3 failed identically because next_scene_id
+    is Director-owned. Cost: ~$1.10 wasted.
+    """
+
+    def test_should_revise_routes_to_proceed_on_graph_class_fail(self):
+        from vn_agent.agents.graph import _should_revise
+        state = {
+            "review_passed": False,
+            "review_can_writer_fix": False,
+            "revision_count": 0,
+        }
+        with patch("vn_agent.agents.graph.get_settings", return_value=_settings_stub()):
+            assert _should_revise(state) == "proceed"
+
+    def test_should_revise_routes_to_revise_on_dialogue_class_fail(self):
+        from vn_agent.agents.graph import _should_revise
+        state = {
+            "review_passed": False,
+            "review_can_writer_fix": True,
+            "revision_count": 0,
+        }
+        with patch("vn_agent.agents.graph.get_settings", return_value=_settings_stub()):
+            assert _should_revise(state) == "revise"
+
+    def test_should_revise_default_can_writer_fix_keeps_revision_loop(self):
+        # Backwards-compat: if a state predates this field, treat as True
+        # so we don't silently swallow legitimate Writer revisions.
+        from vn_agent.agents.graph import _should_revise
+        state = {
+            "review_passed": False,
+            "revision_count": 0,
+        }
+        with patch("vn_agent.agents.graph.get_settings", return_value=_settings_stub()):
+            assert _should_revise(state) == "revise"
+
+    def test_after_review_text_only_accepts_on_graph_class_fail(self):
+        # text-only smoke path: graph-class FAIL must NOT trigger revise,
+        # must skip asset gen, must go to end.
+        from vn_agent.agents.graph import _after_review
+        state = {
+            "review_passed": False,
+            "review_can_writer_fix": False,
+            "revision_count": 0,
+            "text_only": True,
+        }
+        with patch("vn_agent.agents.graph.get_settings", return_value=_settings_stub()):
+            assert _after_review(state) == "end"
+
+    def test_after_review_dialogue_class_still_revises(self):
+        from vn_agent.agents.graph import _after_review
+        state = {
+            "review_passed": False,
+            "review_can_writer_fix": True,
+            "revision_count": 0,
+            "text_only": False,
+        }
+        with patch("vn_agent.agents.graph.get_settings", return_value=_settings_stub()):
+            assert _after_review(state) == "revise"
+
+    def test_after_review_graph_class_proceed_when_not_text_only(self):
+        # Non-text-only graph-class FAIL: still skip revise, but proceed
+        # to asset generation (don't end the pipeline mid-flight).
+        from vn_agent.agents.graph import _after_review
+        state = {
+            "review_passed": False,
+            "review_can_writer_fix": False,
+            "revision_count": 0,
+            "text_only": False,
+        }
+        with patch("vn_agent.agents.graph.get_settings", return_value=_settings_stub()):
+            assert _after_review(state) == "proceed"

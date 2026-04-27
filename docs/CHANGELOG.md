@@ -15,6 +15,32 @@
 
 ## [Unreleased]
 
+### 2026-08-24 | 实现 - 2026-08-24 01:23
+
+**变更文件** (5 个):
+**源码变更** (3 文件):
+  - `src/vn_agent/agents/graph.py`
+  - `src/vn_agent/agents/reviewer.py`
+  - `src/vn_agent/agents/state.py`
+
+**测试变更** (2 文件):
+  - `tests/test_agents/test_graph_routing.py`
+  - `tests/test_agents/test_reviewer.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/graph.py            | 31 ++++++++++-
+ src/vn_agent/agents/reviewer.py         | 54 ++++++++++++++++---
+ src/vn_agent/agents/state.py            |  8 +++
+ tests/test_agents/test_graph_routing.py | 90 ++++++++++++++++++++++++++++++-
+ tests/test_agents/test_reviewer.py      | 96 +++++++++++++++++++++++++++++++++
+ 5 files changed, 271 insertions(+), 8 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-24 | 实现 - 2026-08-24 01:10
 
 **变更文件** (2 个):

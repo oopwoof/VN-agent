@@ -21,6 +21,13 @@ class ReviewResult:
     feedback: str
     issues: list[str]
     scores: dict[str, float] | None = None  # {coherence, voice, arc, branches, pacing, avg}
+    # Phase 13-3 M0 follow-up: routing differentiator. False signals that
+    # all issues are graph-class (unreachable scene, dangling next_scene_id,
+    # missing start_scene) which Writer revisions cannot fix — those are
+    # Director-owned. Routing should accept rather than burn Writer cycles.
+    # Default True keeps current behavior for mechanical / quality / dialogue
+    # paths whose feedback IS Writer-actionable.
+    can_writer_fix: bool = True
 
 
 async def run_reviewer(state: AgentState) -> dict:
@@ -29,6 +36,9 @@ async def run_reviewer(state: AgentState) -> dict:
     if not script:
         return {
             "review_passed": False,
+            # No script means upstream (Director/Writer) failed to produce one;
+            # Writer revision cannot conjure a script out of nothing.
+            "review_can_writer_fix": False,
             "review_feedback": "No script to review",
             "revision_count": state.get("revision_count", 0) + 1,
         }
@@ -51,6 +61,12 @@ async def run_reviewer(state: AgentState) -> dict:
     structural_result = _structural_check(script)
     if not structural_result.passed:
         logger.info(f"Reviewer: {len(structural_result.issues)} structural issues")
+        if not structural_result.can_writer_fix:
+            logger.warning(
+                "Reviewer: every structural issue is graph-class "
+                "(unreachable / dangling next_scene_id / missing start) — "
+                "Writer revision cannot fix; routing will accept"
+            )
         if unknown_chars_payload:
             logger.info(
                 f"Reviewer: {len(unknown_chars_payload)} unknown character(s): "
@@ -58,6 +74,7 @@ async def run_reviewer(state: AgentState) -> dict:
             )
         return {
             "review_passed": False,
+            "review_can_writer_fix": structural_result.can_writer_fix,
             "review_feedback": structural_result.feedback,
             "revision_count": state.get("revision_count", 0) + 1,
             "unknown_characters": unknown_chars_payload,
@@ -71,6 +88,10 @@ async def run_reviewer(state: AgentState) -> dict:
         )
         return {
             "review_passed": False,
+            # Mechanical issues (line counts, emotion tags, character_id format)
+            # are by definition Writer-fixable — clear any stale graph-class
+            # signal from a prior round.
+            "review_can_writer_fix": True,
             "review_feedback": mechanical_result.feedback,
             "revision_count": state.get("revision_count", 0) + 1,
         }
@@ -123,6 +144,8 @@ async def run_reviewer(state: AgentState) -> dict:
 
     return {
         "review_passed": result.passed,
+        # LLM-quality fail means dialogue craft (voice, arc) — Writer-fixable.
+        "review_can_writer_fix": True,
         "review_feedback": feedback,
         "review_scores": result.scores,
         "revision_count": state.get("revision_count", 0) + 1,
@@ -300,15 +323,26 @@ def _mechanical_check(
 
 
 def _structural_check(script: VNScript) -> ReviewResult:
-    """Fast structural validation without LLM."""
+    """Fast structural validation without LLM.
+
+    Phase 13-3 M0 follow-up: tracks ``has_dialogue_issue`` so the result's
+    ``can_writer_fix`` flag tells routing whether to send the script to
+    Writer revision (default — when at least one issue is dialogue-class,
+    e.g. an undeclared character speaking) or to accept (when every issue
+    is graph-class, since Writer revisions don't touch ``next_scene_id``
+    or ``branches`` — those are Director's domain). Without this signal
+    the M0 sanity smoke (2026-04-26) burned 12 extra Writer scene calls
+    across two revisions trying to "fix" 5 unreachable scenes.
+    """
     issues = []
+    has_dialogue_issue = False
     scene_ids = {s.id for s in script.scenes}
 
-    # Check start scene exists
+    # Check start scene exists (graph-class)
     if script.start_scene_id not in scene_ids:
         issues.append(f"Start scene '{script.start_scene_id}' not found in scenes")
 
-    # Check all branch references
+    # Check all branch references (graph-class)
     for scene in script.scenes:
         for branch in scene.branches:
             if branch.next_scene_id not in scene_ids:
@@ -321,7 +355,7 @@ def _structural_check(script: VNScript) -> ReviewResult:
                 f"Scene '{scene.id}': next_scene_id '{scene.next_scene_id}' does not exist"
             )
 
-    # Check reachability (BFS from start)
+    # Check reachability — BFS from start (graph-class)
     reachable = _find_reachable_scenes(script)
     unreachable = scene_ids - reachable
     if unreachable:
@@ -329,7 +363,8 @@ def _structural_check(script: VNScript) -> ReviewResult:
 
     # Note: scenes with no exit (no next_scene_id, no branches) are valid terminal endings
 
-    # Check character consistency
+    # Check character consistency (dialogue-class — Writer can fix by
+    # reassigning the speaker or adding the character to the cast).
     declared_chars = {c.id if hasattr(c, 'id') else c for c in script.characters}
     for scene in script.scenes:
         for line in scene.dialogue:
@@ -337,10 +372,17 @@ def _structural_check(script: VNScript) -> ReviewResult:
                 issues.append(
                     f"Scene '{scene.id}': character '{line.character_id}' speaks but is not declared"
                 )
+                has_dialogue_issue = True
 
     if issues:
         feedback = "Structural issues found:\n" + "\n".join(f"- {i}" for i in issues)
-        return ReviewResult(passed=False, feedback=feedback, issues=issues)
+        # If every issue is graph-class, Writer revision is wasted spend.
+        return ReviewResult(
+            passed=False,
+            feedback=feedback,
+            issues=issues,
+            can_writer_fix=has_dialogue_issue,
+        )
 
     return ReviewResult(passed=True, feedback="Structural checks passed", issues=[])
 

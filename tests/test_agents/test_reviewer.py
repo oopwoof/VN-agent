@@ -98,6 +98,102 @@ class TestStructuralCheck:
         assert not result.passed
 
 
+class TestStructuralCheckCanWriterFix:
+    """Phase 13-3 M0 follow-up: the structural-check result must signal
+    whether Writer revision can fix the issues. Graph-class issues
+    (unreachable scene, dangling next_scene_id, missing start) cannot
+    be touched by Writer — only Director redoes graph topology — so
+    routing must skip the revision loop on those, otherwise the M0
+    smoke pattern (3 wasted Writer revisions on the same broken graph)
+    repeats every long-form run.
+    """
+
+    def test_passing_result_defaults_can_writer_fix_true(self):
+        result = _structural_check(make_valid_script())
+        assert result.passed
+        assert result.can_writer_fix is True
+
+    def test_unreachable_scene_marks_can_writer_fix_false(self):
+        script = make_valid_script()
+        orphan = Scene(
+            id="orphan_scene",
+            title="Orphan",
+            description="Nobody reaches here",
+            background_id="bg_orphan",
+            next_scene_id=None,
+        )
+        script = script.model_copy(update={"scenes": script.scenes + [orphan]})
+        result = _structural_check(script)
+        assert not result.passed
+        assert result.can_writer_fix is False
+
+    def test_missing_start_scene_marks_can_writer_fix_false(self):
+        script = make_valid_script()
+        script = script.model_copy(update={"start_scene_id": "nonexistent"})
+        result = _structural_check(script)
+        assert not result.passed
+        assert result.can_writer_fix is False
+
+    def test_broken_branch_target_marks_can_writer_fix_false(self):
+        script = make_valid_script()
+        bad_scenes = list(script.scenes)
+        bad_scenes[0] = bad_scenes[0].model_copy(update={
+            "branches": [
+                BranchOption(text="dead end", next_scene_id="does_not_exist"),
+            ]
+        })
+        script = script.model_copy(update={"scenes": bad_scenes})
+        result = _structural_check(script)
+        assert not result.passed
+        assert result.can_writer_fix is False
+
+    def test_undeclared_speaker_marks_can_writer_fix_true(self):
+        # Writer can fix dialogue speaker assignment by reassigning the line
+        # or surfacing the undeclared character — keep it in the revision loop.
+        script = make_valid_script()
+        bad_scenes = list(script.scenes)
+        bad_scenes[1] = bad_scenes[1].model_copy(update={
+            "dialogue": [
+                DialogueLine(
+                    character_id="ghost_char",
+                    text="I am not declared.",
+                    emotion="neutral",
+                ),
+            ],
+        })
+        script = script.model_copy(update={"scenes": bad_scenes})
+        result = _structural_check(script)
+        assert not result.passed
+        assert result.can_writer_fix is True
+
+    def test_mixed_issues_keep_can_writer_fix_true(self):
+        # If at least one issue is dialogue-class, route to Writer so it
+        # can fix its part. Director gets another shot upstream if needed.
+        script = make_valid_script()
+        bad_scenes = list(script.scenes)
+        bad_scenes[1] = bad_scenes[1].model_copy(update={
+            "dialogue": [
+                DialogueLine(
+                    character_id="ghost_char",
+                    text="Mixed signal.",
+                    emotion="neutral",
+                ),
+            ],
+        })
+        # Also add an unreachable scene (graph-class).
+        orphan = Scene(
+            id="orphan_scene",
+            title="Orphan",
+            description="Stranded",
+            background_id="bg_orphan",
+            next_scene_id=None,
+        )
+        script = script.model_copy(update={"scenes": bad_scenes + [orphan]})
+        result = _structural_check(script)
+        assert not result.passed
+        assert result.can_writer_fix is True
+
+
 class TestReviewerPassJudgement:
     """Tests for the improved PASS detection logic in _quality_check."""
 
