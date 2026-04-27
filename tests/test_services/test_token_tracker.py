@@ -124,3 +124,102 @@ def test_get_active_tracker_default_is_global():
 
     active = get_active_tracker()
     assert active is global_tracker
+
+
+# ---------------------------------------------------------------------------
+# Phase 13-3 M0 follow-up: cache token tracking + cache_read_ratio
+# ---------------------------------------------------------------------------
+
+
+class TestCacheTokenTracking:
+    """The 2026-04-26 M0 sanity smoke caught smoke_longvn.py guarding writes
+    of total_cost_usd / cache_read_ratio behind hasattr() checks against
+    method names that never existed (total_cost_usd, cache_read_ratio).
+    Both fields silently dropped from run_metrics.json. Fix: rename the
+    cost call to estimated_cost() AND add cache_read_ratio as a real
+    method backed by Anthropic's cache_read_input_tokens usage bucket.
+    """
+
+    def test_add_with_cache_kwargs_records_buckets(self):
+        t = TokenTracker()
+        t.add(
+            "writer", "claude-sonnet-4-6",
+            input_tokens=100, output_tokens=50,
+            cache_read_input_tokens=2000,
+            cache_creation_input_tokens=500,
+        )
+        assert t.total_input() == 100  # uncached only
+        assert t.total_cache_read_input() == 2000
+        assert t.total_cache_creation_input() == 500
+        assert t.total_input_with_cache() == 100 + 2000 + 500
+
+    def test_add_without_cache_kwargs_defaults_to_zero(self):
+        # Backwards-compat: existing callers passing only positional args
+        # should still work with cache buckets defaulting to 0.
+        t = TokenTracker()
+        t.add("director", "claude-sonnet-4-6", 1000, 500)
+        assert t.total_cache_read_input() == 0
+        assert t.total_cache_creation_input() == 0
+        assert t.total_input_with_cache() == 1000
+
+    def test_cache_read_ratio_zero_on_empty_tracker(self):
+        assert TokenTracker().cache_read_ratio() == 0.0
+
+    def test_cache_read_ratio_zero_when_no_cache_hits(self):
+        t = TokenTracker()
+        t.add("director", "claude-sonnet-4-6", 1000, 500)
+        assert t.cache_read_ratio() == 0.0
+
+    def test_cache_read_ratio_full_hit(self):
+        t = TokenTracker()
+        # All input came from cache_read — ratio should be 1.0.
+        t.add(
+            "writer", "claude-sonnet-4-6",
+            input_tokens=0, output_tokens=100,
+            cache_read_input_tokens=5000,
+        )
+        assert t.cache_read_ratio() == 1.0
+
+    def test_cache_read_ratio_mixed(self):
+        t = TokenTracker()
+        # 30% of total input was cache_read.
+        t.add(
+            "writer", "claude-sonnet-4-6",
+            input_tokens=700, output_tokens=200,
+            cache_read_input_tokens=300,
+        )
+        assert abs(t.cache_read_ratio() - 0.3) < 1e-9
+
+    def test_estimated_cost_applies_anthropic_cache_pricing(self):
+        # cache_read billed at ~10% of base input; cache_creation at ~125%.
+        # Verify both are added on top of plain input/output cost.
+        t = TokenTracker()
+        t.add(
+            "writer", "claude-sonnet-4-6",
+            input_tokens=1_000_000, output_tokens=0,
+            cache_read_input_tokens=1_000_000,
+            cache_creation_input_tokens=1_000_000,
+        )
+        # base in: 1M × $3/M = $3.0
+        # cache read: 1M × $3/M × 0.1 = $0.3
+        # cache create: 1M × $3/M × 1.25 = $3.75
+        # output: 0
+        assert abs(t.estimated_cost() - (3.0 + 0.3 + 3.75)) < 1e-9
+
+    def test_summary_dict_includes_cache_fields(self):
+        t = TokenTracker()
+        t.add(
+            "writer", "claude-sonnet-4-6",
+            input_tokens=1000, output_tokens=500,
+            cache_read_input_tokens=2000,
+            cache_creation_input_tokens=200,
+        )
+        d = t.summary_dict()
+        assert d["total_cache_read_input"] == 2000
+        assert d["total_cache_creation_input"] == 200
+        # cache_read / (1000 + 2000 + 200) ≈ 0.625
+        assert abs(d["cache_read_ratio"] - 2000 / 3200) < 1e-3
+        # by_model breakdown also surfaces the new buckets.
+        m = d["by_model"]["claude-sonnet-4-6"]
+        assert m["cache_read"] == 2000
+        assert m["cache_create"] == 200

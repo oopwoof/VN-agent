@@ -382,6 +382,12 @@ def _log_stop_reason(result: Any, caller: str) -> None:
     usage = meta.get("usage", {})
     input_tokens = usage.get("input_tokens", 0)
     output_tokens = usage.get("output_tokens", 0)
+    # Phase 13-3 M0 follow-up: capture Anthropic's cache token buckets so
+    # TokenTracker can compute cache_read_ratio (north-star validation
+    # signal). Default to 0 for non-Anthropic providers / un-cached calls
+    # so the .add() call shape is provider-agnostic.
+    cache_read_input_tokens = usage.get("cache_read_input_tokens", 0) or 0
+    cache_creation_input_tokens = usage.get("cache_creation_input_tokens", 0) or 0
     model = meta.get("model_id") or meta.get("model", "unknown")
     logger.info(
         f"[{caller}] stop_reason={stop_reason!r}  "
@@ -389,7 +395,18 @@ def _log_stop_reason(result: Any, caller: str) -> None:
     )
 
     if isinstance(input_tokens, int) and isinstance(output_tokens, int):
-        get_active_tracker().add(caller, model, input_tokens, output_tokens)
+        get_active_tracker().add(
+            caller,
+            model,
+            input_tokens,
+            output_tokens,
+            cache_read_input_tokens=(
+                cache_read_input_tokens if isinstance(cache_read_input_tokens, int) else 0
+            ),
+            cache_creation_input_tokens=(
+                cache_creation_input_tokens if isinstance(cache_creation_input_tokens, int) else 0
+            ),
+        )
 
     if stop_reason == "max_tokens":
         settings = get_settings()

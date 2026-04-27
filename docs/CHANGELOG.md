@@ -15,6 +15,32 @@
 
 ## [Unreleased]
 
+### 2026-08-24 | 实现 - 2026-08-24 01:09
+
+**变更文件** (4 个):
+**源码变更** (2 文件):
+  - `src/vn_agent/services/llm.py`
+  - `src/vn_agent/services/token_tracker.py`
+
+**测试变更** (1 文件):
+  - `tests/test_services/test_token_tracker.py`
+
+**其他变更** (1 文件):
+  - `scripts/smoke_longvn.py`
+
+**变更统计**:
+```
+scripts/smoke_longvn.py                   | 12 ++--
+ src/vn_agent/services/llm.py              | 19 +++++-
+ src/vn_agent/services/token_tracker.py    | 90 ++++++++++++++++++++++++++--
+ tests/test_services/test_token_tracker.py | 99 +++++++++++++++++++++++++++++++
+ 4 files changed, 211 insertions(+), 9 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-20 | 实现 - 2026-08-20 11:11
 
 **变更文件** (3 个):

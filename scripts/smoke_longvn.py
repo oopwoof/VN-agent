@@ -391,10 +391,14 @@ async def _run(args: argparse.Namespace, *, concurrent: int | None = None,
     }
     if is_mock:
         report["peak_writer_concurrency"] = gauge["peak"]
-    if hasattr(tracker, "total_cost_usd"):
-        report["total_cost_usd"] = round(tracker.total_cost_usd(), 2)
-    if hasattr(tracker, "cache_read_ratio"):
-        report["cache_read_ratio"] = round(tracker.cache_read_ratio(), 3)
+    # Prior code looked for tracker.total_cost_usd() / tracker.cache_read_ratio()
+    # behind hasattr guards — those were never the public method names on
+    # TokenTracker (cost is .estimated_cost(); the ratio didn't exist at all),
+    # so both fields were silently skipped and run_metrics.json shipped without
+    # them. The $15 ceiling assertion below read a missing key as 0.0 and could
+    # never fire.
+    report["total_cost_usd"] = round(tracker.estimated_cost(), 2)
+    report["cache_read_ratio"] = round(tracker.cache_read_ratio(), 3)
 
     # Assertions against Phase 13-1 acceptance targets
     assertions: list[str] = []
