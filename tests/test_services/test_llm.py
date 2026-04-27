@@ -563,6 +563,68 @@ def test_structured_output_propagates_parsing_error(monkeypatch):
             ))
 
 
+def test_max_tokens_warning_uses_effective_cap_when_supplied(caplog):
+    """Phase 13-3 M0 follow-up: when stop_reason='max_tokens' fires, the
+    warning must report the EFFECTIVE max_tokens that was passed for THIS
+    call (e.g. writer_max_tokens_per_scene=8000 for Writer), not the
+    global llm_max_tokens default (16000). Operators reading the warning
+    were tuning the wrong knob during the 2026-04-26 M0 sanity smoke."""
+    import logging
+    from unittest.mock import MagicMock
+
+    from vn_agent.services.llm import _log_stop_reason
+
+    raw = MagicMock()
+    raw.response_metadata = {
+        "stop_reason": "max_tokens",
+        "usage": {"input_tokens": 1000, "output_tokens": 5000},
+        "model": "claude-sonnet-4-6",
+    }
+
+    with caplog.at_level(logging.WARNING, logger="vn_agent.services.llm"):
+        _log_stop_reason(raw, "writer/ch1", effective_max_tokens=5000)
+
+    msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("max_tokens limit (5000)" in m for m in msgs), (
+        f"Effective cap (5000) must appear in the warning; got: {msgs}"
+    )
+    # And the misleading legacy "16000" / "llm.max_tokens" hint must NOT
+    # appear when the call site supplied the actual cap.
+    assert not any("16000" in m for m in msgs), msgs
+    assert not any("llm.max_tokens" in m for m in msgs), msgs
+
+
+def test_max_tokens_warning_falls_back_to_settings_when_no_override(monkeypatch, caplog):
+    """If the call site doesn't supply effective_max_tokens (legacy callers,
+    direct test invocations), the warning falls back to settings.llm_max_tokens
+    so we don't regress the previous diagnostic — just stop misleading the
+    common Writer/Reviewer paths that DO override."""
+    import logging
+    from unittest.mock import MagicMock
+
+    from vn_agent.services.llm import _log_stop_reason
+
+    raw = MagicMock()
+    raw.response_metadata = {
+        "stop_reason": "max_tokens",
+        "usage": {"input_tokens": 100, "output_tokens": 200},
+        "model": "claude-sonnet-4-6",
+    }
+
+    with patch("vn_agent.services.llm.get_settings") as mock_settings:
+        s = mock_settings.return_value
+        s.llm_max_tokens = 16000
+
+        with caplog.at_level(logging.WARNING, logger="vn_agent.services.llm"):
+            _log_stop_reason(raw, "legacy/caller")
+
+    msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("max_tokens limit (16000)" in m for m in msgs), (
+        f"Without effective_max_tokens, fall back to settings.llm_max_tokens; got: {msgs}"
+    )
+    assert any("llm.max_tokens" in m for m in msgs), msgs
+
+
 def test_get_structured_llm_uses_same_base_for_different_schemas():
     """Phase 13-2 Step 4f: schema is NOT part of the _get_llm_cached
     cache key. Different schemas produce different `with_structured_output`

@@ -373,8 +373,22 @@ def get_structured_llm(
     ).with_structured_output(schema, include_raw=True)
 
 
-def _log_stop_reason(result: Any, caller: str) -> None:
-    """Log stop_reason and token usage from response metadata."""
+def _log_stop_reason(
+    result: Any,
+    caller: str,
+    *,
+    effective_max_tokens: int | None = None,
+) -> None:
+    """Log stop_reason and token usage from response metadata.
+
+    Phase 13-3 M0 follow-up: when ``effective_max_tokens`` is supplied,
+    the max_tokens warning surfaces THAT value (i.e. the cap actually
+    passed to the API for THIS call) instead of the global config
+    default ``settings.llm_max_tokens``. The 2026-04-26 M0 sanity smoke
+    showed Writer hitting writer_max_tokens_per_scene=5000 but the
+    warning misleadingly said "max_tokens limit (16000)" — operators
+    saw the wrong number and would have tuned the wrong knob.
+    """
     from vn_agent.services.token_tracker import get_active_tracker
 
     meta = getattr(result, "response_metadata", None) or {}
@@ -409,10 +423,23 @@ def _log_stop_reason(result: Any, caller: str) -> None:
         )
 
     if stop_reason == "max_tokens":
-        settings = get_settings()
+        # Prefer the effective per-call cap when known (e.g. Writer's
+        # per-scene cap from writer_max_tokens_per_scene); fall back to
+        # the global config default only when the call site didn't
+        # supply one. This makes the warning actionable: the operator
+        # sees the actual budget that was hit, not a misleading default.
+        if effective_max_tokens is not None:
+            cap_value = effective_max_tokens
+            knob_hint = (
+                "raise the per-caller cap (e.g. writer_max_tokens_per_scene "
+                "for Writer) or the call-site override"
+            )
+        else:
+            settings = get_settings()
+            cap_value = settings.llm_max_tokens
+            knob_hint = "Consider raising llm.max_tokens in config/settings.yaml"
         logger.warning(
-            f"[{caller}] Response hit max_tokens limit ({settings.llm_max_tokens}). "
-            "Consider increasing llm.max_tokens in config/settings.yaml."
+            f"[{caller}] Response hit max_tokens limit ({cap_value}). {knob_hint}."
         )
 
 
@@ -530,7 +557,14 @@ async def _invoke_once_async(
             # Use raw for stop_reason/token logging, propagate parsing_error,
             # return parsed so callers see a Pydantic instance just like before.
             result = await llm.ainvoke(messages)
-            _log_stop_reason(result.get("raw"), caller)
+            _log_stop_reason(
+                result.get("raw"), caller,
+                effective_max_tokens=(
+                    max_tokens_override
+                    if max_tokens_override is not None
+                    else settings.llm_max_tokens
+                ),
+            )
             err = result.get("parsing_error")
             if err is not None:
                 raise err
@@ -542,7 +576,14 @@ async def _invoke_once_async(
                 max_tokens_override=max_tokens_override,
             )
             result = await llm.ainvoke(messages)
-            _log_stop_reason(result, caller)
+            _log_stop_reason(
+                result, caller,
+                effective_max_tokens=(
+                    max_tokens_override
+                    if max_tokens_override is not None
+                    else settings.llm_max_tokens
+                ),
+            )
             return result
 
     return await _call()
@@ -582,7 +623,14 @@ def _invoke_once_sync(
             # Phase 13-3 M0-3: include_raw=True returns
             # {"raw": BaseMessage, "parsed": Schema, "parsing_error": Exception | None}.
             result = llm.invoke(messages)
-            _log_stop_reason(result.get("raw"), caller)
+            _log_stop_reason(
+                result.get("raw"), caller,
+                effective_max_tokens=(
+                    max_tokens_override
+                    if max_tokens_override is not None
+                    else settings.llm_max_tokens
+                ),
+            )
             err = result.get("parsing_error")
             if err is not None:
                 raise err
@@ -594,7 +642,14 @@ def _invoke_once_sync(
                 max_tokens_override=max_tokens_override,
             )
             result = llm.invoke(messages)
-            _log_stop_reason(result, caller)
+            _log_stop_reason(
+                result, caller,
+                effective_max_tokens=(
+                    max_tokens_override
+                    if max_tokens_override is not None
+                    else settings.llm_max_tokens
+                ),
+            )
             return result
 
     return _call()
