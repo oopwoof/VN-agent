@@ -127,10 +127,35 @@ async def run_writer(state: AgentState) -> dict:
     if settings.use_lore_retrieval:
         try:
             from vn_agent.eval.lore import build_lore_index, format_lore_block
-            lore_index = build_lore_index(script, characters)
+
+            # v4 P0: creator-uploaded RAG chunks (md/pdf/docx and later
+            # web-search results) join the scene-scope retrieval pool.
+            # Only enabled when the pipeline is running under a web job —
+            # CLI paths pass through with no uploads.
+            user_upload_entities: list = []
+            job_id = state.get("job_id")
+            if job_id:
+                try:
+                    from vn_agent.assets.upload_store import load_chunks
+
+                    user_upload_entities = load_chunks(job_id)
+                    if user_upload_entities:
+                        logger.info(
+                            f"Writer: {len(user_upload_entities)} user_upload "
+                            f"chunks loaded for job {job_id}"
+                        )
+                except Exception as e:  # noqa: BLE001 — non-fatal
+                    logger.debug(f"user_upload load failed for job {job_id}: {e}")
+
+            lore_index = build_lore_index(
+                script, characters, user_upload_entities=user_upload_entities,
+            )
             if lore_index is not None:
                 # Render the stable always + chapter blocks once per run.
-                # Retrieved scene block is rendered per-scene in _write_scene.
+                # Retrieved scene block is rendered per-scene in _write_scene
+                # and now automatically includes any user_upload chunks that
+                # cosine-match the scene context (they live in the FAISS pool
+                # alongside scene-scope lore).
                 always_lore_block, chapter_lore_block, _ = format_lore_block(
                     retrieved=[],
                     always_entities=getattr(lore_index, "always_entities", []),

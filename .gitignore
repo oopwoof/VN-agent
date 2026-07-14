@@ -218,7 +218,18 @@ frontend/dist/
 # - vn_jobs.db: SQLite job store for web-mode runtime state
 # - .claude/scheduled_tasks.lock: scheduler runtime lock
 demo_output/
-data/
+# v4 P0-2 note: `data/` is bulk-ignored, but the open-source asset library
+# manifest is a checked-in contract (tag→path index + license + attribution
+# for CC0/CC-BY assets). Enumerate subdirs so the manifest can escape the
+# bulk-ignore; git cannot re-include files if a parent directory is excluded.
+data/sessions/
+data/vn_examples/
+data/final_annotations.csv
+data/assets/*
+data/uploads/
+!data/assets/opensource/
+data/assets/opensource/*
+!data/assets/opensource/manifest.json
 _eval_tmp/
 _eval_ollama_output/
 vn_jobs.db

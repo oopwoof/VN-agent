@@ -37,6 +37,15 @@ rag = ["sentence-transformers>=2.0", "faiss-cpu>=1.7", "numpy>=1.24"]
 # base install stays slim — pipeline degrades to colored-bg sprites when
 # missing (with a startup warning).
 cutout = ["rembg>=2.0", "onnxruntime>=1.17"]
+# v4 P0 (Phase 14): multi-source material fusion — text chunking for
+# uploaded md/pdf/docx + image pHash for cross-source dedup. All optional;
+# pipeline degrades to LLM-only assets when missing (with a warning).
+assets = [
+    "langchain-text-splitters>=0.3",
+    "imagehash>=4.3",
+    "pypdf>=4.0",
+    "python-docx>=1.1",
+]
 
 [project.scripts]
 vn-agent = "vn_agent.cli:app"

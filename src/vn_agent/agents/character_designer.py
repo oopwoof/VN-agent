@@ -229,16 +229,44 @@ async def _generate_sprites(
     cutout_targets: list[tuple[Path, str]] = []
 
     neutral_ok = False
+
+    # v4 P0-2: try local open-source character sprite library first.
+    # Character sprites in the library are anchored on role + appearance
+    # keywords so we build the query from CharacterProfile + VisualProfile.
     try:
-        # 3:4 portrait matches traditional VN full-body sprite framing —
-        # character fills vertical space, 1920x1080 scenes get head-to-toe.
-        await generate_image(neutral_prompt, neutral_abs, aspect_ratio=settings.sprite_aspect_ratio)
-        logger.info(f"Generated neutral sprite: {char.id}")
-        cutout_targets.append((neutral_abs, f"{char.id}_neutral"))
-        neutral_ok = True
-    except Exception as e:
-        logger.warning(f"Could not generate neutral sprite for {char.id}: {e}")
-        errors.append(f"CharacterDesigner: sprite {char.id}_neutral: {e}")
+        from vn_agent.assets.library import record_library_hit, try_library_hit
+
+        sprite_query = " ".join(filter(None, [
+            char.role or "", char.name or "",
+            visual.appearance or "", visual.default_outfit or "",
+        ]))
+        hit = try_library_hit(sprite_query, "character_sprite", neutral_abs)
+        if hit is not None:
+            # Tag the prompt with a library sentinel so downstream telemetry
+            # (P0-6 diversity index) can count non-LLM sprites; the sprites
+            # list append below picks up this modified prompt automatically.
+            provenance = f"[library:{hit.id} · {hit.license}]"
+            neutral_prompt = f"{provenance} {neutral_prompt}"
+            logger.info(f"Library HIT for {char.id} neutral sprite → {hit.id}")
+            neutral_ok = True
+            # Cutout is idempotent on already-transparent PNGs so a library
+            # asset with baked alpha still passes cleanly through rembg.
+            cutout_targets.append((neutral_abs, f"{char.id}_neutral"))
+            record_library_hit(output_dir, "character_sprite", f"{char.id}_neutral", hit, sprite_query)
+    except Exception as e:  # noqa: BLE001 — non-fatal, fall through to LLM
+        logger.debug(f"Library hit-first failed for {char.id} sprite: {e}")
+
+    if not neutral_ok:
+        try:
+            # 3:4 portrait matches traditional VN full-body sprite framing —
+            # character fills vertical space, 1920x1080 scenes get head-to-toe.
+            await generate_image(neutral_prompt, neutral_abs, aspect_ratio=settings.sprite_aspect_ratio)
+            logger.info(f"Generated neutral sprite: {char.id}")
+            cutout_targets.append((neutral_abs, f"{char.id}_neutral"))
+            neutral_ok = True
+        except Exception as e:
+            logger.warning(f"Could not generate neutral sprite for {char.id}: {e}")
+            errors.append(f"CharacterDesigner: sprite {char.id}_neutral: {e}")
 
     sprites.append(EmotionSprite(
         emotion="neutral",

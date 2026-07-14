@@ -428,8 +428,13 @@ _PLACEHOLDER_PNG_SIZE = 67
 _PLACEHOLDER_OGG_SIZE = 44
 _IMG_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 _AUDIO_EXTENSIONS = {".ogg", ".mp3", ".wav"}
+# v4 P0: text upload extensions (md/txt/pdf/docx). Pipeline chunks these
+# into user_upload-scope AnnotatedSessions and feeds them into the lore
+# RAG pool. See assets/text_ingest.py.
+_TEXT_EXTENSIONS = {".md", ".txt", ".markdown", ".pdf", ".docx"}
 _MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
 _MAX_AUDIO_SIZE = 10 * 1024 * 1024  # 10MB
+_MAX_TEXT_SIZE = 20 * 1024 * 1024  # 20MB (world-lore docs can be long)
 
 _MIME_MAP = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
              ".webp": "image/webp", ".ogg": "audio/ogg", ".mp3": "audio/mpeg", ".wav": "audio/wav"}
@@ -529,8 +534,17 @@ async def upload_asset(
     file: UploadFile,
     asset_type: str = Form(...),
     asset_id: str = Form(...),
+    # v4 P0: optional provenance for text uploads — creator declares
+    # license so the export gate can trust it. Defaults keep the endpoint
+    # backwards-compatible for existing image/audio callers.
+    license: str = Form("user_owned"),
 ):
-    """Upload an asset file to replace a placeholder."""
+    """Upload an asset file.
+
+    - `background` / `character_sprite` / `bgm`  → image/audio placeholder replace
+    - `text` (v4 P0)                             → md/txt/pdf/docx chunked into
+                                                    user_upload RAG pool
+    """
     store = _get_store()
     job = store.get(job_id)
     if not job:
@@ -540,6 +554,7 @@ async def upload_asset(
         raise HTTPException(status_code=400, detail="Invalid asset_id format")
 
     output_dir = Path(job.get("output_dir", ""))
+    ext = Path(file.filename or "").suffix.lower()
 
     if asset_type == "background":
         target = output_dir / "game" / "images" / "backgrounds" / f"{asset_id}.png"
@@ -553,15 +568,66 @@ async def upload_asset(
         target = output_dir / "game" / "audio" / "bgm" / f"{asset_id}.ogg"
         allowed_ext = _AUDIO_EXTENSIONS
         max_size = _MAX_AUDIO_SIZE
+    elif asset_type == "text":
+        # Text uploads don't write to output_dir — they persist to
+        # data/uploads/{job_id}/ and feed the lore RAG at generation time.
+        if ext not in _TEXT_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid text format {ext}, allowed: {sorted(_TEXT_EXTENSIONS)}",
+            )
+        content = await file.read()
+        if len(content) > _MAX_TEXT_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Text file too large ({len(content)} bytes), max {_MAX_TEXT_SIZE}",
+            )
+
+        from vn_agent.assets import text_ingest, upload_store
+
+        try:
+            chunks = text_ingest.ingest_upload(
+                content,
+                file.filename or asset_id,
+                source="upload",
+                license=license,
+            )
+        except ImportError as exc:
+            # Missing optional dep (pypdf / python-docx) — actionable message.
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).exception(
+                "Text ingest failed for job %s filename=%r", job_id, file.filename,
+            )
+            raise HTTPException(
+                status_code=500, detail=f"Text ingest failed: {exc}"
+            ) from exc
+
+        if not chunks:
+            raise HTTPException(status_code=400, detail="Uploaded document produced zero chunks (empty or unreadable)")
+
+        upload_store.save_raw(job_id, file.filename or asset_id, content)
+        jsonl_path = upload_store.save_chunks(job_id, chunks)
+        summary = upload_store.summarize(job_id)
+
+        return {
+            "status": "uploaded",
+            "asset_type": "text",
+            "asset_id": asset_id,
+            "size": len(content),
+            "chunks": len(chunks),
+            "cjk_dominant": chunks[0].source_meta.get("cjk_dominant", False),
+            "jsonl_path": str(jsonl_path),
+            "summary": summary,
+        }
     else:
         raise HTTPException(status_code=400, detail=f"Unknown asset_type: {asset_type}")
 
-    # Path traversal check
+    # Path traversal check (image/audio branches only)
     if not str(target.resolve()).startswith(str(output_dir.resolve())):
         raise HTTPException(status_code=403, detail="Path traversal denied")
 
     # Extension check
-    ext = Path(file.filename or "").suffix.lower()
     if ext not in allowed_ext:
         raise HTTPException(status_code=400, detail=f"Invalid file format {ext}, allowed: {allowed_ext}")
 
@@ -802,6 +868,9 @@ async def _run_job(job_id: str, req: GenerateRequest, output_dir: Path) -> None:
                 text_only=req.text_only,
                 max_scenes=req.max_scenes,
                 num_characters=req.num_characters,
+                # v4 P0: propagate the web job id so downstream agents can
+                # look up user-uploaded material chunks via upload_store.
+                job_id=job_id,
             )
 
             # Use astream for per-node progress updates

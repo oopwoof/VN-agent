@@ -15,6 +15,76 @@
 
 ## [Unreleased]
 
+### 2026-07-15 | 实现 - 2026-07-15 00:35
+
+**变更文件** (30 个):
+**源码变更** (16 文件):
+  - `src/vn_agent/agents/character_designer.py`
+  - `src/vn_agent/agents/scene_artist.py`
+  - `src/vn_agent/agents/state.py`
+  - `src/vn_agent/agents/writer.py`
+  - `src/vn_agent/assets/__init__.py`
+  - `src/vn_agent/assets/dedup.py`
+  - `src/vn_agent/assets/library.py`
+  - `src/vn_agent/assets/license_gate.py`
+  - `src/vn_agent/assets/text_ingest.py`
+  - `src/vn_agent/assets/upload_store.py`
+  - ...及其他 6 个文件
+
+**测试变更** (7 文件):
+  - `tests/test_assets/__init__.py`
+  - `tests/test_assets/test_dedup.py`
+  - `tests/test_assets/test_library.py`
+  - `tests/test_assets/test_license_gate.py`
+  - `tests/test_assets/test_text_ingest.py`
+
+**配置变更** (1 文件):
+  - `pyproject.toml`
+
+**其他变更** (3 文件):
+  - `.gitignore`
+  - `data/assets/opensource/manifest.json`
+  - `uv.lock`
+
+**变更统计**:
+```
+.gitignore                                |  13 +-
+ data/assets/opensource/manifest.json      |  13 +
+ docs/PRODUCT.md                           |  17 +-
+ docs/v4/PRODUCT_v4.md                     | 452 ++++++++++++++++++++++++++++++
+ docs/v4/README_v4.md                      |  61 ++++
+ pyproject.toml                            |   9 +
+ src/vn_agent/agents/character_designer.py |  46 ++-
+ src/vn_agent/agents/scene_artist.py       |  25 ++
+ src/vn_agent/agents/state.py              |   7 +
+ src/vn_agent/agents/writer.py             |  29 +-
+ src/vn_agent/assets/__init__.py           |  13 +
+ src/vn_agent/assets/dedup.py              | 249 ++++++++++++++++
+ src/vn_agent/assets/library.py            | 388 +++++++++++++++++++++++++
+ src/vn_agent/assets/license_gate.py       | 166 +++++++++++
+ src/vn_agent/assets/text_ingest.py        | 293 +++++++++++++++++++
+ src/vn_agent/assets/upload_store.py       | 159 +++++++++++
+ src/vn_agent/eval/corpus.py               |  29 +-
+ src/vn_agent/eval/lore.py                 |  26 +-
+ src/vn_agent/metrics/__init__.py          |   1 +
+ src/vn_agent/metrics/diversity.py         | 184 ++++++++++++
+ src/vn_agent/services/mock_llm.py         |  29 +-
+ src/vn_agent/web/app.py                   |  75 ++++-
+ tests/test_assets/__init__.py             |   0
+ tests/test_assets/test_dedup.py           | 173 ++++++++++++
+ tests/test_assets/test_library.py         | 214 ++++++++++++++
+ tests/test_assets/test_license_gate.py    | 143 ++++++++++
+ tests/test_assets/test_text_ingest.py     | 245 ++++++++++++++++
+ tests/test_metrics/__init__.py            |   0
+ tests/test_metrics/test_diversity.py      | 168 +++++++++++
+ uv.lock                                   | 222 ++++++++++++++-
+ 30 files changed, 3413 insertions(+), 36 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-04-26 | 测试 - 2026-04-26 01:00
 
 **变更文件** (2 个):

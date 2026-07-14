@@ -175,7 +175,11 @@ def extract_lore_entities(script, characters: dict) -> list[AnnotatedSession]:
     return entities
 
 
-def build_lore_index(script, characters: dict):
+def build_lore_index(
+    script,
+    characters: dict,
+    user_upload_entities: list[AnnotatedSession] | None = None,
+):
     """Build a per-run EmbeddingIndex over lore entities.
 
     Phase 13-1 / Step 3: always-scope entities are extracted but NOT put
@@ -183,22 +187,29 @@ def build_lore_index(script, characters: dict):
     `.always_entities` so callers can inject them into the cached system
     prefix without competing for top-k slots.
 
+    v4 P0: `user_upload_entities` (from uploads / web search / open-source
+    library) join the FAISS retrieval pool alongside scene-scope entities.
+    They are exposed on the returned index as `.user_upload_entities` so
+    callers (diversity index, license gate, source-badge UI) can enumerate
+    provenance without re-reading the JSONL store.
+
     Returns None when:
-      - Extraction yields zero entities
+      - Extraction yields zero entities and no user_upload chunks
       - sentence-transformers / faiss aren't installed
       - Any other build-time failure (logged at DEBUG)
     """
     entities = extract_lore_entities(script, characters)
-    if not entities:
+    user_upload_entities = list(user_upload_entities or [])
+    if not entities and not user_upload_entities:
         return None
 
     always_entities = [e for e in entities if e.scope == "always"]
     chapter_entities = [e for e in entities if e.scope == "chapter"]
     scene_entities = [e for e in entities if e.scope == "scene"]
-    # Only scene-scope goes into FAISS for per-scene top-k retrieval.
+    # scene-scope + user_upload go into FAISS for per-scene top-k retrieval.
     # Chapter-scope rides along in the cached system prefix (Step 3) — its
     # content is stable within a run, so it doesn't need cosine filtering.
-    retrievable = scene_entities
+    retrievable = scene_entities + user_upload_entities
 
     try:
         from vn_agent.eval.embedder import EmbeddingIndex
@@ -225,10 +236,11 @@ def build_lore_index(script, characters: dict):
         index.always_entities = always_entities  # type: ignore[attr-defined]
         index.chapter_entities = chapter_entities  # type: ignore[attr-defined]
         index.scene_entities = scene_entities  # type: ignore[attr-defined]
+        index.user_upload_entities = user_upload_entities  # type: ignore[attr-defined]
         logger.info(
-            f"Lore index built: {len(entities)} entities total "
+            f"Lore index built: {len(entities) + len(user_upload_entities)} entities total "
             f"({len(always_entities)} always / {len(chapter_entities)} chapter "
-            f"/ {len(scene_entities)} scene)"
+            f"/ {len(scene_entities)} scene / {len(user_upload_entities)} user_upload)"
         )
         return index
     except Exception as e:  # noqa: BLE001 — optional feature, don't crash pipeline

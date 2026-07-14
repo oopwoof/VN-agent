@@ -75,8 +75,33 @@ async def _generate_background(
     """Generate background image prompt and optionally the image.
 
     Returns a tuple of (updated_scene, errors).
+
+    v4 P0-2: check the local open-source asset library first. On hit we
+    copy the CC0/CC-BY file into place and skip BOTH the prompt-LLM call
+    and the image-gen call — saving two API calls per matched scene and
+    grounding the diversity index.
     """
     style_line = art_direction if art_direction else "Painterly anime background art style"
+    file_path = Path(output_dir) / "game" / "images" / "backgrounds" / f"{scene.background_id}.png"
+
+    # ── Library hit-first (v4 P0-2) ─────────────────────────────────────────
+    try:
+        from vn_agent.assets.library import record_library_hit, try_library_hit
+
+        query = f"{scene.background_id} {scene.title} {scene.description}"
+        hit = try_library_hit(query, "background", file_path)
+        if hit is not None:
+            # Provenance encoded in the prompt so it round-trips through the
+            # blackboard without a schema bump; the diversity index (P0-6)
+            # greps for the `[library:...]` sentinel to count non-LLM assets.
+            provenance = f"[library:{hit.id} · {hit.license} · {hit.attribution}]"
+            bg_prompt = f"{provenance} {scene.description or scene.title}"
+            updated_scene = scene.model_copy(update={"background_prompt": bg_prompt})
+            record_library_hit(output_dir, "background", scene.background_id, hit, query)
+            return updated_scene, []
+    except Exception as e:  # noqa: BLE001 — non-fatal, fall through to LLM
+        logger.debug(f"Library hit-first failed for {scene.background_id}: {e}")
+
     user_prompt = f"""Create an image generation prompt for this scene background:
 
 Scene: {scene.title}

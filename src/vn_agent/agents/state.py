@@ -75,6 +75,11 @@ class AgentState(dict):
     # metadata so a creator-mode UI can offer auto-fill or cast-editor
     # workflows instead of making the creator re-open the JSON.
     unknown_characters: list[dict]
+    # v4 P0: web-job identity for cross-agent lookups (uploaded RAG chunks,
+    # asset library provenance, etc.). None when running from CLI or tests.
+    # Populated by web/app.py at pipeline entry; agents check-and-fallback
+    # so CLI paths continue to work with zero user-upload lookup.
+    job_id: str | None
 
 
 def initial_state(
@@ -83,6 +88,7 @@ def initial_state(
     text_only: bool = False,
     max_scenes: int = 10,
     num_characters: int = 3,
+    job_id: str | None = None,
 ) -> dict:
     """Create the initial state for a new VN generation pipeline."""
     return {
@@ -109,4 +115,5 @@ def initial_state(
         "world_state": {},
         "state_constraints": "",
         "unknown_characters": [],
+        "job_id": job_id,
     }

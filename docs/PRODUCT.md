@@ -1,4 +1,15 @@
-# VN-Agent 产品文档
+# VN-Agent 产品文档（v1–v3，🔒 SHELVED）
+
+> **⚠️ 本文档已归为 SHELVED（保留，不删除）**
+> 自 2026-07-08 起，**当前生效的产品北极星见 [docs/v4/PRODUCT_v4.md](./v4/PRODUCT_v4.md)**。
+> 本文档中的产品愿景、Phase 1–13 里程碑、backlog（含 P2 四通道 RAG / 自我进化 Agent / Ren'Py 表现力扩展）**保留但暂不推进**；后续优先级由产品负责人决定。
+> v4 差异一览：主形态从 CLI/JSON → Web 工作台；用户从"玩家+创作者双端"→ 创作者中心 + Autopilot 玩家路径；素材从"全 LLM 生成"→ "上传/网检/开源库外源引入优先"。
+>
+> **2026-07-13 更新**：本文档 P2 backlog 中的 **B 自我进化 Agent（数据飞轮）** 与 **C PlaytestAgent + Vision LLM Judge** 已被 v4 拉回作为简历爆点，对应 v4 P1 / P4；详见 [docs/v4/PRODUCT_v4.md 第 5.6 节](./v4/PRODUCT_v4.md#56-v3-shelved-回补方向b-数据飞轮--c-playtestagent)。本文档保持 SHELVED 事实不变，只是标出被回补的两项。
+>
+> —— 原文档正文完整保留于下：
+
+---
 
 > 记录产品规划、状态、思考与决策
 
@@ -447,7 +458,7 @@ Phase 11 就是对这批批评的系统化响应（Sprint 9/10 deferred 处理 s
 - [ ] Trace 分析工具（从 trace.json 提取瓶颈、优化建议）
 - [ ] Sprint 13-2/3/4: job queue + cost caps + fleet dashboard (multi-user ops)
 
-### 长期架构（2026-04-14 收官草案，详见 DEV_LOG.md 未来架构路线）
+### 长期架构（2026-04-14 收官草案，详见 [ARCHITECTURE.md](./ARCHITECTURE.md) 未来架构路线）
 
 **P2 - 四通道 RAG 架构**（解耦代码与文学）
 - [ ] ETL + chunking：以 `label`/`menu` 为物理边界的场景切片 + AI 生成的 Context Header + Haiku 元数据打标
@@ -463,7 +474,7 @@ Phase 11 就是对这批批评的系统化响应（Sprint 9/10 deferred 处理 s
 - [ ] L2 Reflection Agent：异步跑批提炼元规则 → `dynamic_guidelines.json` → 启动时拼接 System Prompt
 - [ ] L3 DSPy 式自动 Prompt 优化 + DPO 微调廉价模型（Llama 3 8B / Haiku）
 
-**P2 - Ren'Py 表现力扩展 + Multi-Agent 架构演进**（详见 DEV_LOG.md 路线三，2026-04-20 草案）
+**P2 - Ren'Py 表现力扩展 + Multi-Agent 架构演进**（详见 [ARCHITECTURE.md](./ARCHITECTURE.md) 路线三，2026-04-20 草案）
 
 *Schema + Graph 层*
 - [ ] `Scene` 扩字段：`cg_moment` / `ambient` / `minigame` / `scene_effects` / `loop_reset_vars` / `locale_hints`（全 Optional，向后兼容）

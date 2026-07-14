@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -46,13 +46,26 @@ class AnnotatedSession(BaseModel):
     pacing: str | None = None  # slow / medium / fast
     # Phase 13-1 / Step 3: lore-entity scope. "scene" is the default so existing
     # corpus sessions (which are dialogue few-shots, not lore) stay unchanged.
-    #   always   → premise, immutability_score≥8 characters. Bypass FAISS,
-    #              inject in cached system-prompt prefix with cache_control.
-    #   chapter  → story-wide world_vars + secondary characters. In retrieved
-    #              pool but cap raised (800 char).
-    #   scene    → locations, callback hooks, noisy retrieval context. Cap
-    #              stays at 300 char.
-    scope: Literal["always", "chapter", "scene"] = "scene"
+    #   always       → premise, immutability_score≥8 characters. Bypass FAISS,
+    #                  inject in cached system-prompt prefix with cache_control.
+    #   chapter      → story-wide world_vars + secondary characters. In retrieved
+    #                  pool but cap raised (800 char).
+    #   scene        → locations, callback hooks, noisy retrieval context. Cap
+    #                  stays at 300 char.
+    #   user_upload  → v4 P0: user-uploaded text (md/pdf/docx) or web-search
+    #                  chunks. Joins the FAISS retrieval pool alongside scene
+    #                  scope. `source_meta` carries provenance for license
+    #                  gate + diversity index.
+    scope: Literal["always", "chapter", "scene", "user_upload"] = "scene"
+
+    # v4 P0: provenance metadata. Optional; only user_upload / web_search
+    # chunks populate this. Fields typically include:
+    #   source: "upload" | "web_search" | "local_library" | "llm_generated"
+    #   source_url: original URL for web_search, or filename for upload
+    #   license: "CC0" | "CC-BY" | "user_owned" | "derived" | "unknown"
+    #   retrieved_at: ISO timestamp
+    #   search_query: original search query (web_search only)
+    source_meta: dict = Field(default_factory=dict)
 
 
 def load_corpus(csv_path: Path) -> list[AnnotatedSession]:

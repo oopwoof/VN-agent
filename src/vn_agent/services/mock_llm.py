@@ -313,11 +313,36 @@ async def mock_ainvoke(
     model: str | None = None,
     caller: str = "llm",
     **kwargs,  # absorb Phase 13-1 kwargs (cache_ttl, force_cache) without caring
-) -> _MockMessage:
-    """Drop-in replacement for ainvoke_llm that returns canned responses."""
+):
+    """Drop-in replacement for ainvoke_llm.
+
+    Two return contracts, matching real ainvoke_llm's `T | str` signature:
+      - schema=None    → _MockMessage with `.content` (raw text path)
+      - schema=T       → T instance parsed from the canned JSON (Phase 13-2
+                         Step 4f tool-use / structured-output path). Callers
+                         that pass a Pydantic schema expect a validated
+                         instance, NOT a _MockMessage. Before this fix the
+                         mock always returned _MockMessage → director step2
+                         (Sonnet-class tool-use path) crashed with
+                         "'_MockMessage' object has no attribute 'scenes'".
+    """
+    import json
+    from pydantic import BaseModel
+
     sys_lower = system_prompt.lower()
     content = _dispatch(sys_lower, user_prompt, caller)
     logger.debug(f"[mock] caller={caller!r} → {len(content)} chars")
+
+    if schema is not None and isinstance(schema, type) and issubclass(schema, BaseModel):
+        try:
+            data = json.loads(content) if isinstance(content, str) else content
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"[mock] caller={caller!r} schema={schema.__name__} but canned "
+                f"content is not JSON: {e}. First 200 chars: {content[:200]!r}"
+            ) from e
+        return schema.model_validate(data)
+
     return _MockMessage(content)
 
 

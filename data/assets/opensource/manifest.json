@@ -1,0 +1,13 @@
+{
+  "$schema_version": 1,
+  "notes": [
+    "v4 P0-2 opensource asset library manifest.",
+    "Every entry MUST include: id, type, path (relative to this manifest), license, attribution.",
+    "Optional: tags (list[str] for semantic match), width/height (int), notes (str).",
+    "Licenses accepted at M0: CC0, CC-BY, CC-BY-SA. Others get flagged by license_gate.",
+    "M0 ships an empty asset set — the manifest itself is the contract; drop real",
+    "CC0 art files (Kenney / OpenGameArt / itch.io) alongside and add an entry to the assets list.",
+    "See docs/v4/PRODUCT_v4.md §5.③ for the intended workflow."
+  ],
+  "assets": []
+}
