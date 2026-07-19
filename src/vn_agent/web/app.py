@@ -653,6 +653,43 @@ async def upload_asset(
     return {"status": "uploaded", "asset_type": asset_type, "asset_id": asset_id, "size": len(content)}
 
 
+@app.delete("/api/projects/{job_id}/assets/upload")
+async def delete_upload(job_id: str, filename: str | None = None):
+    """v4 P0-upload-delete: remove uploaded doc chunks from the RAG pool.
+
+    Two modes:
+      - `?filename=<name>` deletes just that file's chunks (byte-exact
+        match on `source_meta.filename`). Returns per-file count + summary.
+      - No query param → clears ALL chunks + raw/ bytes for the job.
+        Returns total count + empty summary. Used by the frontend's
+        "Clear all uploads" affordance.
+
+    Idempotent: deleting a filename that no longer exists returns 0
+    with a 200. Callers can refresh their UI unconditionally.
+    """
+    store = _get_store()
+    if not store.get(job_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    from vn_agent.assets import upload_store
+
+    if filename is None:
+        removed = upload_store.clear_all(job_id)
+        return {
+            "status": "cleared",
+            "removed": removed,
+            "summary": upload_store.summarize(job_id),
+        }
+
+    removed = upload_store.delete_by_filename(job_id, filename)
+    return {
+        "status": "deleted" if removed else "noop",
+        "removed": removed,
+        "filename": filename,
+        "summary": upload_store.summarize(job_id),
+    }
+
+
 @app.post("/api/projects/{job_id}/resume")
 async def resume_project(
     job_id: str,

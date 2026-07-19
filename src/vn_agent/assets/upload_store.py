@@ -125,6 +125,93 @@ def load_chunks(job_id: str) -> list[AnnotatedSession]:
     return chunks
 
 
+def delete_by_filename(job_id: str, filename: str) -> int:
+    """Remove every chunk whose `source_meta.filename` matches `filename`.
+
+    Rewrites `uploads.jsonl` atomically (temp + rename) so a crash mid-write
+    can't leave a corrupt store. Returns the number of chunks removed
+    (0 when nothing matched).
+
+    Callers (web DELETE endpoint, tests, future re-ingest tooling):
+    - Match is byte-exact against the stored `filename` value, which is
+      whatever `chunk_text(filename=...)` was called with. In practice
+      that's the uploaded file's basename or the URL-derived stem from
+      the web-search agent, so passing the same string back deletes the
+      right thing.
+    """
+    if not filename:
+        return 0
+    path = upload_dir(job_id) / "uploads.jsonl"
+    if not path.exists():
+        return 0
+
+    chunks = load_chunks(job_id)
+    kept = [c for c in chunks if (c.source_meta or {}).get("filename") != filename]
+    removed = len(chunks) - len(kept)
+    if removed == 0:
+        return 0
+
+    if not kept:
+        # Whole file's worth of chunks was removed and nothing else lives
+        # here — unlink the JSONL so summarize() reports {} cleanly instead
+        # of an empty file.
+        try:
+            path.unlink()
+        except OSError as e:
+            logger.warning(f"Failed to unlink empty uploads.jsonl for job {job_id}: {e}")
+        return removed
+
+    tmp = path.with_suffix(".jsonl.tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            for ch in kept:
+                f.write(ch.model_dump_json())
+                f.write("\n")
+        tmp.replace(path)
+    except OSError as e:
+        logger.warning(f"Failed to rewrite uploads.jsonl for job {job_id}: {e}")
+        # Cleanup on failure — orphan tmp files clutter debug output.
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return 0
+
+    return removed
+
+
+def clear_all(job_id: str) -> int:
+    """Remove every chunk for a job. Returns the count that was there.
+
+    Also unlinks any `raw/` bytes the store persisted for audit; the point
+    of "clear all" is to wipe the job's uploads completely.
+    """
+    dst = upload_dir(job_id)
+    path = dst / "uploads.jsonl"
+    raw_dir = dst / "raw"
+
+    prior = 0
+    if path.exists():
+        prior = len(load_chunks(job_id))
+        try:
+            path.unlink()
+        except OSError as e:
+            logger.warning(f"Failed to unlink uploads.jsonl for job {job_id}: {e}")
+
+    if raw_dir.exists() and raw_dir.is_dir():
+        for f in raw_dir.iterdir():
+            try:
+                f.unlink()
+            except OSError as e:
+                logger.debug(f"Failed to unlink raw upload {f}: {e}")
+        try:
+            raw_dir.rmdir()
+        except OSError:
+            pass
+
+    return prior
+
+
 def summarize(job_id: str) -> dict:
     """Provenance snapshot for the diversity index + UI badges."""
     chunks = load_chunks(job_id)

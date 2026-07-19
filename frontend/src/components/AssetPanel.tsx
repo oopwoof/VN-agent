@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import useStore from '../store'
 import api, { type UploadResult } from '../api'
 import type { AssetEntry } from '../types'
@@ -90,13 +90,40 @@ function AssetCard({ asset, onUpload, type }: { asset: AssetEntry; onUpload: (fi
 // v4 P0-7: dedicated pane for creator-uploaded world-building docs (md/pdf/docx).
 // Persists to data/uploads/{job_id}/uploads.jsonl on the backend and joins the
 // FAISS RAG pool the next time Writer runs.
+// v4 P0-upload-delete: uploaded files are listed as chips with X to delete;
+// staged (not-yet-uploaded) file has a "cancel selection" affordance.
+type UploadSummary = NonNullable<UploadResult['summary']>
+
 function WorldDocsPane({ jobId }: { jobId: string }) {
   const [license, setLicense] = useState<string>('user_owned')
   const [dragOver, setDragOver] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [lastResult, setLastResult] = useState<UploadResult | null>(null)
+  const [summary, setSummary] = useState<UploadSummary | null>(null)
+  const [staged, setStaged] = useState<File | null>(null)   // selected but not uploaded yet
+  const [deleting, setDeleting] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // v4 P0-upload-delete: fetch existing uploads on mount so the list shows
+  // chunks that were uploaded in previous sessions of this job. The
+  // upload endpoint returns a fresh summary on every write, so we only
+  // need to hit the delete endpoint (with a no-op filename) to bootstrap.
+  useEffect(() => {
+    // A DELETE with a nonexistent filename returns the current summary
+    // without mutating state — effectively a cheap "GET summary" for M0.
+    // A dedicated GET endpoint would be cleaner; deferred to when the
+    // upload UI grows beyond this pane.
+    api.deleteUpload(jobId, '__none__').then(res => {
+      const s: UploadSummary = {
+        chunks: res.chunks,
+        by_source: res.by_source,
+        by_license: res.by_license,
+        files: res.files,
+      }
+      setSummary(s)
+    }).catch(() => { /* new jobs return 200 with empty summary; anything else is silently ignored */ })
+  }, [jobId])
 
   const doUpload = async (file: File) => {
     setError(null)
@@ -112,6 +139,8 @@ function WorldDocsPane({ jobId }: { jobId: string }) {
     try {
       const res = await api.uploadAsset(jobId, file, 'text', assetId, license)
       setLastResult(res)
+      if (res.summary) setSummary(res.summary)
+      setStaged(null)
     } catch (e) {
       setError(String(e))
     } finally {
@@ -119,7 +148,44 @@ function WorldDocsPane({ jobId }: { jobId: string }) {
     }
   }
 
-  const summary = lastResult?.summary
+  const doDelete = async (filename: string) => {
+    if (deleting[filename]) return
+    setDeleting(d => ({ ...d, [filename]: true }))
+    setError(null)
+    try {
+      const res = await api.deleteUpload(jobId, filename)
+      const s: UploadSummary = {
+        chunks: res.chunks,
+        by_source: res.by_source,
+        by_license: res.by_license,
+        files: res.files,
+      }
+      setSummary(s)
+    } catch (e) {
+      setError(`删除失败：${e}`)
+    } finally {
+      setDeleting(d => ({ ...d, [filename]: false }))
+    }
+  }
+
+  const clearAll = async () => {
+    if (!summary || summary.chunks === 0) return
+    if (!confirm(`将清空当前 job 的全部 ${summary.chunks} 块上传素材，确认？`)) return
+    setError(null)
+    try {
+      const res = await api.deleteUpload(jobId)  // no filename → clear all
+      const s: UploadSummary = {
+        chunks: res.chunks,
+        by_source: res.by_source,
+        by_license: res.by_license,
+        files: res.files,
+      }
+      setSummary(s)
+    } catch (e) {
+      setError(`清空失败：${e}`)
+    }
+  }
+
   const totalChunks = summary?.chunks ?? 0
   const files = summary?.files ?? []
   const sources = Object.entries(summary?.by_source ?? {})
@@ -155,7 +221,9 @@ function WorldDocsPane({ jobId }: { jobId: string }) {
           e.preventDefault()
           setDragOver(false)
           const f = e.dataTransfer.files[0]
-          if (f) doUpload(f)
+          // v4 P0-upload-delete: don't auto-upload — stage the file first so
+          // the user can cancel or confirm license before spending compute.
+          if (f) setStaged(f)
         }}
         onClick={() => inputRef.current?.click()}
       >
@@ -164,10 +232,17 @@ function WorldDocsPane({ jobId }: { jobId: string }) {
           type="file"
           className="hidden"
           accept={_TEXT_ACCEPT}
-          onChange={e => { const f = e.target.files?.[0]; if (f) doUpload(f) }}
+          onChange={e => { const f = e.target.files?.[0]; if (f) setStaged(f) }}
         />
         {uploading ? (
           <div className="text-sm text-indigo-300">正在切块 + 嵌入…</div>
+        ) : staged ? (
+          <>
+            <div className="text-sm text-emerald-200 truncate">已选择：{staged.name}</div>
+            <div className="text-[10px] text-gray-500 mt-1">
+              {(staged.size / 1024).toFixed(1)} KB — 授权 “{license}”
+            </div>
+          </>
         ) : (
           <>
             <div className="text-sm text-gray-300">拖拽文件到这里，或点击选择</div>
@@ -175,6 +250,23 @@ function WorldDocsPane({ jobId }: { jobId: string }) {
           </>
         )}
       </div>
+
+      {staged && !uploading && (
+        <div className="flex gap-2">
+          <button
+            onClick={() => doUpload(staged)}
+            className="flex-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs py-2 font-medium"
+          >
+            确认上传 · {staged.name}
+          </button>
+          <button
+            onClick={() => setStaged(null)}
+            className="rounded border border-gray-700 hover:border-gray-500 text-xs px-3 text-gray-300"
+          >
+            取消选中
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-300">
@@ -191,9 +283,18 @@ function WorldDocsPane({ jobId }: { jobId: string }) {
         </div>
       )}
 
-      {summary && (
+      {summary && summary.chunks > 0 && (
         <div className="rounded border border-gray-800 bg-gray-900/60 p-3 space-y-2">
-          <div className="text-xs text-gray-400">当前 job 累积</div>
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-gray-400">当前 job 累积</div>
+            <button
+              onClick={clearAll}
+              className="text-[10px] text-red-400 hover:text-red-300"
+              title="清空当前 job 全部上传素材"
+            >
+              清空全部
+            </button>
+          </div>
           <div className="text-sm text-gray-100">
             共 <span className="text-indigo-300">{totalChunks}</span> 块，来自 {files.length} 个来源
           </div>
@@ -212,8 +313,20 @@ function WorldDocsPane({ jobId }: { jobId: string }) {
             </div>
           )}
           {files.length > 0 && (
-            <ul className="text-[11px] text-gray-500 space-y-0.5 max-h-32 overflow-y-auto">
-              {files.map(f => <li key={f} className="truncate">• {f}</li>)}
+            <ul className="text-[11px] space-y-1 max-h-40 overflow-y-auto">
+              {files.map(f => (
+                <li key={f} className="flex items-center justify-between gap-2 rounded bg-gray-950/40 px-2 py-1">
+                  <span className="text-gray-400 truncate flex-1" title={f}>{f}</span>
+                  <button
+                    onClick={() => doDelete(f)}
+                    disabled={!!deleting[f]}
+                    className="text-red-400 hover:text-red-300 disabled:opacity-40 text-[10px]"
+                    title="从 RAG 池删除该文件的全部 chunks"
+                  >
+                    {deleting[f] ? '…' : '×'}
+                  </button>
+                </li>
+              ))}
             </ul>
           )}
         </div>

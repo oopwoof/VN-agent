@@ -122,6 +122,16 @@ const api = {
     if (!resp.ok) throw new Error(await resp.text())
   },
 
+  // v4 P0-upload-delete: remove a single uploaded doc's chunks from the
+  // job's RAG pool, or (filename omitted) clear every upload for the job.
+  async deleteUpload(jobId: string, filename?: string): Promise<UploadResult['summary'] & { removed: number; status: string }> {
+    const qs = filename ? `?filename=${encodeURIComponent(filename)}` : ''
+    const resp = await fetch(`/api/projects/${jobId}/assets/upload${qs}`, { method: 'DELETE' })
+    if (!resp.ok) throw new Error(await resp.text())
+    const data = await resp.json()
+    return { ...data.summary, removed: data.removed, status: data.status }
+  },
+
   // v4 P0-resume: rescue a stuck/crashed job by merging snapshot dialogue
   // into vn_script.json and (for text_only runs) recompiling.
   async resumeProject(jobId: string, opts?: { force?: boolean; dryRun?: boolean }): Promise<{

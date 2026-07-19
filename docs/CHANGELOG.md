@@ -15,6 +15,34 @@
 
 ## [Unreleased]
 
+### 2026-07-19 | 实现 - 2026-07-19 20:31
+
+**变更文件** (5 个):
+**源码变更** (2 文件):
+  - `src/vn_agent/assets/upload_store.py`
+  - `src/vn_agent/web/app.py`
+
+**测试变更** (1 文件):
+  - `tests/test_assets/test_upload_delete.py`
+
+**其他变更** (2 文件):
+  - `frontend/src/api.ts`
+  - `frontend/src/components/AssetPanel.tsx`
+
+**变更统计**:
+```
+frontend/src/api.ts                     |  10 +++
+ frontend/src/components/AssetPanel.tsx  | 129 ++++++++++++++++++++++++++++++--
+ src/vn_agent/assets/upload_store.py     |  87 +++++++++++++++++++++
+ src/vn_agent/web/app.py                 |  37 +++++++++
+ tests/test_assets/test_upload_delete.py | 118 +++++++++++++++++++++++++++++
+ 5 files changed, 373 insertions(+), 8 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-07-19 | 实现 - 2026-07-19 19:27
 
 **变更文件** (40 个):
