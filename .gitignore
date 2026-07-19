@@ -228,7 +228,11 @@ data/final_annotations.csv
 data/assets/*
 data/uploads/
 !data/assets/opensource/
-data/assets/opensource/*
+# Ship the placeholder PNGs so a fresh clone has a demo-runnable library.
+# Real production users overwrite these with Kenney / OpenGameArt art
+# (same filenames → no manifest edit).
+!data/assets/opensource/*.png
+!data/assets/opensource/*.ogg
 !data/assets/opensource/manifest.json
 _eval_tmp/
 _eval_ollama_output/

@@ -1,13 +1,193 @@
 {
   "$schema_version": 1,
   "notes": [
-    "v4 P0-2 opensource asset library manifest.",
-    "Every entry MUST include: id, type, path (relative to this manifest), license, attribution.",
-    "Optional: tags (list[str] for semantic match), width/height (int), notes (str).",
-    "Licenses accepted at M0: CC0, CC-BY, CC-BY-SA. Others get flagged by license_gate.",
-    "M0 ships an empty asset set — the manifest itself is the contract; drop real",
-    "CC0 art files (Kenney / OpenGameArt / itch.io) alongside and add an entry to the assets list.",
-    "See docs/v4/PRODUCT_v4.md §5.③ for the intended workflow."
+    "v4 P0-2 opensource asset library.",
+    "These placeholder assets are CC0 (author-generated via PIL, no external art used).",
+    "Production users should replace files with real Kenney / OpenGameArt / itch.io art",
+    "— matching filenames keeps the manifest valid without edits.",
+    "Regenerate placeholders: `uv run python scripts/seed_opensource_library.py`"
   ],
-  "assets": []
+  "assets": [
+    {
+      "id": "bg_school_day",
+      "type": "background",
+      "path": "school_day.png",
+      "license": "CC0",
+      "attribution": "VN-Agent placeholder (author-generated, CC0)",
+      "tags": [
+        "school",
+        "classroom",
+        "day",
+        "校园",
+        "教室",
+        "白天"
+      ],
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "id": "bg_school_night",
+      "type": "background",
+      "path": "school_night.png",
+      "license": "CC0",
+      "attribution": "VN-Agent placeholder (author-generated, CC0)",
+      "tags": [
+        "school",
+        "classroom",
+        "night",
+        "校园",
+        "夜晚"
+      ],
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "id": "bg_school_dusk",
+      "type": "background",
+      "path": "school_dusk.png",
+      "license": "CC0",
+      "attribution": "VN-Agent placeholder (author-generated, CC0)",
+      "tags": [
+        "school",
+        "classroom",
+        "dusk",
+        "校园",
+        "黄昏"
+      ],
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "id": "bg_rooftop_day",
+      "type": "background",
+      "path": "rooftop_day.png",
+      "license": "CC0",
+      "attribution": "VN-Agent placeholder (author-generated, CC0)",
+      "tags": [
+        "rooftop",
+        "outdoor",
+        "day",
+        "天台",
+        "白天"
+      ],
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "id": "bg_rooftop_night",
+      "type": "background",
+      "path": "rooftop_night.png",
+      "license": "CC0",
+      "attribution": "VN-Agent placeholder (author-generated, CC0)",
+      "tags": [
+        "rooftop",
+        "outdoor",
+        "night",
+        "天台",
+        "夜晚"
+      ],
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "id": "bg_forest_dawn",
+      "type": "background",
+      "path": "forest_dawn.png",
+      "license": "CC0",
+      "attribution": "VN-Agent placeholder (author-generated, CC0)",
+      "tags": [
+        "forest",
+        "outdoor",
+        "dawn",
+        "森林",
+        "黎明"
+      ],
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "id": "bg_cafe_warm",
+      "type": "background",
+      "path": "cafe_warm.png",
+      "license": "CC0",
+      "attribution": "VN-Agent placeholder (author-generated, CC0)",
+      "tags": [
+        "cafe",
+        "indoor",
+        "warm",
+        "咖啡馆",
+        "室内"
+      ],
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "id": "bg_shrine_cool",
+      "type": "background",
+      "path": "shrine_cool.png",
+      "license": "CC0",
+      "attribution": "VN-Agent placeholder (author-generated, CC0)",
+      "tags": [
+        "shrine",
+        "outdoor",
+        "cool",
+        "神社",
+        "室外"
+      ],
+      "width": 1920,
+      "height": 1080
+    },
+    {
+      "id": "sprite_student_female_neutral",
+      "type": "character_sprite",
+      "path": "student_female_neutral.png",
+      "license": "CC0",
+      "attribution": "VN-Agent placeholder (author-generated, CC0)",
+      "tags": [
+        "student",
+        "female",
+        "young",
+        "neutral",
+        "学生",
+        "女",
+        "青年"
+      ],
+      "width": 810,
+      "height": 1080
+    },
+    {
+      "id": "sprite_student_male_neutral",
+      "type": "character_sprite",
+      "path": "student_male_neutral.png",
+      "license": "CC0",
+      "attribution": "VN-Agent placeholder (author-generated, CC0)",
+      "tags": [
+        "student",
+        "male",
+        "young",
+        "neutral",
+        "学生",
+        "男",
+        "青年"
+      ],
+      "width": 810,
+      "height": 1080
+    },
+    {
+      "id": "sprite_teacher_neutral",
+      "type": "character_sprite",
+      "path": "teacher_neutral.png",
+      "license": "CC0",
+      "attribution": "VN-Agent placeholder (author-generated, CC0)",
+      "tags": [
+        "teacher",
+        "adult",
+        "neutral",
+        "老师",
+        "成年"
+      ],
+      "width": 810,
+      "height": 1080
+    }
+  ]
 }

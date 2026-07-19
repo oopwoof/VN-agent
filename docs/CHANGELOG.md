@@ -15,6 +15,39 @@
 
 ## [Unreleased]
 
+### 2026-07-19 | 杂项 - 2026-07-19 17:27
+
+**变更文件** (14 个):
+**其他变更** (14 文件):
+  - `.gitignore`
+  - `data/assets/opensource/cafe_warm.png`
+  - `data/assets/opensource/forest_dawn.png`
+  - `data/assets/opensource/manifest.json`
+  - `data/assets/opensource/rooftop_day.png`
+
+**变更统计**:
+```
+.gitignore                                        |   6 +-
+ data/assets/opensource/cafe_warm.png              | Bin 0 -> 16841 bytes
+ data/assets/opensource/forest_dawn.png            | Bin 0 -> 17332 bytes
+ data/assets/opensource/manifest.json              | 198 +++++++++++++++++++++-
+ data/assets/opensource/rooftop_day.png            | Bin 0 -> 16376 bytes
+ data/assets/opensource/rooftop_night.png          | Bin 0 -> 16259 bytes
+ data/assets/opensource/school_day.png             | Bin 0 -> 16732 bytes
+ data/assets/opensource/school_dusk.png            | Bin 0 -> 17830 bytes
+ data/assets/opensource/school_night.png           | Bin 0 -> 16556 bytes
+ data/assets/opensource/shrine_cool.png            | Bin 0 -> 16546 bytes
+ data/assets/opensource/student_female_neutral.png | Bin 0 -> 14338 bytes
+ data/assets/opensource/student_male_neutral.png   | Bin 0 -> 14854 bytes
+ data/assets/opensource/teacher_neutral.png        | Bin 0 -> 11034 bytes
+ scripts/seed_opensource_library.py                | 178 +++++++++++++++++++
+ 14 files changed, 372 insertions(+), 10 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-07-19 | 实现 - 2026-07-19 17:13
 
 **变更文件** (5 个):
