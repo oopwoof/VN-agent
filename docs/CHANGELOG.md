@@ -15,6 +15,34 @@
 
 ## [Unreleased]
 
+### 2026-07-19 | 实现 - 2026-07-19 17:13
+
+**变更文件** (5 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/assets/web_search_agent.py`
+
+**测试变更** (2 文件):
+  - `tests/test_assets/test_web_search_agent.py`
+  - `tests/test_integration/test_v4_upload_flow.py`
+
+**其他变更** (2 文件):
+  - `frontend/src/api.ts`
+  - `frontend/src/components/AssetPanel.tsx`
+
+**变更统计**:
+```
+frontend/src/api.ts                           |  23 +-
+ frontend/src/components/AssetPanel.tsx        | 192 +++++++++-
+ src/vn_agent/assets/web_search_agent.py       | 483 ++++++++++++++++++++++++++
+ tests/test_assets/test_web_search_agent.py    | 278 +++++++++++++++
+ tests/test_integration/test_v4_upload_flow.py | 311 +++++++++++++++++
+ 5 files changed, 1269 insertions(+), 18 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-07-15 | 实现 - 2026-07-15 00:35
 
 **变更文件** (30 个):

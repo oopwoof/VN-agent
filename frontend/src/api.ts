@@ -1,5 +1,24 @@
 import type { AssetManifest, GenerateConfig, JobSummary, StatusResponse } from './types'
 
+// v4 P0-7: text-upload response from POST /assets/upload.
+// Image/audio uploads return only status/size; text returns chunk stats.
+export interface UploadResult {
+  status: string
+  asset_type: string
+  asset_id: string
+  size: number
+  // Present only for asset_type=text:
+  chunks?: number
+  cjk_dominant?: boolean
+  jsonl_path?: string
+  summary?: {
+    chunks: number
+    by_source: Record<string, number>
+    by_license: Record<string, number>
+    files: string[]
+  }
+}
+
 const api = {
   async generate(config: GenerateConfig): Promise<{ job_id: string }> {
     const resp = await fetch('/generate', {
@@ -83,13 +102,15 @@ const api = {
     return resp.json()
   },
 
-  async uploadAsset(jobId: string, file: File, assetType: string, assetId: string): Promise<void> {
+  async uploadAsset(jobId: string, file: File, assetType: string, assetId: string, license?: string): Promise<UploadResult> {
     const form = new FormData()
     form.append('file', file)
     form.append('asset_type', assetType)
     form.append('asset_id', assetId)
+    if (license) form.append('license', license)
     const resp = await fetch(`/api/projects/${jobId}/assets/upload`, { method: 'POST', body: form })
     if (!resp.ok) throw new Error(await resp.text())
+    return resp.json()
   },
 
   assetFileUrl(jobId: string, path: string): string {
