@@ -63,7 +63,7 @@ const useStore = create<AppState>((set, get) => ({
   errors: [],
   blackboard: {},
   messages: [{ role: 'system', content: 'Welcome to VN-Agent Studio! Enter a story theme to generate a visual novel.', timestamp: Date.now() }],
-  config: { theme: '', max_scenes: 5, num_characters: 3, text_only: true, fast_mode: false },
+  config: { theme: '', max_scenes: 5, num_characters: 3, text_only: true, fast_mode: false, mock: false },
   jobs: [],
   assets: null,
   vnPreview: false,

@@ -15,6 +15,41 @@
 
 ## [Unreleased]
 
+### 2026-07-19 | 实现 - 2026-07-19 18:51
+
+**变更文件** (9 个):
+**源码变更** (2 文件):
+  - `src/vn_agent/services/llm.py`
+  - `src/vn_agent/web/app.py`
+
+**测试变更** (1 文件):
+  - `tests/test_services/test_llm_mock_context.py`
+
+**其他变更** (5 文件):
+  - `.claude/agents/run-analyzer.md`
+  - `frontend/package-lock.json`
+  - `frontend/src/components/ChatPanel.tsx`
+  - `frontend/src/store.ts`
+  - `frontend/src/types.ts`
+
+**变更统计**:
+```
+.claude/agents/run-analyzer.md               | 147 +++++++++
+ docs/v4/PRODUCT_v4.md                        |  60 ++++
+ frontend/package-lock.json                   | 460 ++++++++++++++-------------
+ frontend/src/components/ChatPanel.tsx        |  14 +
+ frontend/src/store.ts                        |   2 +-
+ frontend/src/types.ts                        |   4 +
+ src/vn_agent/services/llm.py                 |  31 ++
+ src/vn_agent/web/app.py                      |  27 +-
+ tests/test_services/test_llm_mock_context.py | 112 +++++++
+ 9 files changed, 631 insertions(+), 226 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-07-19 | 杂项 - 2026-07-19 17:27
 
 **变更文件** (14 个):

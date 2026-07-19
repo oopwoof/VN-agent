@@ -91,7 +91,21 @@ export default function ChatPanel() {
               className="accent-indigo-500" />
             Fast Mode
           </label>
+          {/* v4 P0-7: mock toggle — routes all LLM calls to fixtures.
+              Zero API cost. Recommended for dev testing + validating
+              upload/library/UI flow without burning tokens. */}
+          <label className="flex items-center gap-2 text-amber-300">
+            <input type="checkbox" checked={config.mock}
+              onChange={e => setConfig({ mock: e.target.checked })}
+              className="accent-amber-500" />
+            <span>Mock (Zero API $)</span>
+          </label>
         </div>
+        {config.mock && (
+          <div className="mt-2 rounded border border-amber-900 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200">
+            Mock mode is on — this generation will use canned fixture responses; no real API calls, no token spend.
+          </div>
+        )}
       </details>
 
       {/* Input */}

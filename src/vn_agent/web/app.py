@@ -102,6 +102,11 @@ class GenerateRequest(BaseModel):
     max_scenes: int = Field(default=10, ge=1, le=50)
     text_only: bool = False
     num_characters: int = Field(default=3, ge=1, le=10)
+    # v4 P0-7: per-request mock. Overrides real LLM calls with the fixture
+    # dispatcher in `services/mock_llm.py`. Zero API cost, useful for dev
+    # + validation dry-runs. Server-wide `VN_AGENT_MOCK=1` (see _lifespan)
+    # still short-circuits everything even when this is False.
+    mock: bool = False
 
 
 class GenerateResponse(BaseModel):
@@ -263,15 +268,19 @@ async def generate_setting(job_id: str):
 
     # Per-job token tracker for the setting-generation phase
     from vn_agent.services.token_tracker import TokenTracker, current_tracker
+    from vn_agent.services.llm import mock_mode_var
 
+    config = job.get("config", {})
     job_tracker = TokenTracker()
     tracker_token = current_tracker.set(job_tracker)
+    mock_token = mock_mode_var.set(bool(config.get("mock", False)))
+    if config.get("mock"):
+        logger.info(f"[{job_id}/generate-setting] running in per-request mock mode")
     try:
         from vn_agent.agents.director import _merge_outline_details, _step1_outline, _step2_details
         from vn_agent.config import get_settings
 
         settings = get_settings()
-        config = job.get("config", {})
         output_dir = job.get("output_dir", ".")
 
         outline = await _step1_outline(
@@ -314,6 +323,7 @@ async def generate_setting(job_id: str):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         current_tracker.reset(tracker_token)
+        mock_mode_var.reset(mock_token)
 
 
 @app.get("/api/projects/{job_id}/blackboard")
@@ -704,6 +714,7 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
     """Background task: run Writer + Reviewer pipeline from plan data."""
     store = _get_store()
     from vn_agent.services.token_tracker import TokenTracker, current_tracker
+    from vn_agent.services.llm import mock_mode_var
 
     # Continue accumulating into the same per-job tracker if already active
     # (covers the case where generate-setting ran first), otherwise create fresh.
@@ -711,6 +722,10 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
     existing_usage = existing_bb.get("token_usage") or {}
     job_tracker = TokenTracker()
     tracker_token = current_tracker.set(job_tracker)
+    config = job.get("config", {})
+    mock_token = mock_mode_var.set(bool(config.get("mock", False)))
+    if config.get("mock"):
+        logger.info(f"[{job_id}/generate-script] running in per-request mock mode")
     try:
         from vn_agent.agents.director import _build_from_plan
         from vn_agent.agents.graph import build_graph
@@ -809,6 +824,7 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
         except Exception as e:
             logger.debug(f"Could not persist token usage for {job_id}: {e}")
         current_tracker.reset(tracker_token)
+        mock_mode_var.reset(mock_token)
 
 
 def _merge_token_usage(prev: dict, new: dict) -> dict:
@@ -854,8 +870,16 @@ async def _run_job(job_id: str, req: GenerateRequest, output_dir: Path) -> None:
         # Per-job token tracker: isolate cost accounting across concurrent jobs
         from vn_agent.services.token_tracker import TokenTracker, current_tracker
 
+        # v4 P0-7: per-request mock gate. Setting it inside the semaphore
+        # scope means concurrent jobs — one mock, one real — coexist
+        # cleanly. Reset in finally to avoid leaks into the next task.
+        from vn_agent.services.llm import mock_mode_var
+
         job_tracker = TokenTracker()
         tracker_token = current_tracker.set(job_tracker)
+        mock_token = mock_mode_var.set(bool(req.mock))
+        if req.mock:
+            logger.info(f"[{job_id}] running in per-request mock mode (fixtures, zero API)")
         try:
             from vn_agent.agents.graph import build_graph
             from vn_agent.agents.state import initial_state
@@ -912,6 +936,7 @@ async def _run_job(job_id: str, req: GenerateRequest, output_dir: Path) -> None:
             except Exception as e:
                 logger.debug(f"Could not persist token usage for {job_id}: {e}")
             current_tracker.reset(tracker_token)
+            mock_mode_var.reset(mock_token)
 
 
 # ── Static frontend (must be AFTER all API route definitions) ───────────────

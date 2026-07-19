@@ -11,6 +11,7 @@ import asyncio
 import logging
 import random
 import time
+from contextvars import ContextVar
 from functools import lru_cache
 from itertools import cycle
 from pathlib import Path
@@ -26,6 +27,22 @@ from vn_agent.config import get_settings
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
+
+# v4 P0-7: per-request mock gate. Set to True from the web layer's job
+# runner (or a test's contextmanager) to route ainvoke_llm to
+# `mock_ainvoke` for THAT run only. Async-safe + isolated per job via
+# ContextVar — same pattern as TokenTracker (`current_tracker`). Default
+# False keeps the CLI/real-API path unchanged when nobody sets it.
+mock_mode_var: ContextVar[bool] = ContextVar("vn_agent_mock_mode", default=False)
+
+
+def _use_mock_llm() -> bool:
+    """Read the per-request mock flag. Cheap; kept as a helper so callers
+    other than ainvoke_llm can consult it (e.g., streaming variants)."""
+    try:
+        return bool(mock_mode_var.get())
+    except LookupError:
+        return False
 
 
 # Inner-retry list (tenacity): connection errors, timeouts, 5xx. Does NOT
@@ -567,7 +584,21 @@ async def ainvoke_llm(
     Phase 13-3 M0-1: callers can pass `max_tokens` to pin a per-call
     output cap, overriding settings.llm_max_tokens. Used by Writer to
     bound per-scene cost (writer_max_tokens_per_scene).
+
+    v4 P0-7: if `mock_mode_var` ContextVar is True (set by the web layer
+    when GenerateRequest.mock=True), short-circuit into `mock_ainvoke`
+    without touching real LLM keys / quotas. Per-job scoped so concurrent
+    real+mock jobs don't cross-contaminate.
     """
+    if _use_mock_llm():
+        from vn_agent.services.mock_llm import mock_ainvoke
+        return await mock_ainvoke(
+            system_prompt, user_prompt,
+            schema=schema, model=model, caller=caller,
+            cache_ttl=cache_ttl, force_cache=force_cache,
+            max_tokens=max_tokens,
+        )
+
     settings = get_settings()
     resolved_model = model or settings.llm_model
     pool = _pool_for(resolved_model)

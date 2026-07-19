@@ -422,6 +422,66 @@ v3 的所有已建能力都不重写，v4 只做**收编**和**新增**。以下
 
 ---
 
+## 9. 商业化与成本模型
+
+> 面试高频题："这个能商业化吗？成本能覆盖吗？"
+> 这一节写"真会推向 alpha 收费"级别的思考，不是纸上定价——同时保持能在 30 秒讲清楚。
+
+### 9.1 目标商业模式（3 条路径 × 优先级）
+
+三条路径**不冲突**——同一个平台在不同用户 tier 上叠加。优先级按"能不能自然从 v4 P0-P5 长出来"排。
+
+| 路径 | 描述 | 推进优先级 | 依赖 v4 方向 |
+|---|---|---|---|
+| **A · SaaS 订阅**（创作者 tier） | 免费额度（每月 3 作品 / ≤10 scene / mock 图像）→ Pro 订阅（无限作品 / 真图像 / 优先算力 / 私有素材库）→ Team tier（多人协作 / 共享 Chat Ops 会话） | **P0**（v4 自然形态） | ① 前端工作台 + ② Autopilot + ④ Chat Ops |
+| **B · 素材市场**（marketplace 抽成） | 创作者上传自制立绘/BG/BGM，标价 or CC-BY 分成；平台抽 15-20%。**买家侧**：其他创作者付费下载并直接进本地素材库。 | **P1**（依赖 P0-2 库 + P0-4 版权 gate 上线后接支付） | ③ 素材融合（库是交易场） + P0-4 gate（合规前提） |
+| **C · 工具链授权**（to-B 白牌） | 把 v4 的 Multi-Agent + AgentOps 底座（评测 / 观测 / diversity 指标）打包卖给游戏公司做内部内容生产工具。按 seat / 按调用计费。 | **P2**（需要 P4 PlaytestAgent 稳定后才有说服力） | v3 全套评测 + P4 PlaytestAgent + Chat Ops |
+
+**不做**：广告变现（VN 用户量小，广告 CPM 承载不住成本）；一次性买断（LLM 后端持续成本，一次性收费会亏）。
+
+### 9.2 成本分层（v3 实测锚点 + M0/M1 假设）
+
+单作品**变动成本**分 7 层，每层给 v3 已有实测数字或明确假设。数字取自 `docs/PRODUCT.md` 关键指标 + `run_meta.json` 历史。
+
+| 成本层 | 6-scene demo | 50-scene 目标 | 说明 / 来源 |
+|---|---|---|---|
+| **① LLM API**（Director + Writer + Reviewer） | ~$0.49 → $1.7*（含图像 prompt） | ≤ $15 | v3 Phase 10 Sprint 6-fix + Sprint 8-4 caching；Sonnet + Haiku 分级；prompt cache 5-min TTL（scene 10+ 命中率 ≥ 50%） |
+| **② 图像生成 API**（Nano Banana / DALL-E 3） | 已含在 ①（~$1.2 / demo） | ~$8-12 / 50-scene | v3 Sprint 12-3b~c；**P0-2 库命中一次可省 $0.02-0.05**（避免 prompt LLM + 图像 API 两次） |
+| **③ 存储**（S3 兼容 / Cloudflare R2） | ~$0.001 / demo（<5MB） | ~$0.008 / 50-scene | 每作品 ~40MB 打包（图像 + BGM），CDN 缓存后长尾成本可忽略 |
+| **④ 带宽**（下载 + 在线播放器） | ~$0.001 / demo | ~$0.01 / 50-scene | Web VN player（v4 方向 ⑤）走 SSE + JIT scene delivery，带宽 << 一次性 ZIP 下载 |
+| **⑤ 人工审核**（P0-4 license gate 兜底 + NSFW） | ~$0（M0 只做 whitelist gate） | $0.20-0.50 / 50-scene | Alpha 阶段作者自审；Beta 引入 Vision LLM 预筛 + 人工兜底（估 5% 需人工，$0.5/条 × 5%） |
+| **⑥ Web search API**（P0-5 Serper 兜底） | ~$0（默认关闭） | ~$0.02 / 50-scene | Serper 免费 tier 2500 次/月覆盖前 500 作品；超额 $0.30 / 1k queries |
+| **⑦ 客服/退款/异常**（分摊） | — | ~5% AOV | Beta 后按经验值 |
+
+*注：$1.7 是 v3 Phase 12-3 Showcase demo（含真实 Sonnet + Nano Banana + Haiku + Character Bible）实测。
+
+**固定成本**（不按作品分摊）：GPU/CPU（Autopilot 排队、SBERT embedding、rembg 抠图） · 域名 · Sentry 观测 · 支付通道 · 法务/合规。M0 阶段全部走 serverless（Cloudflare Workers + Render / Fly.io free tier）压到近零。
+
+### 9.3 单位经济性与定价假设
+
+| 场景 | 成本 | 假设定价 | 毛利 | 备注 |
+|---|---|---|---|---|
+| 免费用户（每月 3 作品，mock 图像） | ~$0.05 | 0 | -$0.05 | 引流；靠付费用户补贴 |
+| Pro 订阅创作者（预估 10 作品/月，真图像 50-scene） | ~$15 × 10 = $150 / 月 | **$29 / 月** | 严重负毛利 ❌ | 说明纯 SaaS 单档不成立，必须做 tier + 用量限制 |
+| Pro 订阅（限 3 作品/月 + 优先算力） | ~$45 / 月 | **$29 / 月** | -$16 / 月 | 仍负；LLM 侧成本主导 |
+| Pro 订阅（限 3 × 10-scene 用真图 + 40 × mock 图） | ~$18 / 月 | **$29 / 月** | ~$11 / 月（38%）✅ | 需要"用量分级"设计（v3 preset 已有骨架） |
+| Team tier（Chat Ops + 5 seat） | 上面 × 5 + 存储 = ~$95 / 月 | **$199 / 月** | ~$104 / 月（52%） | Chat Ops 交付人机协作，愿付 |
+| 素材市场抽成 | ~$0（存储 + 带宽） | 15% of 单件（假设均值 $3） | ~$0.45 / 件 | 靠量走通；预估 P1 上线 6 个月能起飞轮 |
+| To-B 工具链授权 | 底座已在（v3+v4） | $2k-10k / 月 / 客户 | > 80% | 一个客户覆盖全平台运营成本 |
+
+**关键 insight（面试锚点）**：**LLM 成本主导 → 不能纯 SaaS 单档定价 → 必须"用量分级"**。这跟"cursor 按订阅但底层套 API 用量"、"perplexity 免费搜索 + Pro 按需求" 同构。我用 v3 preset 骨架实现了这个"分级"能力（budget preset 全 Haiku、$0.01-0.02/次；literary preset 全 Sonnet + Nano Banana、$1.5/6-scene）。
+
+### 9.4 面试可讲的一句话
+
+> "AI 生成本身不是护城河 —— OpenAI 明天开放同样的能力大家一起白菜价。所以我把成本模型设计在**用量分级 + 素材市场 + 工具链授权**三条腿：SaaS 是入口，Marketplace 靠交易费吃复利，to-B 工具链靠评测/观测底座（AgentOps）差异化。**先跑 SaaS 免费 + Pro 带用量限制**验证毛利，成本大头 LLM 通过 preset 分级 + prompt caching + 素材库命中降本。"
+
+**会被追问**：
+- Q: "毛利表里 Pro 档 $29 是不是拍脑袋？" → A: 对标 Cursor Pro $20 / Perplexity Pro $20 / Poe $20 是 AI SaaS 心理锚点；用量限制是让它数学上成立的关键，不是心理定价的关键
+- Q: "免费用户为什么补贴？" → A: LTV 假设——mock 图像的免费用户里有 3-5% 转化为 Pro，Pro 平均订阅 4 个月 = ARPU $116。免费户 CAC ≈ 补贴总额 / 转化率 = $0.05 × 30 / 4% ≈ $37.5，远低于 LTV $116
+- Q: "素材市场版权风险？" → A: P0-4 license gate + 上传强制授权声明 + 平台不做二次授权（只做撮合）三层防御；Alpha 只做 CC0/CC-BY + 用户自证素材两类白名单
+
+---
+
 ## 附录 A：从 v3 shelved 回到 v4 的产品差异
 
 | 维度 | v3 (shelved) | v4 (current) |

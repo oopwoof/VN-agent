@@ -4,6 +4,10 @@ export interface GenerateConfig {
   num_characters: number
   text_only: boolean
   fast_mode: boolean
+  // v4 P0-7: per-request mock. When true, backend routes every LLM call
+  // through `services/mock_llm.py` fixtures — zero API cost, useful for
+  // dev + validating upload/library flow without burning tokens.
+  mock: boolean
 }
 
 export interface ChatMessage {
