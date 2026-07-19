@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState } from 'react'
 import useStore from '../store'
+import FeedbackWidget from './FeedbackWidget'
 
 function TypewriterText({ text }: { text: string }) {
   const [displayed, setDisplayed] = useState('')
@@ -17,7 +18,7 @@ function TypewriterText({ text }: { text: string }) {
 }
 
 export default function ChatPanel() {
-  const { messages, config, setConfig, step } = useStore()
+  const { messages, config, setConfig, step, currentJobId } = useStore()
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const busy = step === 'generating_setting' || step === 'generating_script' || step === 'compiling'
@@ -107,6 +108,16 @@ export default function ChatPanel() {
           </div>
         )}
       </details>
+
+      {/* v4 P1-4: whole-job feedback strip. Sits above the theme input so
+          creators can 👍/👎 an entire generation on their way to typing
+          the next one. Scene-scoped feedback lives in VNPreview. */}
+      {currentJobId && (step === 'completed' || step === 'script_review') && (
+        <div className="px-3 py-2 border-t border-gray-800 flex items-center gap-2">
+          <span className="text-[10px] text-gray-500 uppercase tracking-wider">Feedback</span>
+          <FeedbackWidget jobId={currentJobId} variant="compact" />
+        </div>
+      )}
 
       {/* Input */}
       <div className="p-3 border-t border-gray-800">

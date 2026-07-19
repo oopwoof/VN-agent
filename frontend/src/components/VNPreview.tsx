@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import useStore from '../store'
+import FeedbackWidget from './FeedbackWidget'
 
 interface DialogueLine { character_id: string | null; text: string; emotion: string }
 interface Branch { text: string; next_scene_id: string }
@@ -57,6 +58,15 @@ export default function VNPreview() {
           Back to Editor
         </button>
       </div>
+
+      {/* v4 P1-4: per-scene 👍/👎 stripe. Absolute-positioned so it hovers
+          in the top-left over the game viewport; scoped to scene.id so
+          each scene's feedback is independent. */}
+      {currentJobId && (
+        <div className="absolute top-2 left-2 z-20 bg-black/70 backdrop-blur rounded px-2 py-1">
+          <FeedbackWidget jobId={currentJobId} sceneId={scene.id} variant="compact" />
+        </div>
+      )}
 
       {/* Game viewport */}
       <div className="flex-1 relative cursor-pointer select-none" onClick={advance}>

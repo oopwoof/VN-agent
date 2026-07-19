@@ -15,6 +15,56 @@
 
 ## [Unreleased]
 
+### 2026-07-19 | 实现 - 2026-07-19 22:22
+
+**变更文件** (16 个):
+**源码变更** (7 文件):
+  - `src/vn_agent/agents/writer.py`
+  - `src/vn_agent/cli.py`
+  - `src/vn_agent/feedback/__init__.py`
+  - `src/vn_agent/feedback/injector.py`
+  - `src/vn_agent/feedback/reflection.py`
+  - `src/vn_agent/feedback/store.py`
+  - `src/vn_agent/web/app.py`
+
+**测试变更** (5 文件):
+  - `tests/test_feedback/__init__.py`
+  - `tests/test_feedback/test_injector.py`
+  - `tests/test_feedback/test_reflection.py`
+  - `tests/test_feedback/test_store.py`
+  - `tests/test_integration/test_flywheel_e2e.py`
+
+**其他变更** (4 文件):
+  - `frontend/src/api.ts`
+  - `frontend/src/components/ChatPanel.tsx`
+  - `frontend/src/components/FeedbackWidget.tsx`
+  - `frontend/src/components/VNPreview.tsx`
+
+**变更统计**:
+```
+frontend/src/api.ts                         |  34 ++++
+ frontend/src/components/ChatPanel.tsx       |  13 +-
+ frontend/src/components/FeedbackWidget.tsx  |  96 +++++++++
+ frontend/src/components/VNPreview.tsx       |  10 +
+ src/vn_agent/agents/writer.py               |  38 ++++
+ src/vn_agent/cli.py                         |  17 ++
+ src/vn_agent/feedback/__init__.py           |  10 +
+ src/vn_agent/feedback/injector.py           | 220 ++++++++++++++++++++
+ src/vn_agent/feedback/reflection.py         | 306 ++++++++++++++++++++++++++++
+ src/vn_agent/feedback/store.py              | 211 +++++++++++++++++++
+ src/vn_agent/web/app.py                     |  51 +++++
+ tests/test_feedback/__init__.py             |   0
+ tests/test_feedback/test_injector.py        | 164 +++++++++++++++
+ tests/test_feedback/test_reflection.py      | 202 ++++++++++++++++++
+ tests/test_feedback/test_store.py           | 156 ++++++++++++++
+ tests/test_integration/test_flywheel_e2e.py | 169 +++++++++++++++
+ 16 files changed, 1696 insertions(+), 1 deletion(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-07-19 | 实现 - 2026-07-19 20:46
 
 **变更文件** (6 个):

@@ -20,6 +20,7 @@ import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -651,6 +652,56 @@ async def upload_asset(
     target.write_bytes(content)
 
     return {"status": "uploaded", "asset_type": asset_type, "asset_id": asset_id, "size": len(content)}
+
+
+class FeedbackRequest(BaseModel):
+    """v4 P1-1: creator 👍/👎 payload. Reason is optional but strongly
+    encouraged — reason-less records skip the BM25 index because they have
+    no signal, only counter increment."""
+    verdict: Literal["up", "down"]
+    job_id: str | None = None
+    scene_id: str | None = None
+    reason: str | None = Field(default=None, max_length=2000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    context: dict = Field(default_factory=dict)
+
+
+@app.post("/api/feedback")
+async def submit_feedback(req: FeedbackRequest):
+    """Persist a feedback record to the flywheel JSONL. Returns id + summary
+    so the frontend can update its running counter without a second call."""
+    from vn_agent.feedback import store as fb_store
+
+    try:
+        record = fb_store.FeedbackRecord(
+            verdict=req.verdict,
+            job_id=req.job_id,
+            scene_id=req.scene_id,
+            reason=req.reason,
+            tags=req.tags,
+            context=req.context,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    try:
+        fb_store.append(record)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Feedback persist failed: {e}") from e
+
+    return {
+        "status": "recorded",
+        "id": record.id,
+        "summary": fb_store.summarize(),
+    }
+
+
+@app.get("/api/feedback/summary")
+async def feedback_summary():
+    """Dashboard-friendly counters. Used by the frontend widget to show
+    total feedback + rough ratio of up/down."""
+    from vn_agent.feedback import store as fb_store
+    return fb_store.summarize()
 
 
 @app.delete("/api/projects/{job_id}/assets/upload")

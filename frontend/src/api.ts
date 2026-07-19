@@ -1,5 +1,14 @@
 import type { AssetManifest, GenerateConfig, JobSummary, StatusResponse } from './types'
 
+// v4 P1-1: aggregated feedback counters for the data-flywheel widget.
+export interface FeedbackSummary {
+  total: number
+  by_verdict: { up: number; down: number }
+  by_scene: Record<string, number>
+  by_job: Record<string, number>
+  top_tags: Record<string, number>
+}
+
 // v4 P0-7: text-upload response from POST /assets/upload.
 // Image/audio uploads return only status/size; text returns chunk stats.
 export interface UploadResult {
@@ -120,6 +129,31 @@ const api = {
   async compile(jobId: string): Promise<void> {
     const resp = await fetch(`/api/projects/${jobId}/compile`, { method: 'POST' })
     if (!resp.ok) throw new Error(await resp.text())
+  },
+
+  // v4 P1-1: creator 👍/👎 into the flywheel JSONL. Reason optional but
+  // strongly encouraged — reason-less records don't hit the BM25 injector.
+  async postFeedback(record: {
+    verdict: 'up' | 'down'
+    job_id?: string
+    scene_id?: string
+    reason?: string
+    tags?: string[]
+    context?: Record<string, unknown>
+  }): Promise<{ status: string; id: string; summary: FeedbackSummary }> {
+    const resp = await fetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(record),
+    })
+    if (!resp.ok) throw new Error(await resp.text())
+    return resp.json()
+  },
+
+  async feedbackSummary(): Promise<FeedbackSummary> {
+    const resp = await fetch('/api/feedback/summary')
+    if (!resp.ok) throw new Error(await resp.text())
+    return resp.json()
   },
 
   // v4 P0-upload-delete: remove a single uploaded doc's chunks from the

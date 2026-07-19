@@ -368,6 +368,23 @@ async def _resume_async(
 
 
 @app.command()
+def reflect(
+    min_samples: int = typer.Option(20, "--min-samples", help="Skip when fewer records exist"),
+    max_rules: int = typer.Option(15, "--max-rules", help="Cap on emitted rules"),
+    force: bool = typer.Option(False, "--force", help="Override the min-samples gate"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report only; don't write dynamic_guidelines.json"),
+) -> None:
+    """v4 P1-3: run the Reflection Agent — distill feedback into Writer rules.
+
+    Reads every record from data/feedback/all.jsonl, asks Haiku for 5-15
+    concrete rules, writes data/feedback/dynamic_guidelines.json which
+    the Writer system-prompt hook (P1-3.5) picks up on next generation.
+    """
+    from vn_agent.feedback.reflection import cli_reflect
+    raise typer.Exit(cli_reflect(min_samples, max_rules, force, dry_run))
+
+
+@app.command()
 def salvage(
     output: Path = typer.Argument(..., help="A stuck run's output directory"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Report only; don't touch disk"),

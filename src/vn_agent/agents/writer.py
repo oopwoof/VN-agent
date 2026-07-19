@@ -97,7 +97,26 @@ async def run_writer(state: AgentState) -> dict:
     # Identical across all scenes → Sprint 8-4 prompt caching caches the
     # whole thing (> 1500 chars) for a 5-min TTL. Amortizes across the
     # 6-18 Writer calls in a run (incl. revision loops).
+    #
+    # v4 P1-3: prepend dynamic guidelines from the Reflection Agent (if any).
+    # The block is idempotent — cached alongside the rest of the system
+    # prompt suffix — and empty when no dynamic_guidelines.json exists.
+    dynamic_block = ""
+    try:
+        from vn_agent.feedback.reflection import format_guidelines_for_prompt, load_guidelines
+        guidelines_report = load_guidelines()
+        dynamic_block = format_guidelines_for_prompt(guidelines_report)
+        if dynamic_block:
+            logger.info(
+                f"Writer: applying {len(guidelines_report.rules)} dynamic guideline(s) "
+                f"from {guidelines_report.generated_at}"
+            )
+    except Exception as e:  # noqa: BLE001 — flywheel is opt-in, never blocks Writer
+        logger.debug(f"Dynamic guidelines load failed: {e}")
+
     run_system_prompt = SYSTEM_PROMPT + _build_character_bible(characters)
+    if dynamic_block:
+        run_system_prompt = f"{run_system_prompt}\n\n{dynamic_block}\n"
 
     # Load corpus + optional embedding index for few-shot injection
     corpus = None
@@ -1253,6 +1272,25 @@ async def _write_scene(
     feedback_note = ""
     if revision_feedback:
         feedback_note = f"\nIMPORTANT - Revision feedback to address:\n{revision_feedback}\n"
+
+    # v4 P1-2: BM25-driven flywheel injection. Retrieves past 👎 reasons
+    # relevant to THIS scene's context and renders them as "AVOID: ..."
+    # lines. Empty string when there's no matching down-vote — never
+    # blocks generation, only enriches it.
+    try:
+        from vn_agent.feedback import injector as _fb_injector
+        _flywheel = _fb_injector.build_injection(
+            scene, characters,
+            extra_query=[script.theme, script.description],
+        )
+        if _flywheel.text:
+            feedback_note = f"{feedback_note}\n{_flywheel.text}\n"
+            logger.info(
+                f"[Writer/{scene.id}] Flywheel injection: "
+                f"{len(_flywheel.matched)} avoid rules (ids={_flywheel.matched_ids})"
+            )
+    except Exception as e:  # noqa: BLE001 — never block Writer on flywheel
+        logger.debug(f"Flywheel injection failed for {scene.id}: {e}")
 
     # Sprint 7-5: pass StructureReviewer issues to Writer as context. Most
     # relevant for scenes with branches where intent-alignment failures were
