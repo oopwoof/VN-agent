@@ -130,6 +130,12 @@ class Settings(BaseSettings):
     # Rubric average (1-5 scale) below which the Reviewer fails the script
     # and triggers a Writer revision round. Matches the prompt's stated bar.
     reviewer_pass_threshold: float = 3.5
+    # v4 P0-review-hang: hard wall-clock ceiling on the Reviewer /
+    # StructureReviewer LLM calls. Job 3cbbf260 hung for 52 minutes with
+    # zero on-disk artifacts because there was no per-call timeout and
+    # nothing to grep for after the fact. 300s is generous for a Sonnet
+    # 5-scene rubric pass; longer runs (50-scene) should raise this.
+    reviewer_timeout_seconds: float = 300.0
 
     # Eval / few-shot
     corpus_path: str = ""  # path to final_annotations.csv (empty = disabled)

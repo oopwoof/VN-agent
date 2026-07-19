@@ -80,7 +80,12 @@ async def run_reviewer(state: AgentState) -> dict:
         logger.info("Reviewer: skipping LLM quality check (reviewer_skip_llm=True)")
         result = structural_result
     else:
-        quality_result = await _quality_check(script)
+        # v4 P0-review-hang: pass output_dir so the LLM call is guarded by
+        # `ainvoke_with_pending_debug` — a hang leaves a `.pending.txt`
+        # marker on disk for post-mortem grep + a hard timeout aborts.
+        output_dir = state.get("output_dir", ".")
+        revision_count = state.get("revision_count", 0)
+        quality_result = await _quality_check(script, output_dir=output_dir, revision_count=revision_count)
         result = quality_result
     # Strategy consistency check (warnings only, non-blocking)
     strategy_warnings = check_strategy_consistency(script)
@@ -360,7 +365,12 @@ def _find_reachable_scenes(script: VNScript) -> set[str]:
     return reachable
 
 
-async def _quality_check(script: VNScript) -> ReviewResult:
+async def _quality_check(
+    script: VNScript,
+    *,
+    output_dir: str = ".",
+    revision_count: int = 0,
+) -> ReviewResult:
     """LLM-based quality check for narrative coherence.
 
     Feeds the Reviewer the *full* dialogue of every scene rather than a
@@ -406,7 +416,39 @@ If the average ≥ 3.5 respond with PASS on its own line.
 If average < 3.5, respond FAIL on the first line followed by actionable issues."""
 
     settings = get_settings()
-    response = await ainvoke_llm(SYSTEM_PROMPT, user_prompt, model=settings.llm_reviewer_model, caller="reviewer")
+
+    # v4 P0-review-hang: replace the raw ainvoke_llm with the pending-debug
+    # + hard-timeout wrapper. `name` is round-scoped so a revision loop
+    # produces distinct debug files.
+    from vn_agent.services.pending_debug import ainvoke_with_pending_debug
+    try:
+        response = await ainvoke_with_pending_debug(
+            SYSTEM_PROMPT, user_prompt,
+            output_dir=output_dir,
+            name=f"reviewer_r{revision_count}",
+            model=settings.llm_reviewer_model,
+            caller="reviewer",
+        )
+    except TimeoutError:
+        # Explicit hard-fail path: rather than propagate the timeout and
+        # kill the whole graph, degrade to a structural PASS with a
+        # loud warning. The pipeline continues to Ren'Py compile and
+        # the operator gets an actionable error in review_feedback.
+        logger.error(
+            f"Reviewer LLM call TIMED OUT after "
+            f"{settings.reviewer_timeout_seconds:.0f}s "
+            f"(round {revision_count}). See debug/reviewer_r{revision_count}.error.txt"
+        )
+        return ReviewResult(
+            passed=True,
+            feedback=(
+                f"WARN: Reviewer LLM call timed out after "
+                f"{settings.reviewer_timeout_seconds:.0f}s. "
+                f"Script structural checks passed; quality dimension unscored. "
+                f"See debug/reviewer_r{revision_count}.error.txt for the last request."
+            ),
+            issues=[],
+        )
     content = response.content if hasattr(response, 'content') else str(response)
     content = strip_thinking(content)
 

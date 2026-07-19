@@ -23,6 +23,8 @@ Every VN-Agent run writes to an `output_dir` with a stable layout:
 | `library_hits.jsonl` | v4 P0-2 asset library matches (asset_id, license, target_id, query) | `assets/library.record_library_hit` |
 | `debug/director_step*.txt` | raw LLM responses (Director step1 / step2) | `agents/director._save_debug_raw` |
 | `debug/writer_*.txt` | raw LLM responses (Writer per scene, when enabled) | Writer |
+| `debug/*.pending.txt` | **v4 P0-review-hang**: LLM call in flight (never returned) | `services/pending_debug` |
+| `debug/*.error.txt` | **v4 P0-review-hang**: LLM call raised or timed out | `services/pending_debug` |
 | `snapshots/scene_*.json` | per-scene checkpoints (long-form memory) | Phase 13 Sprint 11-4 |
 | `rag_retrievals.jsonl` | RAG top-k picks per scene | `eval/lore.py` |
 | `game/` | Ren'Py project | `compiler/project_builder.py` |
@@ -67,6 +69,12 @@ Zero-tolerance flags — call these out at the top of the report:
 - Actual cost > 2× preflight estimate → probable cost model drift
 - Terminal error present → run is not usable
 - Mock leakage in a real run → data integrity compromised
+- **`debug/*.pending.txt` files still on disk after run completion** → LLM
+  call never returned; open the file for the exact prompt / model / caller /
+  timeout that hung. `services/pending_debug` writes these atomically before
+  each Reviewer / StructureReviewer call (v4 P0-review-hang).
+- **`debug/*.error.txt` files present** → LLM call raised or hit the
+  reviewer_timeout_seconds cap; the file contains prompt + traceback.
 
 Watch flags — call these out but don't panic:
 - Diversity < 30%

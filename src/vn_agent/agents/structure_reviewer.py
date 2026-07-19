@@ -217,10 +217,19 @@ async def run_structure_reviewer(state: AgentState) -> dict:
 
     # ── LLM-backed intent-alignment + narrative shape audit ────────────────
     user_prompt = _build_audit_prompt(script, state.get("characters", {}))
+    output_dir = state.get("output_dir", ".")
+    director_revision = state.get("director_revision_count", 0)
     try:
-        response = await ainvoke_llm(
+        # v4 P0-review-hang: same pending-debug + timeout wrapper we use
+        # in Reviewer. TimeoutError falls into the same graceful degrade
+        # path as any other LLM failure below (pass-through with local
+        # findings only), keeping the graph moving.
+        from vn_agent.services.pending_debug import ainvoke_with_pending_debug
+        response = await ainvoke_with_pending_debug(
             STRUCTURE_REVIEWER_SYSTEM,
             user_prompt,
+            output_dir=output_dir,
+            name=f"structure_reviewer_r{director_revision}",
             model=settings.llm_structure_reviewer_model,
             caller="structure_reviewer",
         )
