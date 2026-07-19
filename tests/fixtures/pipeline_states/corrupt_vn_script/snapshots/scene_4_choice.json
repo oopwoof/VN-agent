@@ -1,0 +1,27 @@
+{
+  "scene_id": "scene_4_choice",
+  "title": "The Choice",
+  "timestamp": "2026-07-19T11:19:49.966218Z",
+  "dialogue": [
+    {
+      "character_id": "alice",
+      "text": "The Choice: opening line.",
+      "emotion": "neutral"
+    },
+    {
+      "character_id": "bob",
+      "text": "The Choice: reply.",
+      "emotion": "happy"
+    },
+    {
+      "character_id": "alice",
+      "text": "The Choice: reflection.",
+      "emotion": "thoughtful"
+    }
+  ],
+  "narrative_strategy": "accumulate",
+  "state_reads": [],
+  "state_writes": {},
+  "world_state_after": {},
+  "summary": "Salvage-fixture summary for scene_4_choice."
+}

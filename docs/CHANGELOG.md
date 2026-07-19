@@ -15,6 +15,75 @@
 
 ## [Unreleased]
 
+### 2026-07-19 | 实现 - 2026-07-19 19:27
+
+**变更文件** (40 个):
+**源码变更** (4 文件):
+  - `src/vn_agent/agents/writer.py`
+  - `src/vn_agent/cli.py`
+  - `src/vn_agent/salvage.py`
+  - `src/vn_agent/web/app.py`
+
+**测试变更** (34 文件):
+  - `tests/fixtures/pipeline_states/README.md`
+  - `tests/fixtures/pipeline_states/_regenerate.py`
+  - `tests/fixtures/pipeline_states/corrupt_vn_script/characters.json`
+  - `tests/fixtures/pipeline_states/corrupt_vn_script/snapshots/scene_1_arrival.json`
+  - `tests/fixtures/pipeline_states/corrupt_vn_script/snapshots/scene_2_meeting.json`
+
+**其他变更** (2 文件):
+  - `frontend/src/api.ts`
+  - `frontend/src/components/JobHistory.tsx`
+
+**变更统计**:
+```
+frontend/src/api.ts                                |  26 +++
+ frontend/src/components/JobHistory.tsx             |  55 ++++-
+ src/vn_agent/agents/writer.py                      |  86 +++++++
+ src/vn_agent/cli.py                                |  46 ++++
+ src/vn_agent/salvage.py                            | 260 +++++++++++++++++++++
+ src/vn_agent/web/app.py                            |  89 +++++++
+ tests/fixtures/pipeline_states/README.md           |  18 ++
+ tests/fixtures/pipeline_states/_regenerate.py      | 164 +++++++++++++
+ .../corrupt_vn_script/characters.json              |  34 +++
+ .../snapshots/scene_1_arrival.json                 |  27 +++
+ .../snapshots/scene_2_meeting.json                 |  27 +++
+ .../corrupt_vn_script/snapshots/scene_3_lunch.json |  27 +++
+ .../snapshots/scene_4_choice.json                  |  27 +++
+ .../corrupt_vn_script/snapshots/scene_5_dusk.json  |  27 +++
+ .../corrupt_vn_script/vn_script.json               |   1 +
+ .../pipeline_states/post_director/characters.json  |  34 +++
+ .../pipeline_states/post_director/vn_script.json   | 150 ++++++++++++
+ .../post_writer_complete/characters.json           |  34 +++
+ .../snapshots/scene_1_arrival.json                 |  27 +++
+ .../snapshots/scene_2_meeting.json                 |  27 +++
+ .../snapshots/scene_3_lunch.json                   |  27 +++
+ .../snapshots/scene_4_choice.json                  |  27 +++
+ .../snapshots/scene_5_dusk.json                    |  27 +++
+ .../post_writer_complete/vn_script.json            | 230 ++++++++++++++++++
+ .../post_writer_no_flush/characters.json           |  34 +++
+ .../snapshots/scene_1_arrival.json                 |  27 +++
+ .../snapshots/scene_2_meeting.json                 |  27 +++
+ .../snapshots/scene_3_lunch.json                   |  27 +++
+ .../snapshots/scene_4_choice.json                  |  27 +++
+ .../snapshots/scene_5_dusk.json                    |  27 +++
+ .../post_writer_no_flush/vn_script.json            | 150 ++++++++++++
+ .../post_writer_partial/characters.json            |  34 +++
+ .../snapshots/scene_1_arrival.json                 |  27 +++
+ .../snapshots/scene_2_meeting.json                 |  27 +++
+ .../snapshots/scene_3_lunch.json                   |  27 +++
+ .../snapshots/scene_4_choice.json                  |  27 +++
+ .../snapshots/scene_5_dusk.json                    |  27 +++
+ .../post_writer_partial/vn_script.json             | 198 ++++++++++++++++
+ tests/test_assets/test_dedup.py                    |  26 ++-
+ tests/test_integration/test_resume_flow.py         | 150 ++++++++++++
+ 40 files changed, 2342 insertions(+), 17 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-07-19 | 实现 - 2026-07-19 18:51
 
 **变更文件** (9 个):

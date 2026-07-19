@@ -368,6 +368,52 @@ async def _resume_async(
 
 
 @app.command()
+def salvage(
+    output: Path = typer.Argument(..., help="A stuck run's output directory"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report only; don't touch disk"),
+    force: bool = typer.Option(False, "--force", help="Overlay snapshots even if scenes look complete"),
+) -> None:
+    """v4 P0-resume: reconstruct vn_script.json from snapshots for a stuck run.
+
+    Reads snapshots/*.json + Director outline and merges dialogue into the
+    scenes list; writes vn_script.json atomically. Skips scenes that
+    already have dialogue unless `--force`. Use after a Reviewer /
+    asset-gen hang to preserve Writer output before running `--resume`.
+    """
+    from vn_agent.salvage import SalvageError, salvage_run
+
+    try:
+        report = salvage_run(output, write=not dry_run, force=force)
+    except SalvageError as e:
+        console.print(f"[red]Cannot salvage:[/red] {e}")
+        raise typer.Exit(1)
+
+    action_color = {
+        "already_complete": "green",
+        "merged_snapshots": "cyan",
+        "noop": "yellow",
+        "failed": "red",
+    }.get(report.action, "white")
+
+    console.print(
+        f"[{action_color}]salvage → {report.action}[/{action_color}] · "
+        f"scenes {report.scenes_before}→{report.scenes_after} · "
+        f"dialogue lines {report.dialogue_before}→{report.dialogue_after} · "
+        f"snapshots merged {report.snapshots_merged}/{report.snapshots_found}"
+    )
+    for w in report.warnings:
+        console.print(f"[yellow]  ⚠ {w}[/yellow]")
+    for path in report.written:
+        console.print(f"[dim]  · wrote {path}[/dim]")
+    if report.action == "merged_snapshots" and not dry_run:
+        console.print(
+            "\n[green]Next step:[/green] "
+            f"[italic]uv run vn-agent generate 'placeholder' --resume "
+            f"--text-only -o {output}[/italic]"
+        )
+
+
+@app.command()
 def validate(
     script_path: Path = typer.Argument(..., help="Path to vn_script.json"),
 ) -> None:

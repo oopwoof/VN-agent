@@ -141,16 +141,22 @@ class TestImagePHash:
 
         p1 = tmp_path / "a.png"
         p2 = tmp_path / "b.png"
-        # Solid vs checker → very different pHash.
-        Image.new("RGB", (32, 32), color=(200, 100, 50)).save(p1)
-        img = Image.new("RGB", (32, 32), color=(255, 255, 255))
-        for x in range(0, 32, 4):
-            for y in range(0, 32, 4):
-                if (x + y) % 8 == 0:
-                    for dx in range(4):
-                        for dy in range(4):
-                            img.putpixel((x + dx, y + dy), (0, 0, 0))
-        img.save(p2)
+        # imagehash.phash resamples to 32x32 internally then DCT-downsamples
+        # to 8x8, so 32x32 inputs are already at the noise floor for
+        # discrimination. Use 256x256 with genuinely different structure so
+        # the pHash differs by well more than the 8-bit dedup threshold.
+        img1 = Image.new("RGB", (256, 256), color=(200, 100, 50))
+        img1.save(p1)
+
+        # Horizontal-gradient pattern — very different frequency content
+        # from a flat fill, so pHash will diverge cleanly.
+        img2 = Image.new("RGB", (256, 256))
+        for x in range(256):
+            for y in range(256):
+                # Diagonal bands, high contrast.
+                v = 255 if ((x + y) // 16) % 2 == 0 else 0
+                img2.putpixel((x, y), (v, v, v))
+        img2.save(p2)
 
         idx = dedup.DedupIndex()
         assert idx.register(idx.fingerprint_image(p1, origin="a")) is True

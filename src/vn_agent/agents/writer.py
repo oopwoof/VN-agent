@@ -390,6 +390,17 @@ async def _run_scenes_sequential(
             state_after=dict(world_state),
         ))
 
+        # v4 P0-resume: flush partial vn_script.json + characters.json so a
+        # downstream hang (Reviewer / revision loop) still leaves recoverable
+        # dialogue on disk. Best-effort; runs after every completed scene.
+        _flush_partial_vn_script(
+            output_dir=output_dir,
+            base_script=script,
+            updated_scenes=updated_scenes,
+            characters=characters,
+            state_timeline=state_timeline,
+        )
+
         if rollup_enabled and (idx + 1) % settings.chapter_rollup_every == 0:
             chapter_start = idx + 1 - settings.chapter_rollup_every
             chapter_scenes = updated_scenes[chapter_start : idx + 1]
@@ -616,6 +627,18 @@ async def _run_scenes_parallel(
                     scene_id=result.id, state_after=dict(world_state),
                 )
                 completed_count += 1
+
+            # v4 P0-resume: flush partial vn_script.json after every wave.
+            # Uses the sparse-array-so-far; None entries in later slots are
+            # dropped by _flush_partial_vn_script's overlay logic (base
+            # scene from Director outline stays in place).
+            _flush_partial_vn_script(
+                output_dir=output_dir,
+                base_script=script,
+                updated_scenes=updated_scenes_sparse,
+                characters=characters,
+                state_timeline=[t for t in state_timeline_sparse if t is not None],
+            )
 
             # After applying the whole wave, check rollup boundaries.
             # Only fire when the positional chunk is fully filled so
@@ -1018,6 +1041,69 @@ def _build_character_bible(characters: dict[str, CharacterProfile]) -> str:
             lines.append(f"Locked attributes (must not contradict): {sorted(locked)}")
         lines.append("")
     return "\n".join(lines)
+
+
+def _flush_partial_vn_script(
+    output_dir: str,
+    base_script,
+    updated_scenes: list,
+    characters: dict,
+    state_timeline: list | None = None,
+) -> None:
+    """v4 P0-resume: rewrite vn_script.json + characters.json after each scene.
+
+    Why: without this, if the pipeline hangs anywhere after Writer starts
+    (Reviewer, revision loop, asset gen), the on-disk vn_script.json still
+    only carries Director's outline. Users can't recover the dialogue they
+    paid for — as happened with job 3cbbf260 (5 scenes / 66 dialogue lines
+    / $1.08 nearly stranded).
+
+    Behavior: merge `updated_scenes` into `base_script.scenes` positionally
+    (index i in updated_scenes overrides base_script.scenes[i]), write the
+    result to disk atomically. Never raises — best-effort like the
+    per-scene snapshot writer. Called after every completed scene by the
+    sequential + parallel writer loops.
+    """
+    import json as _json
+
+    try:
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+
+        # Preserve Director's outline for scenes that haven't been written
+        # yet; overlay the completed ones. Positional overlay keeps scene
+        # ordering + count stable.
+        merged_scenes = list(base_script.scenes)
+        for i, sc in enumerate(updated_scenes):
+            if sc is None:
+                continue
+            if i < len(merged_scenes):
+                merged_scenes[i] = sc
+            else:
+                merged_scenes.append(sc)
+
+        partial = base_script.model_copy(update={
+            "scenes": merged_scenes,
+            "state_timeline": state_timeline or [],
+        })
+
+        # Atomic write: temp file + rename. Prevents a crash mid-write
+        # from leaving vn_script.json half-serialized (which would
+        # kill --resume).
+        tmp = out / "vn_script.json.tmp"
+        tmp.write_text(partial.model_dump_json(indent=2), encoding="utf-8")
+        tmp.replace(out / "vn_script.json")
+
+        if characters:
+            chars_data = {k: v.model_dump() for k, v in characters.items()}
+            chars_tmp = out / "characters.json.tmp"
+            chars_tmp.write_text(
+                _json.dumps(chars_data, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            chars_tmp.replace(out / "characters.json")
+    except Exception as e:  # noqa: BLE001 — best-effort; never break Writer
+        logger.debug(f"Partial vn_script.json flush failed: {e}")
 
 
 def _write_scene_snapshot(

@@ -1,0 +1,27 @@
+{
+  "scene_id": "scene_1_arrival",
+  "title": "The Arrival",
+  "timestamp": "2026-07-19T11:19:49.957575Z",
+  "dialogue": [
+    {
+      "character_id": "alice",
+      "text": "The Arrival: opening line.",
+      "emotion": "neutral"
+    },
+    {
+      "character_id": "bob",
+      "text": "The Arrival: reply.",
+      "emotion": "happy"
+    },
+    {
+      "character_id": "alice",
+      "text": "The Arrival: reflection.",
+      "emotion": "thoughtful"
+    }
+  ],
+  "narrative_strategy": "accumulate",
+  "state_reads": [],
+  "state_writes": {},
+  "world_state_after": {},
+  "summary": "Salvage-fixture summary for scene_1_arrival."
+}

@@ -11,6 +11,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -650,6 +651,94 @@ async def upload_asset(
     target.write_bytes(content)
 
     return {"status": "uploaded", "asset_type": asset_type, "asset_id": asset_id, "size": len(content)}
+
+
+@app.post("/api/projects/{job_id}/resume")
+async def resume_project(
+    job_id: str,
+    dry_run: bool = False,
+    force: bool = False,
+    compile_after: bool = True,
+):
+    """v4 P0-resume: rescue a stuck / crashed job from on-disk artifacts.
+
+    - Runs `salvage_run` on the job's output_dir (merges snapshots into
+      vn_script if needed).
+    - When compile_after=True and text_only is set in the job config,
+      immediately compiles Ren'Py so the creator can download without
+      re-generating dialogue.
+    - Flips the job status to `completed` (with a `(salvaged)` suffix in
+      progress) so the UI stops showing it as running.
+
+    Query params:
+      - `dry_run`: report only, no writes
+      - `force`: overlay snapshots even for scenes that already have dialogue
+      - `compile_after`: run build_project after salvage (default True)
+    """
+    store = _get_store()
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    output_dir = job.get("output_dir")
+    if not output_dir:
+        raise HTTPException(status_code=400, detail="Job has no output_dir")
+
+    from vn_agent.salvage import SalvageError, salvage_run
+
+    try:
+        report = salvage_run(output_dir, write=not dry_run, force=force)
+    except SalvageError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+    response = {"salvage": report.to_dict()}
+
+    if dry_run or report.action in {"noop", "failed"}:
+        return response
+
+    # For text_only runs the salvage output is already a valid script;
+    # compile immediately so the job flips to completed. For non-text_only
+    # runs (assets pending), advise CLI --resume rather than trying to
+    # spin the whole graph back up here — that's local_regen's territory.
+    config = job.get("config", {}) or {}
+    text_only = bool(config.get("text_only", False))
+
+    if compile_after and text_only:
+        try:
+            from vn_agent.compiler.project_builder import build_project
+            from vn_agent.schema.character import CharacterProfile
+            from vn_agent.schema.script import VNScript
+
+            out = Path(output_dir)
+            script = VNScript.model_validate_json((out / "vn_script.json").read_text(encoding="utf-8"))
+            chars_raw = json.loads((out / "characters.json").read_text(encoding="utf-8"))
+            characters = {k: CharacterProfile.model_validate(v) for k, v in chars_raw.items()}
+            build_project(script, characters, out)
+            response["compiled"] = True
+            store.update_status(
+                job_id, "completed",
+                progress=f"done - {len(script.scenes)} scenes (salvaged)",
+            )
+        except Exception as e:  # noqa: BLE001 — return the salvage result even on compile fail
+            response["compiled"] = False
+            response["compile_error"] = str(e)
+            logger.exception(f"Compile after salvage failed for {job_id}")
+    elif compile_after and not text_only:
+        response["next_step"] = (
+            "Salvage merged snapshots. For non-text_only runs, drop to CLI: "
+            f"vn-agent generate 'placeholder' --resume -o {output_dir}"
+        )
+        # Still mark completed since salvage recovered content; assets
+        # regeneration is the user's next decision.
+        store.update_status(
+            job_id, "completed",
+            progress="script recovered; assets pending — run CLI --resume",
+        )
+    else:
+        # dry_run or explicit compile_after=False.
+        store.update_status(job_id, "completed", progress="script salvaged (compile skipped)")
+
+    return response
 
 
 @app.get("/api/projects/{job_id}/token-usage")

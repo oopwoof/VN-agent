@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import useStore from '../store'
+import api from '../api'
 
 const BADGE: Record<string, string> = {
   pending: 'bg-gray-700 text-gray-400',
@@ -10,8 +11,33 @@ const BADGE: Record<string, string> = {
 
 export default function JobHistory() {
   const { jobs, refreshJobs, selectJob, deleteJob, currentJobId } = useStore()
+  // v4 P0-resume: per-job salvage-in-progress flag so the button doesn't
+  // hammer the endpoint when a click already fired. Keyed by job_id.
+  const [salvaging, setSalvaging] = useState<Record<string, boolean>>({})
 
   useEffect(() => { refreshJobs() }, [refreshJobs])
+
+  const handleSalvage = async (jobId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (salvaging[jobId]) return
+    setSalvaging(s => ({ ...s, [jobId]: true }))
+    try {
+      const res = await api.resumeProject(jobId)
+      const s = res.salvage
+      const parts = [
+        `action=${s.action}`,
+        `scenes ${s.scenes_before}→${s.scenes_after}`,
+        `dialogue ${s.dialogue_before}→${s.dialogue_after}`,
+      ]
+      if (s.snapshots_merged) parts.push(`merged ${s.snapshots_merged}/${s.snapshots_found} snapshots`)
+      alert('Salvage:\n' + parts.join('\n') + (res.compiled ? '\n✓ compiled' : res.next_step ? '\n' + res.next_step : ''))
+      await refreshJobs()
+    } catch (err) {
+      alert('Salvage failed: ' + String(err))
+    } finally {
+      setSalvaging(s => ({ ...s, [jobId]: false }))
+    }
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -42,12 +68,27 @@ export default function JobHistory() {
               <span className="text-[10px] text-gray-600">
                 {j.created_at ? new Date(j.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
               </span>
-              <button
-                onClick={e => { e.stopPropagation(); deleteJob(j.job_id) }}
-                className="text-[10px] text-gray-600 hover:text-red-400"
-              >
-                delete
-              </button>
+              <div className="flex gap-2 items-center">
+                {/* v4 P0-resume: salvage button. Show for running/failed
+                    jobs — running long enough to be suspected of hanging,
+                    or already flipped to failed by pipeline errors. */}
+                {(j.status === 'failed' || j.status === 'running') && (
+                  <button
+                    onClick={e => handleSalvage(j.job_id, e)}
+                    disabled={!!salvaging[j.job_id]}
+                    className="text-[10px] text-amber-500 hover:text-amber-300 disabled:opacity-40"
+                    title="Merge on-disk snapshots into vn_script.json and (if text-only) compile"
+                  >
+                    {salvaging[j.job_id] ? 'salvaging…' : 'salvage'}
+                  </button>
+                )}
+                <button
+                  onClick={e => { e.stopPropagation(); deleteJob(j.job_id) }}
+                  className="text-[10px] text-gray-600 hover:text-red-400"
+                >
+                  delete
+                </button>
+              </div>
             </div>
           </div>
         ))}

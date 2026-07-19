@@ -1,0 +1,34 @@
+{
+  "alice": {
+    "id": "alice",
+    "name": "Alice",
+    "color": "#ff8fa0",
+    "personality": "curious, gentle",
+    "background": "new transfer student",
+    "role": "protagonist",
+    "visual": null,
+    "immutability_score": {
+      "name": 10,
+      "role": 10,
+      "background": 6,
+      "personality": 4
+    },
+    "speech_fingerprint": []
+  },
+  "bob": {
+    "id": "bob",
+    "name": "Bob",
+    "color": "#7aa2ff",
+    "personality": "loyal, playful",
+    "background": "alice's classmate",
+    "role": "friend",
+    "visual": null,
+    "immutability_score": {
+      "name": 10,
+      "role": 10,
+      "background": 6,
+      "personality": 4
+    },
+    "speech_fingerprint": []
+  }
+}

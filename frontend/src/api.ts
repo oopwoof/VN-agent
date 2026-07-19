@@ -121,6 +121,32 @@ const api = {
     const resp = await fetch(`/api/projects/${jobId}/compile`, { method: 'POST' })
     if (!resp.ok) throw new Error(await resp.text())
   },
+
+  // v4 P0-resume: rescue a stuck/crashed job by merging snapshot dialogue
+  // into vn_script.json and (for text_only runs) recompiling.
+  async resumeProject(jobId: string, opts?: { force?: boolean; dryRun?: boolean }): Promise<{
+    salvage: {
+      action: 'noop' | 'already_complete' | 'merged_snapshots' | 'failed'
+      scenes_before: number
+      scenes_after: number
+      dialogue_before: number
+      dialogue_after: number
+      snapshots_found: number
+      snapshots_merged: number
+      warnings: string[]
+    }
+    compiled?: boolean
+    compile_error?: string
+    next_step?: string
+  }> {
+    const params = new URLSearchParams()
+    if (opts?.force) params.set('force', 'true')
+    if (opts?.dryRun) params.set('dry_run', 'true')
+    const url = `/api/projects/${jobId}/resume${params.toString() ? '?' + params.toString() : ''}`
+    const resp = await fetch(url, { method: 'POST' })
+    if (!resp.ok) throw new Error(await resp.text())
+    return resp.json()
+  },
 }
 
 export default api

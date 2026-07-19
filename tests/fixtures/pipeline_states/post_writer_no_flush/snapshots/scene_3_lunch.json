@@ -1,0 +1,27 @@
+{
+  "scene_id": "scene_3_lunch",
+  "title": "Lunch Talk",
+  "timestamp": "2026-07-19T11:19:49.963188Z",
+  "dialogue": [
+    {
+      "character_id": "alice",
+      "text": "Lunch Talk: opening line.",
+      "emotion": "neutral"
+    },
+    {
+      "character_id": "bob",
+      "text": "Lunch Talk: reply.",
+      "emotion": "happy"
+    },
+    {
+      "character_id": "alice",
+      "text": "Lunch Talk: reflection.",
+      "emotion": "thoughtful"
+    }
+  ],
+  "narrative_strategy": "accumulate",
+  "state_reads": [],
+  "state_writes": {},
+  "world_state_after": {},
+  "summary": "Salvage-fixture summary for scene_3_lunch."
+}
