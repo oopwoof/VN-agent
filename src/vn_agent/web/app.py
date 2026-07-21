@@ -376,6 +376,29 @@ async def generate_script(job_id: str):
     return {"status": "script_generating"}
 
 
+@app.get("/api/projects/{job_id}/stream/scenes")
+async def stream_scenes(job_id: str):
+    """v4 P2 ⑤: SSE stream of `scene_ready` events as Writer finishes each
+    scene, so the frontend can start VN playback before the whole script is
+    done. Ends after a `done`/`failed` event. Connect right before calling
+    POST .../generate-script — events fired before a subscriber connects are
+    not replayed (M0: no buffering), so a late connect just misses early
+    scenes and the client falls back to the final blackboard fetch.
+    """
+    store = _get_store()
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    from vn_agent.services import job_events
+
+    async def _gen():
+        async for event in job_events.subscribe(job_id):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(_gen(), media_type="text/event-stream")
+
+
 class SceneUpdate(BaseModel):
     """User edits to a single scene's dialogue."""
     dialogue: list[dict] | None = None
@@ -892,6 +915,7 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
     store = _get_store()
     from vn_agent.services.token_tracker import TokenTracker, current_tracker
     from vn_agent.services.llm import mock_mode_var
+    from vn_agent.services import job_events
 
     # Continue accumulating into the same per-job tracker if already active
     # (covers the case where generate-setting ran first), otherwise create fresh.
@@ -901,6 +925,10 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
     tracker_token = current_tracker.set(job_tracker)
     config = job.get("config", {})
     mock_token = mock_mode_var.set(bool(config.get("mock", False)))
+    # v4 P2 ⑤: scope scene_ready SSE events to this job for the duration of
+    # the run — writer.py publishes via this ContextVar without needing
+    # job_id threaded through every call.
+    job_id_token = job_events.current_job_id.set(job_id)
     if config.get("mock"):
         logger.info(f"[{job_id}/generate-script] running in per-request mock mode")
     try:
@@ -942,6 +970,7 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
 
         if not result_script:
             store.update_status(job_id, "failed", errors=["No script produced"])
+            job_events.close(job_id, ok=False, error="No script produced")
             return
 
         # Update blackboard with full script + reviewer data
@@ -986,9 +1015,11 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
             progress=f"done - {len(result_script.scenes)} scenes",
             errors=final_state.get("errors", []),
         )
+        job_events.close(job_id, ok=True)
     except Exception as e:
         logger.exception(f"Script generation failed for {job_id}")
         store.update_status(job_id, "failed", errors=[str(e)])
+        job_events.close(job_id, ok=False, error=str(e))
     finally:
         # Merge this phase's tracker into any existing usage from generate-setting
         try:
@@ -1002,6 +1033,7 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
             logger.debug(f"Could not persist token usage for {job_id}: {e}")
         current_tracker.reset(tracker_token)
         mock_mode_var.reset(mock_token)
+        job_events.current_job_id.reset(job_id_token)
 
 
 def _merge_token_usage(prev: dict, new: dict) -> dict:

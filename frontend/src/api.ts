@@ -131,6 +131,42 @@ const api = {
     if (!resp.ok) throw new Error(await resp.text())
   },
 
+  // v4 P2 ⑤: subscribe to scene_ready SSE events as Writer finishes each
+  // scene, so playback can start before the whole script is done. Connect
+  // BEFORE calling generateScript — events fired before a subscriber
+  // connects aren't buffered/replayed (see backend stream_scenes docstring).
+  // Caller owns the returned EventSource and should not need to close it
+  // manually — it self-closes on 'done'/'failed'.
+  streamScenes(jobId: string, handlers: {
+    onScene: (scene: Record<string, unknown>) => void
+    onDone?: () => void
+    onError?: (error?: string) => void
+  }): EventSource {
+    const es = new EventSource(`/api/projects/${jobId}/stream/scenes`)
+    es.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data)
+        if (data.event === 'scene_ready') {
+          handlers.onScene(data.scene)
+        } else if (data.event === 'done') {
+          handlers.onDone?.()
+          es.close()
+        } else if (data.event === 'failed') {
+          handlers.onError?.(data.error)
+          es.close()
+        }
+      } catch (e) {
+        console.error('stream_scenes: failed to parse event', e)
+      }
+    }
+    es.onerror = () => {
+      // One-shot per-job stream — don't let the browser auto-retry into a
+      // finished/gone job.
+      es.close()
+    }
+    return es
+  },
+
   // v4 P1-1: creator 👍/👎 into the flywheel JSONL. Reason optional but
   // strongly encouraged — reason-less records don't hit the BM25 injector.
   async postFeedback(record: {

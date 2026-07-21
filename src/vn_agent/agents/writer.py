@@ -419,6 +419,7 @@ async def _run_scenes_sequential(
             characters=characters,
             state_timeline=state_timeline,
         )
+        _publish_scene_ready(updated_scene)
 
         if rollup_enabled and (idx + 1) % settings.chapter_rollup_every == 0:
             chapter_start = idx + 1 - settings.chapter_rollup_every
@@ -637,6 +638,7 @@ async def _run_scenes_parallel(
                         scene_id=scene.id, state_after=dict(world_state),
                     )
                     completed_count += 1
+                    _publish_scene_ready(scene)
                     continue
 
                 updated_scenes_sparse[idx] = result
@@ -646,6 +648,7 @@ async def _run_scenes_parallel(
                     scene_id=result.id, state_after=dict(world_state),
                 )
                 completed_count += 1
+                _publish_scene_ready(result)
 
             # v4 P0-resume: flush partial vn_script.json after every wave.
             # Uses the sparse-array-so-far; None entries in later slots are
@@ -1123,6 +1126,18 @@ def _flush_partial_vn_script(
             chars_tmp.replace(out / "characters.json")
     except Exception as e:  # noqa: BLE001 — best-effort; never break Writer
         logger.debug(f"Partial vn_script.json flush failed: {e}")
+
+
+def _publish_scene_ready(scene: Scene) -> None:
+    """v4 P2 ⑤: notify SSE subscribers a scene finished writing, so the
+    frontend can start playback before the whole script is done. Best-effort
+    — never raises, no-op if job_events isn't tracking a job in this context
+    (CLI runs, tests)."""
+    try:
+        from vn_agent.services import job_events
+        job_events.publish_scene_ready(scene.model_dump(mode="json"))
+    except Exception as e:  # noqa: BLE001 — streaming is a nice-to-have, never break Writer
+        logger.debug(f"Scene-ready publish failed: {e}")
 
 
 def _write_scene_snapshot(

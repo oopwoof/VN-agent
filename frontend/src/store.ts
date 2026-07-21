@@ -20,6 +20,9 @@ interface AppState {
   vnPreview: boolean
   startTime: number | null
   elapsed: number
+  // v4 P2 ⑤: true while the scene_ready SSE stream is subscribed during
+  // script generation — drives the "Watch Live" affordance.
+  streamActive: boolean
 
   setConfig: (partial: Partial<GenerateConfig>) => void
   generate: () => Promise<void>
@@ -37,6 +40,11 @@ interface AppState {
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let elapsedTimer: ReturnType<typeof setInterval> | null = null
+let sceneStream: EventSource | null = null
+
+function stopSceneStream() {
+  if (sceneStream) { sceneStream.close(); sceneStream = null }
+}
 
 function addMsg(get: () => AppState, set: (s: Partial<AppState>) => void, role: 'user' | 'system', content: string) {
   set({ messages: [...get().messages, { role, content, timestamp: Date.now() }] })
@@ -69,6 +77,7 @@ const useStore = create<AppState>((set, get) => ({
   vnPreview: false,
   startTime: null,
   elapsed: 0,
+  streamActive: false,
 
   setConfig: (partial) => set({ config: { ...get().config, ...partial } }),
 
@@ -76,8 +85,9 @@ const useStore = create<AppState>((set, get) => ({
     const { config } = get()
     if (!config.theme.trim()) return
 
+    stopSceneStream()
     addMsg(get, set, 'user', config.theme)
-    set({ step: 'generating_setting', progress: 'Creating project...', errors: [], blackboard: {}, assets: null, vnPreview: false })
+    set({ step: 'generating_setting', progress: 'Creating project...', errors: [], blackboard: {}, assets: null, vnPreview: false, streamActive: false })
     startElapsed(set, get)
 
     try {
@@ -120,6 +130,33 @@ const useStore = create<AppState>((set, get) => ({
     startElapsed(set, get)
     addMsg(get, set, 'system', 'Setting confirmed. Writer is creating dialogue...')
 
+    // v4 P2 ⑤: open the scene stream BEFORE kicking off generation so the
+    // subscriber is registered before Writer can finish scene 1 — events
+    // published with no subscriber connected are dropped (no buffering in
+    // M0). Scenes stream straight into blackboard.scene_scripts so VNPreview
+    // can play them as they arrive; the final getBlackboard() fetch below
+    // still overwrites with the authoritative full script.
+    stopSceneStream()
+    set({ streamActive: true })
+    let firstSceneSeen = false
+    sceneStream = api.streamScenes(currentJobId, {
+      onScene: (scene) => {
+        const bb = get().blackboard
+        const existing = (bb.scene_scripts as Array<Record<string, unknown>>) || []
+        const idx = existing.findIndex(s => s.id === scene.id)
+        const updated = idx >= 0
+          ? existing.map((s, i) => (i === idx ? scene : s))
+          : [...existing, scene]
+        set({ blackboard: { ...bb, scene_scripts: updated } })
+        if (!firstSceneSeen) {
+          firstSceneSeen = true
+          addMsg(get, set, 'system', `Scene "${scene.title || scene.id}" ready — you can Watch Live while the rest generates.`)
+        }
+      },
+      onDone: () => set({ streamActive: false }),
+      onError: () => set({ streamActive: false }),
+    })
+
     try {
       await api.generateScript(currentJobId)
       pollTimer = setInterval(async () => {
@@ -129,6 +166,8 @@ const useStore = create<AppState>((set, get) => ({
 
           if (res.status === 'completed') {
             stopTimers()
+            stopSceneStream()
+            set({ streamActive: false })
             const { blackboard } = await api.getBlackboard(currentJobId)
 
             if (get().config.fast_mode) {
@@ -145,18 +184,21 @@ const useStore = create<AppState>((set, get) => ({
             get().refreshJobs()
           } else if (res.status === 'failed') {
             stopTimers()
-            set({ step: 'failed', errors: res.errors })
+            stopSceneStream()
+            set({ streamActive: false, step: 'failed', errors: res.errors })
             addMsg(get, set, 'system', `Failed: ${res.errors.join(', ')}`)
             get().refreshJobs()
           }
         } catch {
           stopTimers()
-          set({ step: 'failed', errors: ['Connection lost'] })
+          stopSceneStream()
+          set({ streamActive: false, step: 'failed', errors: ['Connection lost'] })
         }
       }, 1500)
     } catch (e) {
       stopTimers()
-      set({ step: 'failed', errors: [String(e)] })
+      stopSceneStream()
+      set({ streamActive: false, step: 'failed', errors: [String(e)] })
     }
   },
 
@@ -231,6 +273,8 @@ const useStore = create<AppState>((set, get) => ({
   toggleVNPreview: () => set({ vnPreview: !get().vnPreview }),
 
   selectJob: async (jobId) => {
+    stopTimers()
+    stopSceneStream()
     try {
       const res = await api.status(jobId)
       const { blackboard } = await api.getBlackboard(jobId)
@@ -240,14 +284,15 @@ const useStore = create<AppState>((set, get) => ({
       }
       const step: AppStep = statusMap[res.status] || 'idle'
 
-      set({ currentJobId: jobId, step, progress: res.progress, errors: res.errors, blackboard, vnPreview: false })
+      set({ currentJobId: jobId, step, progress: res.progress, errors: res.errors, blackboard, vnPreview: false, streamActive: false })
       if (step === 'completed' as AppStep) get().fetchAssets()
     } catch { /* ignore */ }
   },
 
   deleteJob: async (jobId) => {
+    if (get().currentJobId === jobId) { stopTimers(); stopSceneStream() }
     await api.deleteJob(jobId)
-    if (get().currentJobId === jobId) set({ currentJobId: null, step: 'idle', blackboard: {}, assets: null })
+    if (get().currentJobId === jobId) set({ currentJobId: null, step: 'idle', blackboard: {}, assets: null, streamActive: false })
     get().refreshJobs()
   },
 

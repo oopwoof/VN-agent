@@ -18,7 +18,7 @@ function stepIndex(step: string, progress: string): number {
 }
 
 export default function PreviewPanel() {
-  const { step, progress, errors, elapsed, vnPreview } = useStore()
+  const { step, progress, errors, elapsed, vnPreview, blackboard, streamActive, toggleVNPreview } = useStore()
 
   // VN Preview mode takes over the entire panel
   if (vnPreview) return <VNPreview />
@@ -56,8 +56,25 @@ export default function PreviewPanel() {
               <div className="flex items-center gap-3">
                 <div className="spinner" />
                 <span className="text-sm text-gray-300">{progress || 'Working...'}</span>
+                {streamActive && (
+                  <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium uppercase tracking-wider">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                    Live
+                  </span>
+                )}
               </div>
               <p className="text-xs text-gray-600 mt-2">Elapsed: {elapsed}s</p>
+              {/* v4 P2 ⑤: JIT playback — scenes stream into blackboard.scene_scripts
+                  as Writer finishes them, so preview can start before the full
+                  script (and Reviewer pass) is done. */}
+              {step === 'generating_script' && Array.isArray(blackboard.scene_scripts) && (blackboard.scene_scripts as unknown[]).length > 0 && (
+                <button
+                  onClick={toggleVNPreview}
+                  className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  ▶ Watch Live ({(blackboard.scene_scripts as unknown[]).length} scene{(blackboard.scene_scripts as unknown[]).length === 1 ? '' : 's'} ready)
+                </button>
+              )}
             </div>
           </div>
         )}

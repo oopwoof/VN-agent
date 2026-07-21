@@ -15,6 +15,41 @@
 
 ## [Unreleased]
 
+### 2026-07-21 | 实现 - 2026-07-21 23:31
+
+**变更文件** (11 个):
+**源码变更** (3 文件):
+  - `src/vn_agent/agents/writer.py`
+  - `src/vn_agent/services/job_events.py`
+  - `src/vn_agent/web/app.py`
+
+**其他变更** (8 文件):
+  - `frontend/package-lock.json`
+  - `frontend/package.json`
+  - `frontend/src/api.ts`
+  - `frontend/src/components/PreviewPanel.tsx`
+  - `frontend/src/index.css`
+
+**变更统计**:
+```
+frontend/package-lock.json               | 334 ++++++++++++++++++++++++++++++-
+ frontend/package.json                    |   2 +
+ frontend/src/api.ts                      |  36 ++++
+ frontend/src/components/PreviewPanel.tsx |  19 +-
+ frontend/src/index.css                   |   1 +
+ frontend/src/main.tsx                    |   1 +
+ frontend/src/store.ts                    |  57 +++++-
+ frontend/vite.config.ts                  |   3 +-
+ src/vn_agent/agents/writer.py            |  15 ++
+ src/vn_agent/services/job_events.py      |  78 ++++++++
+ src/vn_agent/web/app.py                  |  32 +++
+ 11 files changed, 565 insertions(+), 13 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-07-19 | 实现 - 2026-07-19 22:22
 
 **变更文件** (16 个):
