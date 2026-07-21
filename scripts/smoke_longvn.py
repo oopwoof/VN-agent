@@ -62,12 +62,22 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import io
 import json
 import logging
 import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+
+# Windows consoles default to the system codepage (e.g. GBK), which mangles
+# Chinese theme text in the dry-run summary printed below — same fix as
+# scripts/update_docs.py. Without this, --theme "<中文>" prints as mojibake
+# even though the underlying str is correctly decoded (cosmetic only, but
+# it's exactly what someone eyeballs before typing --confirm).
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # Make src/ importable when run as a script
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))

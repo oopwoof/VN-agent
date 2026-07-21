@@ -389,6 +389,17 @@ v3 的所有已建能力都不重写，v4 只做**收编**和**新增**。以下
 2. **"竞品呢？"** — NovelAI / AI Dungeon / Charat 都不出 Ren'Py 工程，也不做多 Agent 评测闭环；v4 差异化在**平台 + 评测**而不是**生成质量**（这个模型比不过大厂）。
 3. **"能商业化吗？"** — 短期不做 to C 收费；讲 SaaS + 素材市场 + 工具链授权三个可能路径；重点是"AI 生成已经不稀缺，工作台和评测底座才是壁垒"。
 
+### 7.4 阶段交付状态（2026-07-21 更新，只列已核实事实，不列未测过的目标值）
+
+| 阶段 | 状态 | 已核实的事实 |
+|---|---|---|
+| **P0** ③多源素材融合 | ✅ 已提交 | `assets/{library,dedup,license_gate,text_ingest,web_search_agent}.py` + `metrics/diversity.py` 落地；diversity index 已实现并写入 `vn_script.json.metrics`，**尚未在真实 API 跑一次拿到实测百分比**（目标 ≥30% 仍是目标，不是已验证数字，讲的时候要如实区分） |
+| **P1** B数据飞轮 | ✅ 已提交 | BM25 injector + Reflection Agent（Haiku）+ 前端 👍/👎 落地；M0 阶段无真实 alpha 用户反馈数据，闭环用合成/mock 反馈验证过跑通，**不能说"已有用户数据"** |
+| **P2** ①前端+⑤流式 | ✅ 已提交（浏览器烟测未做） | Tailwind v4 修复（此前 className 全部不生效，`npm run build` 现在产出 35KB CSS）；SSE scene_ready 流式播放落地；**没有实测 TTI/TTFS 数字**，这两个北极星指标目标值还是目标 |
+| **P0+P1 合计测试** | — | `tests/test_assets` + `tests/test_metrics` + `tests/test_feedback` 共 173 个测试用例（2026-07-21 collect 计数） |
+
+**面试口径提醒**：以上"已提交"只代表代码落地 + 单元测试通过，不代表北极星指标（diversity ≥30%、TTI ≤3s 等）已经用真实数据验证。讲的时候用"闭环已跑通，指标待真实流量验证"的措辞，不要把目标值说成实测值。
+
 ---
 
 ## 8. 横切约束：中文 VN 一等公民
