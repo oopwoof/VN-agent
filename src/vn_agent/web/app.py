@@ -446,6 +446,101 @@ async def update_scene(job_id: str, scene_id: str, update: SceneUpdate):
     return {"status": "updated", "scene_id": scene_id}
 
 
+# ── Chat Ops (v4 P3) ─────────────────────────────────────────────────────────
+# Beyond-workflow editing: after a script exists, a creator can address a
+# specific scene/character in natural language instead of re-running the
+# whole pipeline. L1 safety net (see chat_ops/orchestrator.py docstring):
+# every mutating intent returns a preview and waits for an explicit confirm
+# via a separate call before touching any file.
+
+class ChatMessageRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+
+
+class ChatTurnRequest(BaseModel):
+    """Echo of a previously-returned preview turn, sent back to /chat/execute
+    to confirm it. The client is not trusted to invent a turn's classification
+    fields — this is the FULL preview payload round-tripped, not just an id,
+    so execute_turn always acts on exactly what was previewed."""
+    turn_id: str
+    intent: str
+    confidence: float
+    target_scene_id: str | None = None
+    target_character_id: str | None = None
+    instruction: str = ""
+    reasoning: str = ""
+    preview_text: str = ""
+
+
+@app.post("/api/projects/{job_id}/chat/preview")
+async def chat_preview(job_id: str, req: ChatMessageRequest):
+    """Classify a chat message and return a preview. Non-mutating intents
+    (explain/unknown) are already resolved in the response — nothing more
+    to call. Mutating intents (local_regen/add_character/edit_asset) need a
+    follow-up POST to /chat/execute with this response's fields to actually run."""
+    store = _get_store()
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    from vn_agent.chat_ops.orchestrator import preview_turn
+    from vn_agent.services.llm import mock_mode_var
+
+    bb = job.get("blackboard", {})
+    output_dir = job.get("output_dir", ".")
+    # v4 P0-7 pattern: per-request mock, scoped to this call only.
+    mock_token = mock_mode_var.set(bool(job.get("config", {}).get("mock", False)))
+    try:
+        result = await preview_turn(output_dir, bb, req.message)
+    finally:
+        mock_mode_var.reset(mock_token)
+    return result.to_dict()
+
+
+@app.post("/api/projects/{job_id}/chat/execute")
+async def chat_execute(job_id: str, req: ChatTurnRequest):
+    """Execute a previously-previewed mutating turn. Re-syncs the blackboard
+    from disk afterward for local_regen, since regenerate_scene() writes
+    vn_script.json directly rather than going through the JobStore."""
+    store = _get_store()
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if req.intent not in ("local_regen", "add_character", "edit_asset"):
+        raise HTTPException(status_code=400, detail=f"'{req.intent}' has no execute step — it resolves in preview")
+
+    from vn_agent.chat_ops.orchestrator import ChatTurnResult
+    from vn_agent.chat_ops.orchestrator import execute_turn as _execute_turn
+    from vn_agent.services.llm import mock_mode_var
+
+    output_dir = job.get("output_dir", ".")
+    preview = ChatTurnResult(
+        turn_id=req.turn_id, message="", intent=req.intent, confidence=req.confidence,
+        target_scene_id=req.target_scene_id, target_character_id=req.target_character_id,
+        instruction=req.instruction, reasoning=req.reasoning,
+        preview_text=req.preview_text, requires_confirmation=True,
+    )
+    mock_token = mock_mode_var.set(bool(job.get("config", {}).get("mock", False)))
+    try:
+        result = await _execute_turn(output_dir, preview)
+    finally:
+        mock_mode_var.reset(mock_token)
+
+    if result.success and req.intent == "local_regen":
+        try:
+            from vn_agent.schema.script import VNScript
+            script_path = Path(output_dir) / "vn_script.json"
+            fresh_script = VNScript.model_validate_json(script_path.read_text(encoding="utf-8"))
+            bb = store.get_blackboard(job_id)
+            bb["scene_scripts"] = _scenes_to_blackboard(fresh_script)
+            bb["_script_json"] = fresh_script.model_dump()
+            store.update_blackboard(job_id, bb)
+        except Exception as e:
+            logger.warning(f"chat_execute: blackboard re-sync from disk failed for {job_id}: {e}")
+
+    return result.to_dict()
+
+
 @app.get("/api/projects/{job_id}/export-script")
 async def export_script(job_id: str):
     """Export the current script as JSON."""
@@ -975,26 +1070,7 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
 
         # Update blackboard with full script + reviewer data
         bb = store.get_blackboard(job_id)
-        bb["scene_scripts"] = [
-            {
-                "id": s.id,
-                "title": s.title,
-                "description": s.description,
-                "background_id": s.background_id,
-                "characters_present": s.characters_present,
-                "narrative_strategy": s.narrative_strategy,
-                "dialogue": [
-                    {"character_id": d.character_id, "text": d.text, "emotion": d.emotion}
-                    for d in s.dialogue
-                ],
-                "branches": [
-                    {"text": b.text, "next_scene_id": b.next_scene_id}
-                    for b in s.branches
-                ],
-                "next_scene_id": s.next_scene_id,
-            }
-            for s in result_script.scenes
-        ]
+        bb["scene_scripts"] = _scenes_to_blackboard(result_script)
         bb["reviewer"] = {
             "passed": final_state.get("review_passed", False),
             "feedback": final_state.get("review_feedback", ""),
@@ -1034,6 +1110,35 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
         current_tracker.reset(tracker_token)
         mock_mode_var.reset(mock_token)
         job_events.current_job_id.reset(job_id_token)
+
+
+def _scenes_to_blackboard(script) -> list[dict]:
+    """Serialize a VNScript's scenes into the blackboard["scene_scripts"] shape
+    the frontend (VNPreview.tsx) consumes. Shared by the initial generation
+    finalize step and by chat_ops (v4 P3) re-syncing the blackboard after a
+    local_regen mutates vn_script.json directly on disk — without this, the
+    frontend's cached blackboard would drift from what's actually on disk
+    after a chat-ops edit."""
+    return [
+        {
+            "id": s.id,
+            "title": s.title,
+            "description": s.description,
+            "background_id": s.background_id,
+            "characters_present": s.characters_present,
+            "narrative_strategy": s.narrative_strategy,
+            "dialogue": [
+                {"character_id": d.character_id, "text": d.text, "emotion": d.emotion}
+                for d in s.dialogue
+            ],
+            "branches": [
+                {"text": b.text, "next_scene_id": b.next_scene_id}
+                for b in s.branches
+            ],
+            "next_scene_id": s.next_scene_id,
+        }
+        for s in script.scenes
+    ]
 
 
 def _merge_token_usage(prev: dict, new: dict) -> dict:

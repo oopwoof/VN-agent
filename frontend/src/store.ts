@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { AssetManifest, ChatMessage, GenerateConfig, JobSummary } from './types'
-import api from './api'
+import api, { type ChatTurn } from './api'
 
 export type AppStep =
   | 'idle' | 'generating_setting' | 'setting_review'
@@ -23,6 +23,11 @@ interface AppState {
   // v4 P2 ⑤: true while the scene_ready SSE stream is subscribed during
   // script generation — drives the "Watch Live" affordance.
   streamActive: boolean
+  // v4 P3: chat-ops turn awaiting creator confirm (local_regen/add_character/
+  // edit_asset). null once resolved or cancelled. explain/unknown never sit
+  // here — they resolve straight into a chat message.
+  pendingChatTurn: ChatTurn | null
+  chatBusy: boolean
 
   setConfig: (partial: Partial<GenerateConfig>) => void
   generate: () => Promise<void>
@@ -36,6 +41,13 @@ interface AppState {
   selectJob: (jobId: string) => Promise<void>
   deleteJob: (jobId: string) => Promise<void>
   refreshJobs: () => Promise<void>
+  // v4 P3: Chat Ops — send a message; non-mutating intents resolve inline,
+  // mutating ones populate pendingChatTurn for confirmChatTurn/cancelChatTurn.
+  sendChatMessage: (message: string) => Promise<void>
+  confirmChatTurn: () => Promise<void>
+  cancelChatTurn: () => void
+  // Gate for ChatPanel: is there a generated script to chat-edit right now?
+  chatOpsAvailable: () => boolean
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -78,6 +90,8 @@ const useStore = create<AppState>((set, get) => ({
   startTime: null,
   elapsed: 0,
   streamActive: false,
+  pendingChatTurn: null,
+  chatBusy: false,
 
   setConfig: (partial) => set({ config: { ...get().config, ...partial } }),
 
@@ -299,6 +313,61 @@ const useStore = create<AppState>((set, get) => ({
   refreshJobs: async () => {
     const jobs = await api.listJobs()
     set({ jobs })
+  },
+
+  chatOpsAvailable: () => {
+    const { currentJobId, blackboard, step } = get()
+    const scenes = blackboard.scene_scripts as unknown[] | undefined
+    return !!currentJobId && Array.isArray(scenes) && scenes.length > 0
+      && step !== 'generating_setting' && step !== 'idle'
+  },
+
+  sendChatMessage: async (message) => {
+    const { currentJobId, chatBusy } = get()
+    if (!currentJobId || chatBusy || !message.trim()) return
+
+    addMsg(get, set, 'user', message)
+    set({ chatBusy: true })
+    try {
+      const turn = await api.chatPreview(currentJobId, message.trim())
+      if (turn.requires_confirmation) {
+        set({ pendingChatTurn: turn })
+      } else {
+        // explain / unknown — already resolved, nothing to confirm.
+        addMsg(get, set, 'system', turn.result_text || turn.preview_text)
+      }
+    } catch (e) {
+      addMsg(get, set, 'system', `Chat error: ${e}`)
+    } finally {
+      set({ chatBusy: false })
+    }
+  },
+
+  confirmChatTurn: async () => {
+    const { currentJobId, pendingChatTurn, chatBusy } = get()
+    if (!currentJobId || !pendingChatTurn || chatBusy) return
+
+    set({ chatBusy: true })
+    try {
+      const resolved = await api.chatExecute(currentJobId, pendingChatTurn)
+      addMsg(get, set, 'system', resolved.result_text || (resolved.success ? 'Done.' : 'Failed.'))
+      if (resolved.success) {
+        // local_regen mutated vn_script.json on disk directly — refetch the
+        // blackboard the backend already re-synced from it (see chat_execute
+        // in web/app.py) so VNPreview/ScriptPanel reflect the new dialogue.
+        const { blackboard } = await api.getBlackboard(currentJobId)
+        set({ blackboard })
+      }
+    } catch (e) {
+      addMsg(get, set, 'system', `Chat error: ${e}`)
+    } finally {
+      set({ pendingChatTurn: null, chatBusy: false })
+    }
+  },
+
+  cancelChatTurn: () => {
+    addMsg(get, set, 'system', 'Cancelled.')
+    set({ pendingChatTurn: null })
   },
 }))
 

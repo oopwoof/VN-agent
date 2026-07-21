@@ -15,6 +15,51 @@
 
 ## [Unreleased]
 
+### 2026-07-22 | 实现 - 2026-07-22 00:35
+
+**变更文件** (14 个):
+**源码变更** (5 文件):
+  - `src/vn_agent/chat_ops/__init__.py`
+  - `src/vn_agent/chat_ops/intent_router.py`
+  - `src/vn_agent/chat_ops/orchestrator.py`
+  - `src/vn_agent/services/mock_llm.py`
+  - `src/vn_agent/web/app.py`
+
+**测试变更** (5 文件):
+  - `tests/test_chat_ops/__init__.py`
+  - `tests/test_chat_ops/test_intent_router.py`
+  - `tests/test_chat_ops/test_orchestrator.py`
+  - `tests/test_services/test_mock_llm.py`
+  - `tests/test_web/test_chat_endpoints.py`
+
+**其他变更** (3 文件):
+  - `frontend/src/api.ts`
+  - `frontend/src/components/ChatPanel.tsx`
+  - `frontend/src/store.ts`
+
+**变更统计**:
+```
+docs/v4/PRODUCT_v4.md                     |   3 +-
+ frontend/src/api.ts                       |  49 +++++
+ frontend/src/components/ChatPanel.tsx     |  74 +++++++-
+ frontend/src/store.ts                     |  71 ++++++-
+ src/vn_agent/chat_ops/__init__.py         |   8 +
+ src/vn_agent/chat_ops/intent_router.py    | 177 ++++++++++++++++++
+ src/vn_agent/chat_ops/orchestrator.py     | 298 ++++++++++++++++++++++++++++++
+ src/vn_agent/services/mock_llm.py         |  70 +++++++
+ src/vn_agent/web/app.py                   | 145 +++++++++++++--
+ tests/test_chat_ops/__init__.py           |   0
+ tests/test_chat_ops/test_intent_router.py | 111 +++++++++++
+ tests/test_chat_ops/test_orchestrator.py  | 224 ++++++++++++++++++++++
+ tests/test_services/test_mock_llm.py      |  68 +++++++
+ tests/test_web/test_chat_endpoints.py     | 172 +++++++++++++++++
+ 14 files changed, 1439 insertions(+), 31 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-07-21 | 文档 - 2026-07-21 23:36
 
 **变更文件** (2 个):

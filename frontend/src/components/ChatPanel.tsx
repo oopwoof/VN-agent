@@ -17,19 +17,37 @@ function TypewriterText({ text }: { text: string }) {
   return <>{displayed}</>
 }
 
+// v4 P3: icon + label per dispatchable intent, shown on the preview card so
+// a creator can tell at a glance what kind of edit is about to run.
+const INTENT_META: Record<string, { icon: string; label: string }> = {
+  local_regen: { icon: '✏️', label: 'Rewrite scene' },
+  add_character: { icon: '👤', label: 'Add character' },
+  edit_asset: { icon: '🖼️', label: 'Edit asset' },
+}
+
 export default function ChatPanel() {
-  const { messages, config, setConfig, step, currentJobId } = useStore()
+  const {
+    messages, config, setConfig, step, currentJobId,
+    pendingChatTurn, chatBusy, sendChatMessage, confirmChatTurn, cancelChatTurn, chatOpsAvailable,
+  } = useStore()
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
-  const busy = step === 'generating_setting' || step === 'generating_script' || step === 'compiling'
+  const generating = step === 'generating_setting' || step === 'generating_script' || step === 'compiling'
+  const busy = generating || chatBusy
+  const chatOps = chatOpsAvailable()
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, pendingChatTurn])
 
   const handleSend = () => {
-    if (!input.trim() || busy) return
-    setConfig({ theme: input.trim() })
+    if (!input.trim() || busy || pendingChatTurn) return
+    const message = input.trim()
     setInput('')
-    setTimeout(() => useStore.getState().generate(), 50)
+    if (chatOps) {
+      sendChatMessage(message)
+    } else {
+      setConfig({ theme: message })
+      setTimeout(() => useStore.getState().generate(), 50)
+    }
   }
 
   return (
@@ -119,6 +137,44 @@ export default function ChatPanel() {
         </div>
       )}
 
+      {/* v4 P3: intent-preview card — L1 safety net. Every mutating chat-ops
+          intent (local_regen/add_character/edit_asset) stops here for an
+          explicit confirm before anything on disk changes. Non-mutating
+          intents (explain/unknown) never produce a pendingChatTurn — they
+          resolve straight into a chat message. */}
+      {pendingChatTurn && (
+        <div className="mx-3 mb-2 rounded-lg border border-indigo-700/60 bg-indigo-950/40 p-3 space-y-2">
+          <div className="flex items-center gap-2 text-xs">
+            <span>{INTENT_META[pendingChatTurn.intent]?.icon ?? '❓'}</span>
+            <span className="font-medium text-indigo-300">
+              {INTENT_META[pendingChatTurn.intent]?.label ?? pendingChatTurn.intent}
+            </span>
+            <span className="text-gray-500 ml-auto">
+              {Math.round(pendingChatTurn.confidence * 100)}% confidence
+            </span>
+          </div>
+          <p className="text-sm text-gray-200 leading-relaxed">{pendingChatTurn.preview_text}</p>
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={confirmChatTurn}
+              disabled={chatBusy}
+              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium
+                rounded-md transition-colors disabled:opacity-50"
+            >
+              {chatBusy ? 'Running...' : 'Confirm'}
+            </button>
+            <button
+              onClick={cancelChatTurn}
+              disabled={chatBusy}
+              className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-md
+                transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Input */}
       <div className="p-3 border-t border-gray-800">
         <div className="flex gap-2">
@@ -126,15 +182,15 @@ export default function ChatPanel() {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
-            placeholder="Enter your story theme..."
-            disabled={busy}
+            placeholder={chatOps ? "Ask a question, or ask to rewrite a scene..." : "Enter your story theme..."}
+            disabled={busy || !!pendingChatTurn}
             className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm
               text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2
               focus:ring-indigo-500 disabled:opacity-50"
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim() || busy}
+            disabled={!input.trim() || busy || !!pendingChatTurn}
             className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium
               rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >

@@ -396,7 +396,8 @@ v3 的所有已建能力都不重写，v4 只做**收编**和**新增**。以下
 | **P0** ③多源素材融合 | ✅ 已提交 | `assets/{library,dedup,license_gate,text_ingest,web_search_agent}.py` + `metrics/diversity.py` 落地；diversity index 已实现并写入 `vn_script.json.metrics`，**尚未在真实 API 跑一次拿到实测百分比**（目标 ≥30% 仍是目标，不是已验证数字，讲的时候要如实区分） |
 | **P1** B数据飞轮 | ✅ 已提交 | BM25 injector + Reflection Agent（Haiku）+ 前端 👍/👎 落地；M0 阶段无真实 alpha 用户反馈数据，闭环用合成/mock 反馈验证过跑通，**不能说"已有用户数据"** |
 | **P2** ①前端+⑤流式 | ✅ 已提交（浏览器烟测未做） | Tailwind v4 修复（此前 className 全部不生效，`npm run build` 现在产出 35KB CSS）；SSE scene_ready 流式播放落地；**没有实测 TTI/TTFS 数字**，这两个北极星指标目标值还是目标 |
-| **P0+P1 合计测试** | — | `tests/test_assets` + `tests/test_metrics` + `tests/test_feedback` 共 173 个测试用例（2026-07-21 collect 计数） |
+| **P3** ④Chat Ops M0 | ✅ M0 已提交 | `chat_ops/{intent_router,orchestrator}.py` + `POST /api/projects/{id}/chat/{preview,execute}` + `ChatPanel.tsx` 意图确认卡片落地；4 意图分类器全部实现，**local_regen 有真实执行器**（复用 `agents/local_regen.py`），add_character/edit_asset **M0 阶段只分类不执行**（诚实的"未实现"提示，而非静默失败）；explain 走 LLM 直答；mock 模式支持关键词识别 4 种意图，方便零成本 demo |
+| **P0+P1+P3 合计测试** | — | `tests/test_assets` + `tests/test_metrics` + `tests/test_feedback` + `tests/test_chat_ops` + `tests/test_web/test_chat_endpoints.py` 共 199 个测试用例（2026-07-21 collect 计数） |
 
 **面试口径提醒**：以上"已提交"只代表代码落地 + 单元测试通过，不代表北极星指标（diversity ≥30%、TTI ≤3s 等）已经用真实数据验证。讲的时候用"闭环已跑通，指标待真实流量验证"的措辞，不要把目标值说成实测值。
 

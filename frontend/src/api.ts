@@ -1,5 +1,28 @@
 import type { AssetManifest, GenerateConfig, JobSummary, StatusResponse } from './types'
 
+// v4 P3: one chat-ops turn's lifecycle state. A preview (requires_confirmation
+// true, executed false) becomes a resolved turn (executed true) after
+// /chat/execute — or resolves immediately for non-mutating intents (explain/
+// unknown), which /chat/preview alone already returns as resolved.
+export interface ChatTurn {
+  turn_id: string
+  message: string
+  intent: 'local_regen' | 'add_character' | 'edit_asset' | 'explain' | 'unknown'
+  confidence: number
+  target_scene_id: string | null
+  target_character_id: string | null
+  instruction: string
+  reasoning: string
+  preview_text: string
+  requires_confirmation: boolean
+  executed: boolean
+  success: boolean | null
+  result_text: string
+  diff: string | null
+  wall_seconds: number | null
+  error: string | null
+}
+
 // v4 P1-1: aggregated feedback counters for the data-flywheel widget.
 export interface FeedbackSummary {
   total: number
@@ -165,6 +188,32 @@ const api = {
       es.close()
     }
     return es
+  },
+
+  // v4 P3: classify a chat-ops message. Non-mutating intents (explain/
+  // unknown) come back already resolved; mutating intents (local_regen/
+  // add_character/edit_asset) come back as a preview needing chatExecute.
+  async chatPreview(jobId: string, message: string): Promise<ChatTurn> {
+    const resp = await fetch(`/api/projects/${jobId}/chat/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    })
+    if (!resp.ok) throw new Error(await resp.text())
+    return resp.json()
+  },
+
+  // v4 P3: confirm and run a previewed mutating turn. Pass the exact turn
+  // object chatPreview returned — the server re-validates nothing about it
+  // client-side is trusted beyond what preview_turn already classified.
+  async chatExecute(jobId: string, turn: ChatTurn): Promise<ChatTurn> {
+    const resp = await fetch(`/api/projects/${jobId}/chat/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(turn),
+    })
+    if (!resp.ok) throw new Error(await resp.text())
+    return resp.json()
   },
 
   // v4 P1-1: creator 👍/👎 into the flywheel JSONL. Reason optional but

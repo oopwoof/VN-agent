@@ -352,8 +352,78 @@ def _has_cjk(text: str) -> bool:
     return bool(re.search(r'[\u4e00-\u9fff]', text))
 
 
+def _mock_intent_classification(user_prompt: str) -> str:
+    """Keyword-sniff the raw chat message (embedded in intent_router's user
+    prompt as `Creator message: '...'`) to pick which of the 4 dispatchable
+    intents to fake \u2014 makes mock mode a real interactive demo of Chat Ops
+    instead of a single frozen classification regardless of what's typed.
+
+    `classify_intent()`'s hallucination guard drops any scene/character id
+    that isn't actually in the project, so we scrape the first real scene id
+    out of the "Scenes:" context block this mock is given rather than
+    inventing one \u2014 otherwise local_regen would always get demoted to
+    "unknown" in mock mode.
+    """
+    import json
+    import re
+
+    msg_match = re.search(r"Creator message: ['\"](.+?)['\"]\s*$", user_prompt, re.DOTALL)
+    message = (msg_match.group(1) if msg_match else user_prompt).lower()
+
+    scene_match = re.search(r"- (\S+?): ", user_prompt)
+    scene_id = scene_match.group(1) if scene_match else None
+
+    explain_kw = ("why", "explain", "who is", "\u4e3a\u4ec0\u4e48", "\u89e3\u91ca", "\u662f\u8c01", "\u600e\u4e48\u56de\u4e8b")
+    add_char_kw = ("add a character", "new character", "add character", "\u65b0\u89d2\u8272", "\u52a0\u4e2a\u89d2\u8272", "\u589e\u52a0\u89d2\u8272")
+    regen_kw = ("rewrite", "regenerate", "redo", "change the dialogue", "\u91cd\u5199", "\u6539\u5199", "\u91cd\u65b0\u751f\u6210")
+    asset_kw = ("swap", "change the background", "change the music", "\u6362\u4e2a\u80cc\u666f", "\u6362\u5f20\u56fe", "\u6362\u97f3\u4e50")
+
+    if any(k in message for k in explain_kw):
+        payload = {
+            "intent": "explain", "confidence": 0.9,
+            "instruction": message.strip() or "explain the story", "reasoning": "mock: explain keyword matched",
+        }
+    elif any(k in message for k in add_char_kw):
+        payload = {
+            "intent": "add_character", "confidence": 0.85,
+            "instruction": message.strip(), "reasoning": "mock: add-character keyword matched",
+        }
+    elif any(k in message for k in asset_kw):
+        payload = {
+            "intent": "edit_asset", "confidence": 0.8, "target_scene_id": scene_id,
+            "instruction": message.strip(), "reasoning": "mock: asset-edit keyword matched",
+        }
+    elif any(k in message for k in regen_kw) or scene_id:
+        payload = {
+            "intent": "local_regen", "confidence": 0.85, "target_scene_id": scene_id,
+            "instruction": message.strip() or "revise this scene", "reasoning": "mock: regen keyword / scene reference matched",
+        }
+    else:
+        payload = {
+            "intent": "unknown", "confidence": 0.3,
+            "reasoning": "mock: no keyword matched any of the 4 intents",
+        }
+
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _dispatch(sys_lower: str, user_prompt: str, caller: str) -> str:
     is_chinese = _has_cjk(user_prompt)
+
+    # v4 P3: Chat Ops intent classifier. Checked before other caller-tag
+    # matches — "chat_ops/" is a distinctive prefix that can't collide with
+    # director/writer/reviewer keyword checks below. Keyword-sniffs the raw
+    # message so mock mode can demo all 4 dispatchable intents interactively
+    # instead of always returning the same canned classification.
+    if caller.startswith("chat_ops/intent_router"):
+        return _mock_intent_classification(user_prompt)
+    if caller.startswith("chat_ops/explain"):
+        return (
+            "（模拟回答）根据现有设定，这个问题的答案取决于具体场景细节——真实生成时会引用实际剧本内容作答。"
+            if is_chinese else
+            "(mock answer) Based on the current setting, the answer depends on the specific scene "
+            "details — a real run would cite the actual script content here."
+        )
 
     # Director step2: detected by caller tag or system prompt content
     if "director" in sys_lower and (
