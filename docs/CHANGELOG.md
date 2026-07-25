@@ -15,6 +15,72 @@
 
 ## [Unreleased]
 
+### 2026-07-25 | 实现 - 2026-07-25 17:04
+
+**变更文件** (24 个):
+**源码变更** (11 文件):
+  - `src/vn_agent/cli.py`
+  - `src/vn_agent/config.py`
+  - `src/vn_agent/playtest/__init__.py`
+  - `src/vn_agent/playtest/agent.py`
+  - `src/vn_agent/playtest/branch_walker.py`
+  - `src/vn_agent/playtest/frame_compositor.py`
+  - `src/vn_agent/playtest/schema.py`
+  - `src/vn_agent/playtest/vision_judge.py`
+  - `src/vn_agent/services/llm.py`
+  - `src/vn_agent/services/mock_llm.py`
+  - ...及其他 1 个文件
+
+**测试变更** (6 文件):
+  - `tests/test_playtest/__init__.py`
+  - `tests/test_playtest/test_agent.py`
+  - `tests/test_playtest/test_branch_walker.py`
+  - `tests/test_playtest/test_frame_compositor.py`
+  - `tests/test_playtest/test_vision_judge.py`
+
+**配置变更** (1 文件):
+  - `config/settings.yaml`
+
+**其他变更** (5 文件):
+  - `frontend/src/api.ts`
+  - `frontend/src/components/AssetPanel.tsx`
+  - `frontend/src/components/PlaytestPane.tsx`
+  - `frontend/src/types.ts`
+  - `scripts/smoke_longvn.py`
+
+**变更统计**:
+```
+config/settings.yaml                         |   7 +
+ docs/v4/PRODUCT_v4.md                        |   5 +-
+ frontend/src/api.ts                          |  23 ++-
+ frontend/src/components/AssetPanel.tsx       |   9 +-
+ frontend/src/components/PlaytestPane.tsx     | 163 ++++++++++++++++++
+ frontend/src/types.ts                        |  42 +++++
+ scripts/smoke_longvn.py                      |  25 ++-
+ src/vn_agent/cli.py                          |  45 +++++
+ src/vn_agent/config.py                       |   9 +
+ src/vn_agent/playtest/__init__.py            |  13 ++
+ src/vn_agent/playtest/agent.py               | 169 +++++++++++++++++++
+ src/vn_agent/playtest/branch_walker.py       | 106 ++++++++++++
+ src/vn_agent/playtest/frame_compositor.py    | 244 +++++++++++++++++++++++++++
+ src/vn_agent/playtest/schema.py              |  91 ++++++++++
+ src/vn_agent/playtest/vision_judge.py        | 105 ++++++++++++
+ src/vn_agent/services/llm.py                 |  51 +++++-
+ src/vn_agent/services/mock_llm.py            |  15 +-
+ src/vn_agent/web/app.py                      |  52 ++++++
+ tests/test_playtest/__init__.py              |   0
+ tests/test_playtest/test_agent.py            | 103 +++++++++++
+ tests/test_playtest/test_branch_walker.py    | 122 ++++++++++++++
+ tests/test_playtest/test_frame_compositor.py |  89 ++++++++++
+ tests/test_playtest/test_vision_judge.py     |  75 ++++++++
+ tests/test_web/test_playtest_endpoint.py     | 113 +++++++++++++
+ 24 files changed, 1655 insertions(+), 21 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-07-22 | 实现 - 2026-07-22 00:35
 
 **变更文件** (14 个):

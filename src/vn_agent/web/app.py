@@ -541,6 +541,58 @@ async def chat_execute(job_id: str, req: ChatTurnRequest):
     return result.to_dict()
 
 
+# ── PlaytestAgent (P4 M0) ────────────────────────────────────────────────────
+# Opt-in post-generation health check: composites Pillow frames (no real
+# Ren'Py execution — see playtest/frame_compositor.py docstring for why),
+# judges each with a vision LLM, writes a report. Report-only in M0 —
+# nothing here writes back into the generation pipeline.
+
+class PlaytestRunRequest(BaseModel):
+    max_frames: int | None = None
+
+
+@app.post("/api/projects/{job_id}/playtest/run")
+async def run_playtest_endpoint(job_id: str, req: PlaytestRunRequest = PlaytestRunRequest()):
+    """Run PlaytestAgent against the job's current on-disk script. Requires
+    vn_script.json to already exist (i.e. build_project() has run at least once)."""
+    store = _get_store()
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    output_dir = job.get("output_dir", "")
+    if not output_dir or not (Path(output_dir) / "vn_script.json").exists():
+        raise HTTPException(status_code=400, detail="No compiled script yet — generate first")
+
+    from vn_agent.playtest.agent import PlaytestError, run_playtest
+    from vn_agent.services.llm import mock_mode_var
+
+    mock_token = mock_mode_var.set(bool(job.get("config", {}).get("mock", False)))
+    try:
+        report = await run_playtest(output_dir, max_frames=req.max_frames)
+    except PlaytestError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    finally:
+        mock_mode_var.reset(mock_token)
+
+    return report.model_dump()
+
+
+@app.get("/api/projects/{job_id}/playtest/report")
+async def get_playtest_report(job_id: str):
+    """Return the most recent playtest report for this job, if one exists."""
+    store = _get_store()
+    job = store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    output_dir = Path(job.get("output_dir", ""))
+    report_path = output_dir / "playtest" / "report.json"
+    if not report_path.exists():
+        raise HTTPException(status_code=404, detail="No playtest report yet — run playtest first")
+    return json.loads(report_path.read_text(encoding="utf-8"))
+
+
 @app.get("/api/projects/{job_id}/export-script")
 async def export_script(job_id: str):
     """Export the current script as JSON."""

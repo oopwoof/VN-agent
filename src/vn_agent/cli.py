@@ -607,6 +607,51 @@ def regen(
         console.print(f"[dim]Ren'Py rebuilt at {output}[/dim]")
 
 
+@app.command("playtest")
+def playtest_cmd(
+    output: Path = typer.Argument(..., help="Run directory with vn_script.json (from a completed generation)"),
+    max_frames: int | None = typer.Option(None, "--max-frames", help="Cap on composited/judged frames (default: config playtest.max_frames)"),
+    mock: bool = typer.Option(False, "--mock", help="Use fixture vision-judge responses (zero API cost)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """P4 M0: walk the branch graph, composite a frame per scene/choice-menu
+    node (Pillow, not a real Ren'Py engine run), judge each with a vision
+    LLM, and write playtest/report.json.
+
+    Report-only — does not modify vn_script.json or feed back into
+    generation. Use --mock to demo without spending real API tokens.
+    """
+    setup_logging(verbose)
+
+    from vn_agent.playtest.agent import PlaytestError, run_playtest
+    from vn_agent.services.llm import mock_mode_var
+
+    if not (output / "vn_script.json").exists():
+        console.print(f"[red]No vn_script.json in {output}[/red]")
+        raise typer.Exit(1)
+
+    # Playtest reuses the web layer's mock_mode_var ContextVar (not
+    # _patch_mock_llm's static per-module patch list above) because
+    # vision_judge.py lazily imports ainvoke_llm inside the function body —
+    # same reason chat_ops does the same thing.
+    mock_token = mock_mode_var.set(mock)
+    try:
+        report = asyncio.run(run_playtest(output, max_frames=max_frames))
+    except PlaytestError as e:
+        console.print(f"[red]Playtest failed: {e}[/red]")
+        raise typer.Exit(1)
+    finally:
+        mock_mode_var.reset(mock_token)
+
+    console.print(f"[green][OK] Playtest complete: {report.script_title}[/green]")
+    console.print(f"  Scenes: {report.visited_scenes}/{report.total_scenes} visited (coverage {report.coverage_score:.0%})")
+    console.print(f"  Branches: {report.reachable_branches}/{report.total_declared_branches} reachable")
+    console.print(f"  Frames judged: {report.frames_judged} (skipped {report.frames_skipped})")
+    for dim, score in report.dimension_scores.items():
+        console.print(f"  {dim}: {score}")
+    console.print(f"[dim]Report: {output / 'playtest' / 'report.json'}[/dim]")
+
+
 @app.command("continue-outline")
 def continue_outline(
     output: Path = typer.Option(..., "--output", "-o", help="Run directory with outline_checkpoint.json"),

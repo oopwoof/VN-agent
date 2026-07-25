@@ -1,4 +1,4 @@
-import type { AssetManifest, GenerateConfig, JobSummary, StatusResponse } from './types'
+import type { AssetManifest, GenerateConfig, JobSummary, PlaytestReport, StatusResponse } from './types'
 
 // v4 P3: one chat-ops turn's lifecycle state. A preview (requires_confirmation
 // true, executed false) becomes a resolved turn (executed true) after
@@ -212,6 +212,27 @@ const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(turn),
     })
+    if (!resp.ok) throw new Error(await resp.text())
+    return resp.json()
+  },
+
+  // v4 P4: run PlaytestAgent (branch walk + composited frames + vision
+  // judge) against the job's current on-disk script. Can take 10-60s
+  // (sequential per-frame LLM calls) — caller should show a spinner.
+  async runPlaytest(jobId: string, maxFrames?: number): Promise<PlaytestReport> {
+    const resp = await fetch(`/api/projects/${jobId}/playtest/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ max_frames: maxFrames ?? null }),
+    })
+    if (!resp.ok) throw new Error(await resp.text())
+    return resp.json()
+  },
+
+  // v4 P4: fetch the most recent playtest report, if one exists (404 before
+  // the first run for this job).
+  async getPlaytestReport(jobId: string): Promise<PlaytestReport> {
+    const resp = await fetch(`/api/projects/${jobId}/playtest/report`)
     if (!resp.ok) throw new Error(await resp.text())
     return resp.json()
   },

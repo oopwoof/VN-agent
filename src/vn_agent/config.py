@@ -174,6 +174,15 @@ class Settings(BaseSettings):
     # or missing OpenAI key → secondary judge skipped (Sonnet-only mode).
     llm_judge_model_secondary: str = "gpt-4o"
 
+    # P4 M0: vision judge model for PlaytestAgent. Decoupled from
+    # llm_judge_model (which scopes scripts/eval_strategy_adherence.py) for
+    # the same reason llm_judge_model was decoupled from llm_reviewer_model
+    # — independent tuning without cross-contaminating an unrelated script.
+    llm_playtest_judge_model: str = "claude-sonnet-4-6"
+    playtest_max_frames: int = 12          # hard cap; choice_menu nodes prioritized when truncating
+    playtest_frame_max_dim: int = 896      # downscale target (px) before base64-encoding for the vision call
+    playtest_judge_timeout_seconds: float = 60.0
+
     # Sprint 8-4: Anthropic prompt caching. When True and provider=anthropic,
     # system prompts ≥1500 chars are tagged with cache_control={"type":
     # "ephemeral"}. First call of a job pays 1.25× input cost; subsequent

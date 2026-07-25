@@ -306,13 +306,20 @@ class _MockMessage:
         self.response_metadata = {"stop_reason": "end_turn", "usage": {"input_tokens": 0, "output_tokens": 0}}
 
 
+_PLAYTEST_JUDGE_RESPONSE = """{
+  "ui_coherence_score": 4, "dead_end_risk": "none",
+  "interactivity_pacing_score": 4, "player_agency_score": 3,
+  "findings": [], "summary": "mock: frame composited cleanly, no dead-end risk detected"
+}"""
+
+
 async def mock_ainvoke(
     system_prompt: str,
     user_prompt: str,
     schema=None,
     model: str | None = None,
     caller: str = "llm",
-    **kwargs,  # absorb Phase 13-1 kwargs (cache_ttl, force_cache) without caring
+    **kwargs,  # absorb Phase 13-1 kwargs (cache_ttl, force_cache, images, ...) without caring
 ):
     """Drop-in replacement for ainvoke_llm.
 
@@ -417,6 +424,12 @@ def _dispatch(sys_lower: str, user_prompt: str, caller: str) -> str:
     # instead of always returning the same canned classification.
     if caller.startswith("chat_ops/intent_router"):
         return _mock_intent_classification(user_prompt)
+    # v4 P4: PlaytestAgent vision judge. Required — without this branch, a
+    # mock-mode playtest run falls through to the generic '{"result": ...}'
+    # fixture below, which fails PlaytestFrameJudgment.model_validate()
+    # (missing the required ge=1/le=5 score fields) and 500s the endpoint.
+    if caller.startswith("playtest/judge"):
+        return _PLAYTEST_JUDGE_RESPONSE
     if caller.startswith("chat_ops/explain"):
         return (
             "（模拟回答）根据现有设定，这个问题的答案取决于具体场景细节——真实生成时会引用实际剧本内容作答。"

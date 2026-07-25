@@ -397,7 +397,8 @@ v3 的所有已建能力都不重写，v4 只做**收编**和**新增**。以下
 | **P1** B数据飞轮 | ✅ 已提交 | BM25 injector + Reflection Agent（Haiku）+ 前端 👍/👎 落地；M0 阶段无真实 alpha 用户反馈数据，闭环用合成/mock 反馈验证过跑通，**不能说"已有用户数据"** |
 | **P2** ①前端+⑤流式 | ✅ 已提交（浏览器烟测未做） | Tailwind v4 修复（此前 className 全部不生效，`npm run build` 现在产出 35KB CSS）；SSE scene_ready 流式播放落地；**没有实测 TTI/TTFS 数字**，这两个北极星指标目标值还是目标 |
 | **P3** ④Chat Ops M0 | ✅ M0 已提交 | `chat_ops/{intent_router,orchestrator}.py` + `POST /api/projects/{id}/chat/{preview,execute}` + `ChatPanel.tsx` 意图确认卡片落地；4 意图分类器全部实现，**local_regen 有真实执行器**（复用 `agents/local_regen.py`），add_character/edit_asset **M0 阶段只分类不执行**（诚实的"未实现"提示，而非静默失败）；explain 走 LLM 直答；mock 模式支持关键词识别 4 种意图，方便零成本 demo |
-| **P0+P1+P3 合计测试** | — | `tests/test_assets` + `tests/test_metrics` + `tests/test_feedback` + `tests/test_chat_ops` + `tests/test_web/test_chat_endpoints.py` 共 199 个测试用例（2026-07-21 collect 计数） |
+| **P4** C-PlaytestAgent + Vision Judge M0 | ✅ M0 已提交（浏览器烟测未做） | `playtest/{schema,branch_walker,frame_compositor,vision_judge,agent}.py` + `POST /api/projects/{id}/playtest/run` + `GET .../playtest/report` + `vn-agent playtest` CLI + `PlaytestPane.tsx`（挂在 AssetPanel 新 tab）落地；**关键范围调整**：勘查发现仓库里没有任何 Ren'Py headless 执行基础设施（无 subprocess 封装、无 SDK 路径配置、无 `--warp`/截图自动化），真实引擎截图这条路线的工程风险/工作量远超原计划的"2 周"估算，改为 Pillow 直接合成代表帧（复用 pipeline 已生成的真实/占位背景+立绘 PNG + 合成对话框/选项 UI），不跑真实 Ren'Py 引擎——这是经用户确认的 M0 范围调整，不是隐藏的缩水；branch walker 尊重 `BranchOption.requires` 状态门（比 `reviewer.py` 现有的 BFS 更严格，能正确识别"声明了但当前不可达"的分支）；`services/llm.py::ainvoke_llm` 新增 `images` 参数支持多模态输入（此前仓库零 vision 调用先例）；mock 模式下走 `playtest/judge` 关键词分发，零成本 demo 全部 4 类节点；**过程中额外发现并修了一个真实 bug**：Pillow 默认字体不含 CJK 字形，中文对话原本会渲染成方块——已改为优先加载系统 CJK 字体（Windows 上用微软雅黑），并把 `textwrap`（按空格分词，对中文完全失效）换成按字符数换行，中英文均已用真实 mock 生成项目截图验证过；**顺带修了另一个真实 bug**：本会话早前给 `scripts/smoke_longvn.py` 加的 Windows UTF-8 stdout 修复是模块级代码，会在被 pytest 收集（`tests/test_scripts/test_smoke_longvn.py` import 它）时污染 pytest 自身的 capture 机制，导致同进程内该文件之后收集的全部测试级联报 `I/O operation on closed file`——全量 `pytest tests/` 才会暴露（分块跑测试时不会触发），已把该段代码挪进 `main()`，只在脚本被直接执行时生效，全量回归验证：909 passed, 1 skipped, 1 deselected（`test_graph_routing.py` 一个已确认与本次改动无关的预置 flaky 测试），exit 0 |
+| **P0+P1+P3+P4 合计测试** | — | `tests/test_assets` + `tests/test_metrics` + `tests/test_feedback` + `tests/test_chat_ops` + `tests/test_web/test_chat_endpoints.py` + `tests/test_playtest` + `tests/test_web/test_playtest_endpoint.py` 共 225 个测试用例（2026-07-25 collect 计数） |
 
 **面试口径提醒**：以上"已提交"只代表代码落地 + 单元测试通过，不代表北极星指标（diversity ≥30%、TTI ≤3s 等）已经用真实数据验证。讲的时候用"闭环已跑通，指标待真实流量验证"的措辞，不要把目标值说成实测值。
 
@@ -422,7 +423,7 @@ v3 的所有已建能力都不重写，v4 只做**收编**和**新增**。以下
 | **P1 数据飞轮** | 👍/👎 原因输入支持中文；Reflection 元规则**用中文生成**（避免英文规则再翻译丢意思） |
 | **P2 前端 + 流式** | 前端至少中英双语（默认中文）；`VNPreview` 中文 typewriter 效果按 grapheme（非 byte）切，不掉字 |
 | **P3 Chat Ops** | 意图路由分类器 prompt 中文优先；意图预览卡片中文渲染 |
-| **P4 PlaytestAgent** | Vision Judge 打分维度中英双语，主报告中文 |
+| **P4 PlaytestAgent** | Vision Judge 打分维度中英双语，主报告中文（**M0 现状**：合成帧本身正确渲染中文对话/选项——已用中文 mock 生成项目实测截图验证 CJK 字体 + 按字符换行；但 judge prompt / 维度标签目前只有英文，未做中英双语标注，留作后续小任务） |
 | **P5 Autopilot** | 独立入口默认中文主题输入 |
 
 ### 8.3 质量 gate（P0 完成时验证一次，作为其他阶段的 baseline）

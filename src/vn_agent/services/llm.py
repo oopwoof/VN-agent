@@ -448,6 +448,33 @@ def _build_system_message(
     return SystemMessage(content=system_prompt)
 
 
+def _build_human_message(
+    user_prompt: str,
+    images: list[bytes] | None,
+    image_media_type: str = "image/png",
+):
+    """P4: multimodal HumanMessage builder. Plain-string content when no
+    images (unchanged behavior for every existing caller); otherwise a
+    content-block list — the standard cross-provider shape both
+    langchain-anthropic and langchain-openai accept, so no provider
+    branching is needed here."""
+    from langchain_core.messages import HumanMessage
+
+    if not images:
+        return HumanMessage(content=user_prompt)
+    import base64
+
+    content: list[dict] = [{"type": "text", "text": user_prompt}]
+    for img in images:
+        content.append({
+            "type": "image",
+            "source_type": "base64",
+            "data": base64.b64encode(img).decode("ascii"),
+            "mime_type": image_media_type,
+        })
+    return HumanMessage(content=content)
+
+
 async def _invoke_once_async(
     system_prompt: str,
     user_prompt: str,
@@ -458,12 +485,12 @@ async def _invoke_once_async(
     cache_ttl: str = "5m",
     force_cache: bool = False,
     max_tokens_override: int | None = None,
+    images: list[bytes] | None = None,
+    image_media_type: str = "image/png",
 ) -> T | str:
     """Single invocation attempt with inner tenacity retry (conn errors / 5xx).
     RateLimitError is NOT caught here — the outer pool-rotation loop owns it.
     """
-    from langchain_core.messages import HumanMessage
-
     settings = get_settings()
     retrier = _make_retry_decorator(settings.llm_max_retries)
     enable_cache = getattr(settings, "enable_prompt_caching", True)
@@ -474,7 +501,7 @@ async def _invoke_once_async(
             system_prompt, settings.llm_provider, enable_cache,
             cache_ttl=cache_ttl, force_cache=force_cache,
         )
-        messages = [sys_msg, HumanMessage(content=user_prompt)]
+        messages = [sys_msg, _build_human_message(user_prompt, images, image_media_type)]
         if schema is not None:
             llm = get_structured_llm(
                 schema, model,
@@ -514,10 +541,10 @@ def _invoke_once_sync(
     cache_ttl: str = "5m",
     force_cache: bool = False,
     max_tokens_override: int | None = None,
+    images: list[bytes] | None = None,
+    image_media_type: str = "image/png",
 ) -> T | str:
     """Sync counterpart to _invoke_once_async."""
-    from langchain_core.messages import HumanMessage
-
     settings = get_settings()
     retrier = _make_retry_decorator(settings.llm_max_retries)
     enable_cache = getattr(settings, "enable_prompt_caching", True)
@@ -528,7 +555,7 @@ def _invoke_once_sync(
             system_prompt, settings.llm_provider, enable_cache,
             cache_ttl=cache_ttl, force_cache=force_cache,
         )
-        messages = [sys_msg, HumanMessage(content=user_prompt)]
+        messages = [sys_msg, _build_human_message(user_prompt, images, image_media_type)]
         if schema is not None:
             llm = get_structured_llm(
                 schema, model,
@@ -566,6 +593,8 @@ async def ainvoke_llm(
     cache_ttl: str = "5m",
     force_cache: bool = False,
     max_tokens: int | None = None,
+    images: list[bytes] | None = None,
+    image_media_type: str = "image/png",
 ) -> T | str:
     """Invoke LLM with system+user prompts, optionally with structured output.
 
@@ -589,6 +618,10 @@ async def ainvoke_llm(
     when GenerateRequest.mock=True), short-circuit into `mock_ainvoke`
     without touching real LLM keys / quotas. Per-job scoped so concurrent
     real+mock jobs don't cross-contaminate.
+
+    v4 P4: `images` (raw bytes, e.g. PNG) turns the human message into a
+    multimodal content block — used by playtest/vision_judge.py. Empty/None
+    keeps the plain-string path every other caller already relies on.
     """
     if _use_mock_llm():
         from vn_agent.services.mock_llm import mock_ainvoke
@@ -596,7 +629,7 @@ async def ainvoke_llm(
             system_prompt, user_prompt,
             schema=schema, model=model, caller=caller,
             cache_ttl=cache_ttl, force_cache=force_cache,
-            max_tokens=max_tokens,
+            max_tokens=max_tokens, images=images, image_media_type=image_media_type,
         )
 
     settings = get_settings()
@@ -613,6 +646,7 @@ async def ainvoke_llm(
                 system_prompt, user_prompt, schema, resolved_model,
                 caller, key_override, cache_ttl, force_cache,
                 max_tokens_override=max_tokens,
+                images=images, image_media_type=image_media_type,
             )
         except _RATE_LIMIT_TYPES as e:
             last_err = e
@@ -640,6 +674,8 @@ def invoke_llm(
     cache_ttl: str = "5m",
     force_cache: bool = False,
     max_tokens: int | None = None,
+    images: list[bytes] | None = None,
+    image_media_type: str = "image/png",
 ) -> T | str:
     """Synchronous LLM invocation. Same pool + backoff + cache semantics as async."""
     settings = get_settings()
@@ -656,6 +692,7 @@ def invoke_llm(
                 system_prompt, user_prompt, schema, resolved_model,
                 caller, key_override, cache_ttl, force_cache,
                 max_tokens_override=max_tokens,
+                images=images, image_media_type=image_media_type,
             )
         except _RATE_LIMIT_TYPES as e:
             last_err = e

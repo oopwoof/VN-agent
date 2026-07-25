@@ -2,8 +2,9 @@ import { useEffect, useState, useRef } from 'react'
 import useStore from '../store'
 import api, { type UploadResult } from '../api'
 import type { AssetEntry } from '../types'
+import PlaytestPane from './PlaytestPane'
 
-type Tab = 'backgrounds' | 'characters' | 'bgm' | 'world_docs'
+type Tab = 'backgrounds' | 'characters' | 'bgm' | 'world_docs' | 'playtest'
 
 // v4 P0-7: text-upload license options — labels the creator picks from
 // so the export gate (P0-4) can trust the metadata later. Matches the
@@ -354,6 +355,10 @@ export default function AssetPanel() {
     // per-slot placeholders like image/audio assets — they're a stream of
     // creator-provided reference material, counted at the job level.
     { key: 'world_docs', label: 'World Docs' },
+    // v4 P4: PlaytestAgent — opt-in, post-completion only, so it lives
+    // alongside the other post-generation panes rather than as its own
+    // top-level route.
+    { key: 'playtest', label: 'Playtest' },
   ]
 
   return (
@@ -374,6 +379,8 @@ export default function AssetPanel() {
       <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
         {tab === 'world_docs' ? (
           <WorldDocsPane jobId={currentJobId} />
+        ) : tab === 'playtest' ? (
+          <PlaytestPane jobId={currentJobId} />
         ) : (
           <>
             <p className="text-[10px] text-gray-600 mb-3">Click or drag-drop to upload replacements</p>

@@ -41,6 +41,7 @@ llm:
   scene_artist_model: claude-haiku-4-5-20251001       # single prompt formatting — haiku
   music_director_model: claude-haiku-4-5-20251001     # mood classification — haiku
   judge_model: claude-sonnet-4-6             # eval_strategy_adherence per-scene judge — sonnet (Sprint 7-3)
+  playtest_judge_model: claude-sonnet-4-6    # P4 PlaytestAgent vision judge — sonnet (vision reasoning)
 
 # Yaml flattening: section.key → section_key. Config.py has `image_provider`
 # and `image_model`, so this section MUST be named `image:` (not `image_gen:`)
@@ -68,3 +69,9 @@ generation:
 
 corpus_path: "data/final_annotations.csv"
 few_shot_k: 2
+
+# P4 M0: PlaytestAgent branch-walker + frame budget. See config.py for field docs.
+playtest:
+  max_frames: 12
+  frame_max_dim: 896
+  judge_timeout_seconds: 60.0

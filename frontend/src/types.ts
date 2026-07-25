@@ -45,3 +45,45 @@ export interface AssetManifest {
   characters: AssetEntry[]
   bgm: AssetEntry[]
 }
+
+// v4 P4: PlaytestAgent — mirrors src/vn_agent/playtest/schema.py field-for-field.
+export interface PlaytestFrameFinding {
+  category: 'ui_coherence' | 'dead_end' | 'pacing' | 'player_agency' | 'advisory'
+  message: string
+  severity: 'info' | 'warning' | 'critical'
+}
+
+export interface PlaytestFrameJudgment {
+  ui_coherence_score: number
+  dead_end_risk: 'none' | 'low' | 'high'
+  interactivity_pacing_score: number
+  player_agency_score: number
+  findings: PlaytestFrameFinding[]
+  summary: string
+}
+
+export interface PlaytestFrameEntry {
+  node_id: string
+  scene_id: string
+  kind: 'scene' | 'choice_menu'
+  frame_path: string
+  judgment: PlaytestFrameJudgment | null
+  judge_error: string | null
+}
+
+export interface PlaytestReport {
+  generated_at: string
+  script_title: string
+  total_scenes: number
+  visited_scenes: number
+  unreachable_scene_ids: string[]
+  total_declared_branches: number
+  reachable_branches: number
+  coverage_score: number
+  branch_reachability_score: number
+  dimension_scores: Record<string, number>
+  frames: PlaytestFrameEntry[]
+  judge_model: string
+  frames_judged: number
+  frames_skipped: number
+}

@@ -70,15 +70,6 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-# Windows consoles default to the system codepage (e.g. GBK), which mangles
-# Chinese theme text in the dry-run summary printed below — same fix as
-# scripts/update_docs.py. Without this, --theme "<中文>" prints as mojibake
-# even though the underlying str is correctly decoded (cosmetic only, but
-# it's exactly what someone eyeballs before typing --confirm).
-if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-
 # Make src/ importable when run as a script
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -406,6 +397,22 @@ def _print_benchmark_table(summary: dict) -> None:
 
 
 def main() -> None:
+    # Windows consoles default to the system codepage (e.g. GBK), which
+    # mangles Chinese theme text in the dry-run summary printed below — same
+    # fix as scripts/update_docs.py. Without this, --theme "<中文>" prints as
+    # mojibake even though the underlying str is correctly decoded (cosmetic
+    # only, but it's exactly what someone eyeballs before typing --confirm).
+    # Scoped to main() (not module level): reassigning sys.stdout/stderr at
+    # import time corrupts pytest's own capture bookkeeping for every test
+    # collected afterward in the same process (confirmed — running the full
+    # suite after tests/test_scripts/test_smoke_longvn.py imports this
+    # module previously cascaded into ~500 spurious "I/O operation on closed
+    # file" errors). main() only runs when this script is actually invoked
+    # as a program, never on import.
+    if sys.platform == "win32":
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(
         description="Phase 13-1 long-VN smoke harness (REAL API)",
     )
