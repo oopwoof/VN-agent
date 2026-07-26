@@ -8,6 +8,11 @@ export interface GenerateConfig {
   // through `services/mock_llm.py` fixtures — zero API cost, useful for
   // dev + validating upload/library flow without burning tokens.
   mock: boolean
+  // v4 P5: Autopilot entry point. When true, the backend resolves a preset
+  // (M0: always "autopilot_best") and applies it via a per-job Settings
+  // override; the store also auto-enters the VN player on the first scene
+  // instead of waiting for a manual "Watch Live" click.
+  autopilot: boolean
 }
 
 export interface ChatMessage {

@@ -19,6 +19,7 @@ import shutil
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -109,6 +110,24 @@ class GenerateRequest(BaseModel):
     # + validation dry-runs. Server-wide `VN_AGENT_MOCK=1` (see _lifespan)
     # still short-circuits everything even when this is False.
     mock: bool = False
+    # P5 Autopilot: when True, resolve_preset(theme) picks a preset name
+    # (M0: always "autopilot_best") stored in the job's config blob and
+    # applied via a per-job Settings ContextVar override in generate_setting/
+    # _run_script_generation.
+    autopilot: bool = False
+    # v4 P5 bugfix: pre-existing double-execution bug — this endpoint used
+    # to unconditionally fire a background _run_job task that runs the whole
+    # graph independently (writing a zip, never touching SSE/blackboard),
+    # WHILE the SPA also independently drives generate-setting ->
+    # generate-script on the same job_id (the path that actually feeds SSE +
+    # VNPreview). Every SPA-driven generation was silently running the full
+    # pipeline twice, and _run_job takes the concurrency semaphore while the
+    # step-by-step path doesn't — a real race on the same job row, not just
+    # wasted API spend. interactive=True (sent by the SPA) skips _run_job
+    # entirely. Default False preserves the headless API contract
+    # (/generate -> /status -> /download) for any caller that only ever
+    # hits this one endpoint.
+    interactive: bool = False
 
 
 class GenerateResponse(BaseModel):
@@ -143,8 +162,12 @@ async def generate(req: GenerateRequest):
         output_dir = Path(tempfile.mkdtemp(prefix=f"vn_{job_id}_"))
 
     config = req.model_dump()
+    if req.autopilot:
+        from vn_agent.autopilot.resolver import resolve_preset
+        config["preset"] = resolve_preset(req.theme)
     store.create(job_id, req.theme, config, str(output_dir))
-    asyncio.create_task(_run_job(job_id, req, output_dir))
+    if not req.interactive:
+        asyncio.create_task(_run_job(job_id, req, output_dir))
     return GenerateResponse(job_id=job_id)
 
 
@@ -276,6 +299,16 @@ async def generate_setting(job_id: str):
     job_tracker = TokenTracker()
     tracker_token = current_tracker.set(job_tracker)
     mock_token = mock_mode_var.set(bool(config.get("mock", False)))
+    # P5 Autopilot: per-job Settings override, re-derived from the job's own
+    # config blob (ContextVars don't propagate across separate HTTP requests,
+    # so this must be re-set here — mirrors mock_token above, not set once
+    # at job-creation time).
+    preset = config.get("preset")
+    settings_token = None
+    if preset:
+        from vn_agent.autopilot.resolver import build_settings
+        from vn_agent.config import _settings_override
+        settings_token = _settings_override.set(build_settings(preset))
     if config.get("mock"):
         logger.info(f"[{job_id}/generate-setting] running in per-request mock mode")
     try:
@@ -326,6 +359,9 @@ async def generate_setting(job_id: str):
     finally:
         current_tracker.reset(tracker_token)
         mock_mode_var.reset(mock_token)
+        if settings_token is not None:
+            from vn_agent.config import _settings_override
+            _settings_override.reset(settings_token)
 
 
 @app.get("/api/projects/{job_id}/blackboard")
@@ -1072,12 +1108,23 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
     tracker_token = current_tracker.set(job_tracker)
     config = job.get("config", {})
     mock_token = mock_mode_var.set(bool(config.get("mock", False)))
+    # P5 Autopilot: same per-job Settings override as generate_setting() —
+    # graph.astream() below runs entirely within this coroutine (no nested
+    # create_task), so the ContextVar propagates correctly through
+    # writer.py/reviewer.py/structure_reviewer.py/graph.py's conditional edges.
+    preset = config.get("preset")
+    settings_token = None
+    if preset:
+        from vn_agent.autopilot.resolver import build_settings
+        from vn_agent.config import _settings_override
+        settings_token = _settings_override.set(build_settings(preset))
     # v4 P2 ⑤: scope scene_ready SSE events to this job for the duration of
     # the run — writer.py publishes via this ContextVar without needing
     # job_id threaded through every call.
     job_id_token = job_events.current_job_id.set(job_id)
     if config.get("mock"):
         logger.info(f"[{job_id}/generate-script] running in per-request mock mode")
+    run_start = datetime.now(UTC)
     try:
         from vn_agent.agents.director import _build_from_plan
         from vn_agent.agents.graph import build_graph
@@ -1159,9 +1206,22 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
             store.update_blackboard(job_id, bb)
         except Exception as e:
             logger.debug(f"Could not persist token usage for {job_id}: {e}")
+
+        # P5 Autopilot: run_meta.json + outcomes log, scoped to preset-flagged
+        # jobs only (closes the run_meta.json gap run-analyzer.md already
+        # documents expecting — the web job path never wrote one before this).
+        if preset:
+            try:
+                _write_autopilot_run_meta(job_id, preset, run_start)
+            except Exception as e:
+                logger.warning(f"Could not write autopilot run_meta/outcome for {job_id}: {e}")
+
         current_tracker.reset(tracker_token)
         mock_mode_var.reset(mock_token)
         job_events.current_job_id.reset(job_id_token)
+        if settings_token is not None:
+            from vn_agent.config import _settings_override
+            _settings_override.reset(settings_token)
 
 
 def _scenes_to_blackboard(script) -> list[dict]:
@@ -1217,6 +1277,59 @@ def _merge_token_usage(prev: dict, new: dict) -> dict:
     }
 
 
+def _write_autopilot_run_meta(job_id: str, preset: str, run_start: datetime) -> None:
+    """Write run_meta.json + append an autopilot outcomes.jsonl row.
+
+    Scoped to preset-flagged (Autopilot) jobs only. Also closes a
+    pre-existing gap: the web job path never wrote run_meta.json before this
+    — only standalone CLI scripts (scripts/run_real_demo.py) did, even
+    though .claude/agents/run-analyzer.md already documents expecting one
+    alongside trace.json/vn_script.json/library_hits.jsonl in every run's
+    output_dir.
+    """
+    from vn_agent.autopilot.outcomes import AutopilotOutcome
+    from vn_agent.autopilot.outcomes import append as append_outcome
+
+    store = _get_store()
+    fresh_job = store.get(job_id) or {}
+    output_dir = Path(fresh_job.get("output_dir") or ".")
+    bb = store.get_blackboard(job_id)
+    usage = bb.get("token_usage") or {}
+    scene_scripts = bb.get("scene_scripts") or []
+    success = fresh_job.get("status") == "completed"
+    errors = fresh_job.get("errors") or []
+    wall_time_seconds = round((datetime.now(UTC) - run_start).total_seconds(), 1)
+
+    meta = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "job_id": job_id,
+        "theme": fresh_job.get("theme", ""),
+        "preset": preset,
+        "wall_time_seconds": wall_time_seconds,
+        "actual": {
+            "token_usage": usage,
+            "estimated_cost_usd": usage.get("estimated_cost_usd", 0.0),
+        },
+        "script": {"scene_count": len(scene_scripts)},
+        "errors": errors,
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "run_meta.json").write_text(
+        json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8",
+    )
+
+    append_outcome(AutopilotOutcome(
+        job_id=job_id,
+        theme=fresh_job.get("theme", ""),
+        preset_used=preset,
+        success=success,
+        wall_time_seconds=wall_time_seconds,
+        estimated_cost_usd=usage.get("estimated_cost_usd", 0.0),
+        scene_count=len(scene_scripts),
+        error=errors[0] if errors and not success else None,
+    ))
+
+
 # ── Background runner ────────────────────────────────────────────────────────
 
 _STEP_LABELS = {
@@ -1244,8 +1357,20 @@ async def _run_job(job_id: str, req: GenerateRequest, output_dir: Path) -> None:
         job_tracker = TokenTracker()
         tracker_token = current_tracker.set(job_tracker)
         mock_token = mock_mode_var.set(bool(req.mock))
+        # P5 Autopilot: headless-caller parity with generate_setting/
+        # _run_script_generation. The SPA never reaches this function
+        # (interactive=True skips it) — this only matters for a caller that
+        # hits /generate directly with autopilot=True and no follow-up.
+        job = store.get(job_id) or {}
+        preset = job.get("config", {}).get("preset")
+        settings_token = None
+        if preset:
+            from vn_agent.autopilot.resolver import build_settings
+            from vn_agent.config import _settings_override
+            settings_token = _settings_override.set(build_settings(preset))
         if req.mock:
             logger.info(f"[{job_id}] running in per-request mock mode (fixtures, zero API)")
+        run_start = datetime.now(UTC)
         try:
             from vn_agent.agents.graph import build_graph
             from vn_agent.agents.state import initial_state
@@ -1301,8 +1426,16 @@ async def _run_job(job_id: str, req: GenerateRequest, output_dir: Path) -> None:
                 store.update_blackboard(job_id, bb)
             except Exception as e:
                 logger.debug(f"Could not persist token usage for {job_id}: {e}")
+            if preset:
+                try:
+                    _write_autopilot_run_meta(job_id, preset, run_start)
+                except Exception as e:
+                    logger.warning(f"Could not write autopilot run_meta/outcome for {job_id}: {e}")
             current_tracker.reset(tracker_token)
             mock_mode_var.reset(mock_token)
+            if settings_token is not None:
+                from vn_agent.config import _settings_override
+                _settings_override.reset(settings_token)
 
 
 # ── Static frontend (must be AFTER all API route definitions) ───────────────

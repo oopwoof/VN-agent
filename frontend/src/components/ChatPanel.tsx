@@ -45,9 +45,22 @@ export default function ChatPanel() {
     if (chatOps) {
       sendChatMessage(message)
     } else {
-      setConfig({ theme: message })
+      setConfig({ theme: message, autopilot: false })
       setTimeout(() => useStore.getState().generate(), 50)
     }
+  }
+
+  // v4 P5: one-click theme -> playable VN, no review-step clicking. The
+  // "skip review steps" behavior is entirely the existing fast_mode
+  // auto-chain (generate() -> confirmSetting() -> confirmScript()); this
+  // only adds preset resolution (config.autopilot, applied server-side)
+  // and auto-entering the player (handled in store.ts's onScene handler).
+  const handleAutopilot = () => {
+    if (!input.trim() || busy || pendingChatTurn) return
+    const message = input.trim()
+    setInput('')
+    setConfig({ theme: message, autopilot: true, fast_mode: true })
+    setTimeout(() => useStore.getState().generate(), 50)
   }
 
   return (
@@ -196,6 +209,20 @@ export default function ChatPanel() {
           >
             {busy ? '...' : 'Send'}
           </button>
+          {/* v4 P5: Autopilot — theme in, straight into the player, no
+              review-step clicking. Only shown in theme-entry mode (not
+              chat-ops), same gate as the Send/theme branch above. */}
+          {!chatOps && (
+            <button
+              onClick={handleAutopilot}
+              disabled={!input.trim() || busy || !!pendingChatTurn}
+              title="Skip review steps and jump straight into the player"
+              className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium
+                rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+            >
+              ⚡ Autopilot
+            </button>
+          )}
         </div>
       </div>
     </div>

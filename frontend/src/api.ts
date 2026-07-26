@@ -56,7 +56,13 @@ const api = {
     const resp = await fetch('/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config),
+      // v4 P5 bugfix: interactive=true tells the backend to skip its
+      // internal _run_job background task, which otherwise re-runs the
+      // whole pipeline a second time (writing a zip, invisible to SSE)
+      // concurrently with the generate-setting/generate-script chain below
+      // — a real double-execution + status-write race, not just wasted
+      // API spend. The SPA always drives that chain, so it always opts in.
+      body: JSON.stringify({ ...config, interactive: true }),
     })
     if (!resp.ok) throw new Error(await resp.text())
     return resp.json()

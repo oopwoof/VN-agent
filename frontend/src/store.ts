@@ -83,7 +83,7 @@ const useStore = create<AppState>((set, get) => ({
   errors: [],
   blackboard: {},
   messages: [{ role: 'system', content: 'Welcome to VN-Agent Studio! Enter a story theme to generate a visual novel.', timestamp: Date.now() }],
-  config: { theme: '', max_scenes: 5, num_characters: 3, text_only: true, fast_mode: false, mock: false },
+  config: { theme: '', max_scenes: 5, num_characters: 3, text_only: true, fast_mode: false, mock: false, autopilot: false },
   jobs: [],
   assets: null,
   vnPreview: false,
@@ -164,7 +164,18 @@ const useStore = create<AppState>((set, get) => ({
         set({ blackboard: { ...bb, scene_scripts: updated } })
         if (!firstSceneSeen) {
           firstSceneSeen = true
-          addMsg(get, set, 'system', `Scene "${scene.title || scene.id}" ready — you can Watch Live while the rest generates.`)
+          if (get().config.autopilot) {
+            // v4 P5 Autopilot: auto-enter the player instead of waiting for
+            // a manual "Watch Live" click. Gated strictly on config.autopilot
+            // (not fast_mode) so existing fast-mode users see no behavior
+            // change. PreviewPanel's vnPreview guard takes priority over
+            // `step`, so this stays showing through the rest of script
+            // generation and the subsequent auto-compile.
+            set({ vnPreview: true })
+            addMsg(get, set, 'system', `Scene "${scene.title || scene.id}" ready — playing live.`)
+          } else {
+            addMsg(get, set, 'system', `Scene "${scene.title || scene.id}" ready — you can Watch Live while the rest generates.`)
+          }
         }
       },
       onDone: () => set({ streamActive: false }),

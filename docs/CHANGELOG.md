@@ -15,6 +15,61 @@
 
 ## [Unreleased]
 
+### 2026-07-27 | 实现 - 2026-07-27 00:57
+
+**变更文件** (19 个):
+**源码变更** (6 文件):
+  - `src/vn_agent/autopilot/__init__.py`
+  - `src/vn_agent/autopilot/outcomes.py`
+  - `src/vn_agent/autopilot/resolver.py`
+  - `src/vn_agent/cli.py`
+  - `src/vn_agent/config.py`
+  - `src/vn_agent/web/app.py`
+
+**测试变更** (7 文件):
+  - `tests/test_autopilot/__init__.py`
+  - `tests/test_autopilot/test_outcomes.py`
+  - `tests/test_autopilot/test_resolver.py`
+  - `tests/test_cli/test_mock_patch.py`
+  - `tests/test_config_override/__init__.py`
+
+**配置变更** (1 文件):
+  - `config/presets/autopilot_best.yaml`
+
+**其他变更** (4 文件):
+  - `frontend/src/api.ts`
+  - `frontend/src/components/ChatPanel.tsx`
+  - `frontend/src/store.ts`
+  - `frontend/src/types.ts`
+
+**变更统计**:
+```
+config/presets/autopilot_best.yaml                 |  51 +++++
+ docs/v4/PRODUCT_v4.md                              |   9 +-
+ frontend/src/api.ts                                |   8 +-
+ frontend/src/components/ChatPanel.tsx              |  29 ++-
+ frontend/src/store.ts                              |  15 +-
+ frontend/src/types.ts                              |   5 +
+ src/vn_agent/autopilot/__init__.py                 |  11 ++
+ src/vn_agent/autopilot/outcomes.py                 | 139 ++++++++++++++
+ src/vn_agent/autopilot/resolver.py                 |  55 ++++++
+ src/vn_agent/cli.py                                |  27 ++-
+ src/vn_agent/config.py                             |  38 +++-
+ src/vn_agent/web/app.py                            | 135 +++++++++++++-
+ tests/test_autopilot/__init__.py                   |   0
+ tests/test_autopilot/test_outcomes.py              |  62 +++++++
+ tests/test_autopilot/test_resolver.py              |  53 ++++++
+ tests/test_cli/test_mock_patch.py                  |  71 +++++++
+ tests/test_config_override/__init__.py             |   0
+ .../test_config_override/test_settings_override.py |  86 +++++++++
+ tests/test_web/test_autopilot_flow.py              | 206 +++++++++++++++++++++
+ 19 files changed, 988 insertions(+), 12 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-07-25 | 实现 - 2026-07-25 17:04
 
 **变更文件** (24 个):

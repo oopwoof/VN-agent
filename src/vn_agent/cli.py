@@ -16,13 +16,33 @@ from vn_agent.agents.state import initial_state
 from vn_agent.compiler.project_builder import build_project
 
 _mock_patches: list = []
+_mock_mode_token = None
 
 
 def _patch_mock_llm() -> None:
-    """Replace ainvoke_llm in all agent modules with the canned mock."""
+    """Replace ainvoke_llm in all agent modules with the canned mock.
+
+    v4 P5 bugfix: this static per-module patch list alone does NOT cover
+    every real call path. `agents/reviewer.py` and `structure_reviewer.py`
+    route their actual LLM calls through
+    `services/pending_debug.py::ainvoke_with_pending_debug()` (added for an
+    earlier hang-diagnosis fix), which does its own fresh
+    `from vn_agent.services.llm import ainvoke_llm` import inside the
+    function body — entirely bypassing the patched module-level name above.
+    Confirmed live: a `--mock` CLI run still made 5 real Anthropic calls
+    (~$0.12) because of this gap. `ainvoke_llm` itself already checks the
+    `mock_mode_var` ContextVar and short-circuits into `mock_ainvoke` — the
+    web layer relies on that path exclusively — so setting it here as well
+    closes the gap for every call path, including ones that route around
+    this patch list entirely.
+    """
     from unittest.mock import patch
 
+    from vn_agent.services.llm import mock_mode_var
     from vn_agent.services.mock_llm import mock_ainvoke
+
+    global _mock_mode_token
+    _mock_mode_token = mock_mode_var.set(True)
 
     targets = [
         "vn_agent.agents.director.ainvoke_llm",
@@ -41,9 +61,14 @@ def _patch_mock_llm() -> None:
 
 
 def _unpatch_mock_llm() -> None:
+    global _mock_mode_token
     for p in _mock_patches:
         p.stop()
     _mock_patches.clear()
+    if _mock_mode_token is not None:
+        from vn_agent.services.llm import mock_mode_var
+        mock_mode_var.reset(_mock_mode_token)
+        _mock_mode_token = None
 
 app = typer.Typer(
     name="vn-agent",

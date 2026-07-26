@@ -1,4 +1,5 @@
 """Configuration loading with pydantic-settings."""
+from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -363,7 +364,7 @@ class Settings(BaseSettings):
         return self
 
 
-def _load_yaml_settings() -> dict:
+def load_yaml_settings() -> dict:
     config_path = ROOT / "config" / "settings.yaml"
     if not config_path.exists():
         return {}
@@ -380,10 +381,41 @@ def _load_yaml_settings() -> dict:
     return flat
 
 
+# Backward-compat alias — kept so any external/private-name import doesn't break.
+_load_yaml_settings = load_yaml_settings
+
+
 @lru_cache(maxsize=1)
+def _load_default_settings() -> Settings:
+    return Settings(**load_yaml_settings())
+
+
+# P5 Autopilot: per-job Settings override. get_settings() is called ad-hoc
+# from ~20 agent/graph call sites (director, writer, reviewer, character
+# designer, scene artist, graph conditional edges...) — threading an explicit
+# Settings object through all of them would be a much bigger diff than this
+# module deserves. A ContextVar consulted inside get_settings() itself makes
+# every existing call site respect a per-job override with zero migration.
+#
+# Must be re-set per request/task (mirrors services.llm.mock_mode_var): each
+# incoming ASGI request is its own asyncio.Task with an independent
+# contextvars snapshot, so a .set() in one endpoint handler is invisible to
+# a later, separate HTTP request's handler — even for the same job_id.
+_settings_override: ContextVar[Settings | None] = ContextVar(
+    "vn_agent_settings_override", default=None,
+)
+
+
 def get_settings() -> Settings:
-    yaml_data = _load_yaml_settings()
-    return Settings(**yaml_data)
+    override = _settings_override.get()
+    return override if override is not None else _load_default_settings()
+
+
+# scripts/eval_ollama.py calls get_settings.cache_clear() directly to force a
+# reload after mutating config/settings.yaml mid-script. get_settings is now
+# a plain wrapper, not the cached function itself — re-attach the attribute
+# so that call site keeps working unchanged.
+get_settings.cache_clear = _load_default_settings.cache_clear
 
 
 def get_music_library() -> dict:

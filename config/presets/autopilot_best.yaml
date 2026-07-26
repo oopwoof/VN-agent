@@ -1,0 +1,51 @@
+# Autopilot preset — P5 M0 hand-picked "best known" recipe.
+#
+# Unlike the other presets here, this one is not meant to be copy-pasted into
+# config/settings.yaml by a human. It is loaded at runtime by
+# src/vn_agent/autopilot/resolver.py (`resolve_preset()` always returns
+# "autopilot_best" in M0 — no per-theme selection yet, that's M1) and applied
+# per-job via a ContextVar settings override, so Autopilot gets these values
+# regardless of whatever preset a developer's local settings.yaml happens to
+# point at (budget/ollama during local dev, say).
+#
+# Values are tuned for the product KPI in docs/v4/PRODUCT_v4.md: end-to-end
+# wall-clock <= 8 minutes and success rate >= 85% for a 10-scene run.
+# Narrative agents stay Sonnet / mechanical agents stay Haiku per the
+# project's model-selection rule (feedback_model_selection) — this preset's
+# job is pinning the *generation-shape* knobs, not changing model choice.
+
+llm:
+  default_provider: anthropic
+  model: claude-sonnet-4-6
+  temperature: 0.7
+  max_tokens: 16000
+  max_retries: 3
+  base_url: ""
+  api_key: ""
+
+  director_model: claude-sonnet-4-6
+  writer_model: claude-sonnet-4-6
+  structure_reviewer_model: claude-sonnet-4-6
+  reviewer_model: claude-sonnet-4-6
+  character_designer_model: claude-haiku-4-5-20251001
+  scene_artist_model: claude-haiku-4-5-20251001
+  music_director_model: claude-haiku-4-5-20251001
+
+# NOTE: these are bare top-level keys, NOT nested under a `generation:`
+# section — unlike llm/image/music/playtest, Settings' generation-shape
+# fields (max_scenes, max_revision_rounds, min/max_dialogue_lines,
+# reviewer_skip_llm) carry no "generation_" prefix. The shared flatten
+# algorithm (config.py/resolver.py) turns a nested `generation: {max_scenes:
+# ..}` into a flat "generation_max_scenes" key, which doesn't match any
+# Settings field and is silently dropped by extra="ignore" — confirmed this
+# is *also* true of config/settings.yaml's own `generation:` block today
+# (pre-existing, unrelated to Autopilot, not fixed here — out of scope for
+# this PR). Keeping these flat here is what actually makes them apply.
+max_scenes: 10
+# Capped at 1 (vs. the ambient default of 3) so a single slow revision loop
+# can't blow the 8-minute wall-clock budget. The mechanical pre-gate in
+# DialogueReviewer still catches cheap issues before any LLM call fires.
+max_revision_rounds: 1
+min_dialogue_lines: 5
+max_dialogue_lines: 16
+reviewer_skip_llm: false

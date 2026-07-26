@@ -193,6 +193,8 @@
 
 **优先级**：**P5**（3-5 天；demo 闭环；依赖 P0 素材库 + P2 web player + P1 数据飞轮反哺）
 
+**M0 范围调整（2026-07-26，已提交）**：上面"独立入口（一个 URL / 一个 API）"的表述是 M1+ 的目标形态；`App.tsx` 今天不是路由结构，做真正独立页面需要新增客户端路由基建，会超出 3-5 天预算。M0 落地为**现有创作者工作台里的一个"⚡ Autopilot"按钮**（`ChatPanel.tsx`），复用已有的 `fast_mode` 自动跳过 review 步骤链路，额外做了预设解析（一句话主题 → 后端 `resolve_preset()` 恒定选 `autopilot_best.yaml`，M1 才做按 tag/embedding 的按主题选择）+ 自动进播放器（首个场景 SSE 到达即自动切换，不用手动点"Watch Live"）。独立 URL 入口的产品框架推迟到 M1，是明确写下的范围备注，不是隐藏的缩水。详见 7.4。
+
 ---
 
 ### ③ 多样化生成：外源信息引入（上传 · 网检 · 本地开源库）
@@ -389,7 +391,7 @@ v3 的所有已建能力都不重写，v4 只做**收编**和**新增**。以下
 2. **"竞品呢？"** — NovelAI / AI Dungeon / Charat 都不出 Ren'Py 工程，也不做多 Agent 评测闭环；v4 差异化在**平台 + 评测**而不是**生成质量**（这个模型比不过大厂）。
 3. **"能商业化吗？"** — 短期不做 to C 收费；讲 SaaS + 素材市场 + 工具链授权三个可能路径；重点是"AI 生成已经不稀缺，工作台和评测底座才是壁垒"。
 
-### 7.4 阶段交付状态（2026-07-21 更新，只列已核实事实，不列未测过的目标值）
+### 7.4 阶段交付状态（2026-07-26 更新，只列已核实事实，不列未测过的目标值）
 
 | 阶段 | 状态 | 已核实的事实 |
 |---|---|---|
@@ -398,7 +400,8 @@ v3 的所有已建能力都不重写，v4 只做**收编**和**新增**。以下
 | **P2** ①前端+⑤流式 | ✅ 已提交（浏览器烟测未做） | Tailwind v4 修复（此前 className 全部不生效，`npm run build` 现在产出 35KB CSS）；SSE scene_ready 流式播放落地；**没有实测 TTI/TTFS 数字**，这两个北极星指标目标值还是目标 |
 | **P3** ④Chat Ops M0 | ✅ M0 已提交 | `chat_ops/{intent_router,orchestrator}.py` + `POST /api/projects/{id}/chat/{preview,execute}` + `ChatPanel.tsx` 意图确认卡片落地；4 意图分类器全部实现，**local_regen 有真实执行器**（复用 `agents/local_regen.py`），add_character/edit_asset **M0 阶段只分类不执行**（诚实的"未实现"提示，而非静默失败）；explain 走 LLM 直答；mock 模式支持关键词识别 4 种意图，方便零成本 demo |
 | **P4** C-PlaytestAgent + Vision Judge M0 | ✅ M0 已提交（浏览器烟测未做） | `playtest/{schema,branch_walker,frame_compositor,vision_judge,agent}.py` + `POST /api/projects/{id}/playtest/run` + `GET .../playtest/report` + `vn-agent playtest` CLI + `PlaytestPane.tsx`（挂在 AssetPanel 新 tab）落地；**关键范围调整**：勘查发现仓库里没有任何 Ren'Py headless 执行基础设施（无 subprocess 封装、无 SDK 路径配置、无 `--warp`/截图自动化），真实引擎截图这条路线的工程风险/工作量远超原计划的"2 周"估算，改为 Pillow 直接合成代表帧（复用 pipeline 已生成的真实/占位背景+立绘 PNG + 合成对话框/选项 UI），不跑真实 Ren'Py 引擎——这是经用户确认的 M0 范围调整，不是隐藏的缩水；branch walker 尊重 `BranchOption.requires` 状态门（比 `reviewer.py` 现有的 BFS 更严格，能正确识别"声明了但当前不可达"的分支）；`services/llm.py::ainvoke_llm` 新增 `images` 参数支持多模态输入（此前仓库零 vision 调用先例）；mock 模式下走 `playtest/judge` 关键词分发，零成本 demo 全部 4 类节点；**过程中额外发现并修了一个真实 bug**：Pillow 默认字体不含 CJK 字形，中文对话原本会渲染成方块——已改为优先加载系统 CJK 字体（Windows 上用微软雅黑），并把 `textwrap`（按空格分词，对中文完全失效）换成按字符数换行，中英文均已用真实 mock 生成项目截图验证过；**顺带修了另一个真实 bug**：本会话早前给 `scripts/smoke_longvn.py` 加的 Windows UTF-8 stdout 修复是模块级代码，会在被 pytest 收集（`tests/test_scripts/test_smoke_longvn.py` import 它）时污染 pytest 自身的 capture 机制，导致同进程内该文件之后收集的全部测试级联报 `I/O operation on closed file`——全量 `pytest tests/` 才会暴露（分块跑测试时不会触发），已把该段代码挪进 `main()`，只在脚本被直接执行时生效，全量回归验证：909 passed, 1 skipped, 1 deselected（`test_graph_routing.py` 一个已确认与本次改动无关的预置 flaky 测试），exit 0 |
-| **P0+P1+P3+P4 合计测试** | — | `tests/test_assets` + `tests/test_metrics` + `tests/test_feedback` + `tests/test_chat_ops` + `tests/test_web/test_chat_endpoints.py` + `tests/test_playtest` + `tests/test_web/test_playtest_endpoint.py` 共 225 个测试用例（2026-07-25 collect 计数） |
+| **P5** Autopilot M0 | ✅ M0 已提交（浏览器点击验证未做） | `src/vn_agent/autopilot/{resolver,outcomes}.py` + `config/presets/autopilot_best.yaml` + `ChatPanel.tsx` "⚡ Autopilot" 按钮落地；**M0 范围调整**：产品文档原描述的"独立入口（一个 URL/API）"改为工作台内按钮（详见 5.② 小节），复用既有 `fast_mode` 自动跳过 review 链路，新增预设解析（`resolve_preset()` M0 恒定选 `autopilot_best`，M1 才做按主题的 tag/embedding 选择）+ 首场景 SSE 到达即自动切播放器；`get_settings()` 拆分为 `_load_default_settings()`（原 `lru_cache`）+ 一个逐 job 的 `ContextVar` 覆盖层，让 ~20 处直接调用 `get_settings()` 的 agent/graph 代码零改动地拿到 preset 覆盖，覆盖必须逐 endpoint/task 重新 `set()`（ContextVar 不跨 ASGI 请求传播，与既有 `mock_mode_var` 同款约束）；**过程中发现并修了三个真实 bug**：① `POST /generate` 此前无条件 fire 一个后台 `_run_job` 全量跑一遍 pipeline（写 zip，不进 SSE/blackboard），同时 SPA 自己又走 `generate-setting → generate-script` 链路在同一 job_id 上再跑一遍——同一次生成被并发执行两次，且 `_run_job` 拿并发信号量而另一条路径不拿，是真实的状态竞态而不只是浪费 API 调用；新增 `interactive` 字段，SPA 请求恒传 `true` 跳过 `_run_job`，默认 `false` 保留无头 API 调用方的既有契约（本 bug 存在于 P0-P4 就已提交的代码里，与本次改动本身无关，顺手在同一个 diff 里修掉，经用户确认）；② `config/settings.yaml`/预设 YAML 里 `generation:` 段的字段（`max_scenes`/`max_revision_rounds` 等）在 `Settings` 模型上其实是不带前缀的裸字段，现有展平算法却统一加 `{section}_` 前缀，导致这个 `generation:` 段从一开始就从未真正生效过（`extra="ignore"` 静默吞掉）——这是仓库既有、与本次改动无关的潜在 bug，`autopilot_best.yaml` 里对应字段改成裸顶层 key 绕开它并加注释说明，未去动共享的展平逻辑本身（范围外，只记录不改）；③ **一个真实花钱的 bug**：`vn-agent generate --mock` 烟测时意外触发了 5 次真实 Anthropic API 调用（约 $0.12）——`agents/reviewer.py`/`structure_reviewer.py` 的真实调用路径走 `services/pending_debug.py::ainvoke_with_pending_debug()`（更早一个"Reviewer 卡死 52 分钟"排障修复引入的超时包装器），这个函数内部自己重新 `from vn_agent.services.llm import ainvoke_llm` 导入，完全绕开了 `_patch_mock_llm()` 打的模块级补丁；CLI 的 `--mock` 只调用了 `_patch_mock_llm()`，从未设置 `ainvoke_llm` 内部真正检查的 `mock_mode_var`（Web 层的 mock 完全靠这个 ContextVar，从未受此问题影响）——已在 `cli.py::_patch_mock_llm()` 里同时 `mock_mode_var.set(True)` 补上，`tests/test_cli/test_mock_patch.py` 新增回归测试锁死（用真实耗时 <2s 断言证明是走的本地 fixture 而非网络请求）；此 bug 同样是仓库既有、与 P5 本身无关，是本次会话烟测时才触发+发现，已第一时间告知用户并在获确认后修复；全量回归验证：934 passed, 1 skipped, 1 deselected（同一个已确认无关的预置 flaky 测试），exit 0 |
+| **P0+P1+P3+P4+P5 合计测试** | — | `tests/test_assets` + `tests/test_metrics` + `tests/test_feedback` + `tests/test_chat_ops` + `tests/test_web/test_chat_endpoints.py` + `tests/test_playtest` + `tests/test_web/test_playtest_endpoint.py` + `tests/test_autopilot` + `tests/test_config_override` + `tests/test_web/test_autopilot_flow.py` + `tests/test_cli/test_mock_patch.py` 共 253 个测试用例（2026-07-27 collect 计数） |
 
 **面试口径提醒**：以上"已提交"只代表代码落地 + 单元测试通过，不代表北极星指标（diversity ≥30%、TTI ≤3s 等）已经用真实数据验证。讲的时候用"闭环已跑通，指标待真实流量验证"的措辞，不要把目标值说成实测值。
 
@@ -424,7 +427,7 @@ v3 的所有已建能力都不重写，v4 只做**收编**和**新增**。以下
 | **P2 前端 + 流式** | 前端至少中英双语（默认中文）；`VNPreview` 中文 typewriter 效果按 grapheme（非 byte）切，不掉字 |
 | **P3 Chat Ops** | 意图路由分类器 prompt 中文优先；意图预览卡片中文渲染 |
 | **P4 PlaytestAgent** | Vision Judge 打分维度中英双语，主报告中文（**M0 现状**：合成帧本身正确渲染中文对话/选项——已用中文 mock 生成项目实测截图验证 CJK 字体 + 按字符换行；但 judge prompt / 维度标签目前只有英文，未做中英双语标注，留作后续小任务） |
-| **P5 Autopilot** | 独立入口默认中文主题输入 |
+| **P5 Autopilot** | 中文主题输入直接可用（复用工作台既有的中英双语支持，M0 阶段是工作台内按钮而非独立入口——见 5.② M0 范围调整） |
 
 ### 8.3 质量 gate（P0 完成时验证一次，作为其他阶段的 baseline）
 
