@@ -15,6 +15,26 @@
 
 ## [Unreleased]
 
+### 2026-08-04 | 实现 - 2026-08-04 00:53
+
+**变更文件** (2 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/services/image_gen.py`
+
+**测试变更** (1 文件):
+  - `tests/test_services/test_image_gen.py`
+
+**变更统计**:
+```
+src/vn_agent/services/image_gen.py    | 21 +++++++++++++
+ tests/test_services/test_image_gen.py | 58 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 79 insertions(+)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-07-27 | 实现 - 2026-07-27 00:57
 
 **变更文件** (19 个):

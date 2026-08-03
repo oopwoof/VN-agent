@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from vn_agent.services import image_gen
+from vn_agent.services.llm import mock_mode_var
 
 
 class _FakeSettings:
@@ -399,3 +400,60 @@ class TestAspectRatioPlumbing:
 
         gen_cfg = captured_payload["generationConfig"]
         assert "imageConfig" not in gen_cfg
+
+
+class TestMockModeBlocksRealCalls:
+    """Regression guard for a real cost-safety bug found 2026-08-03: unlike
+    ainvoke_llm, this module had zero mock-mode awareness, so a web-UI
+    generation with "Mock (Zero API $)" checked (and Text Only unchecked)
+    still made real, billable calls to OpenAI/Gemini with live keys — one
+    call reached OpenAI's real /v1/images/edits endpoint. mock_mode_var is
+    the same ContextVar ainvoke_llm already checks; these tests assert both
+    public entry points raise before any provider or httpx call is made."""
+
+    @pytest.mark.asyncio
+    async def test_generate_image_blocked_in_mock_mode(self, tmp_path):
+        out = tmp_path / "out.png"
+        token = mock_mode_var.set(True)
+        try:
+            with patch("httpx.AsyncClient.post", side_effect=AssertionError("network call attempted")):
+                with pytest.raises(image_gen.ImageGenerationError, match="mock mode"):
+                    await image_gen.generate_image("prompt", out)
+        finally:
+            mock_mode_var.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_generate_image_with_reference_blocked_in_mock_mode(self, tmp_path):
+        out = tmp_path / "out.png"
+        ref = tmp_path / "ref.png"
+        ref.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 80)  # reference exists
+        token = mock_mode_var.set(True)
+        try:
+            with patch("httpx.AsyncClient.post", side_effect=AssertionError("network call attempted")):
+                with pytest.raises(image_gen.ImageGenerationError, match="mock mode"):
+                    await image_gen.generate_image_with_reference("prompt", ref, out)
+        finally:
+            mock_mode_var.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_generate_image_not_blocked_when_mock_mode_off(self, tmp_path):
+        """Sanity check: the new guard is mock-only, not an unconditional block."""
+        assert mock_mode_var.get() is False
+        out = tmp_path / "out.png"
+        settings = _FakeSettings("openai")
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 80
+
+        async def fake_post(self, url, headers=None, json=None):  # noqa: A002
+            class R:
+                status_code = 200
+                def raise_for_status(self): pass
+                def json(self):
+                    import base64
+                    return {"data": [{"b64_json": base64.b64encode(png).decode()}]}
+            return R()
+
+        with patch("vn_agent.services.image_gen.get_settings", return_value=settings), \
+             patch("httpx.AsyncClient.post", new=fake_post):
+            result = await image_gen.generate_image("prompt", out)
+        assert result == out
+        assert out.read_bytes().startswith(b"\x89PNG")

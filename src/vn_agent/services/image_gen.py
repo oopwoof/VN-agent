@@ -31,6 +31,7 @@ from pathlib import Path
 import httpx
 
 from vn_agent.config import get_settings
+from vn_agent.services.llm import mock_mode_var
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,23 @@ async def generate_image(
     Use "16:9" for scene backgrounds (matches Ren'Py's 1920x1080 base)
     and "3:4" for character sprites (traditional VN full-body framing).
     None → provider default (usually 1:1).
+
+    Found 2026-08-03: this whole module had zero mock-mode awareness —
+    the "Mock (Zero API $)" toggle only ever gated text/LLM calls via
+    mock_mode_var inside ainvoke_llm, never image generation, so a
+    non-text-only mock generation still made real, billable calls to
+    OpenAI/Gemini with live keys. This check closes that gap the same
+    way the CLI's --mock fix did for the pending_debug bypass: raising
+    here routes through each caller's existing try/except (they already
+    tolerate provider failures and fall back to a neutral-copy or leave
+    the file missing), and the file-missing case is already covered by
+    compiler/project_builder.py::_write_placeholder_assets at compile
+    time — no new placeholder mechanism needed.
     """
+    if mock_mode_var.get():
+        raise ImageGenerationError(
+            "mock mode: image generation is disabled, no real API calls made"
+        )
     settings = get_settings()
     primary = settings.image_provider
 
@@ -144,6 +161,10 @@ async def generate_image_with_reference(
     degrades to text-only via generate_image — caller should have called
     provider_supports_reference() first to enrich the prompt if needed.
     """
+    if mock_mode_var.get():
+        raise ImageGenerationError(
+            "mock mode: image generation is disabled, no real API calls made"
+        )
     settings = get_settings()
     if not reference_path.exists():
         logger.warning(
