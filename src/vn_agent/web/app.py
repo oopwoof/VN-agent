@@ -1156,6 +1156,10 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
                 if node_name != "__end__":
                     label = _STEP_LABELS.get(node_name, f"Running {node_name}")
                     store.update_status(job_id, "running", progress=label)
+                    # v4 P6: publish the node identity structurally so the
+                    # frontend can drive the pipeline view off real events
+                    # instead of substring-matching the progress string.
+                    job_events.publish_node(node_name, label)
                 if isinstance(chunk, dict):
                     final_state.update(chunk)
 
@@ -1332,8 +1336,17 @@ def _write_autopilot_run_meta(job_id: str, preset: str, run_start: datetime) -> 
 
 # ── Background runner ────────────────────────────────────────────────────────
 
+# One entry per node in agents/graph.py's compiled graph. Kept exhaustive by
+# tests/test_web/test_pipeline_labels.py — an unlabelled node falls back to
+# f"Running {node_name}", which leaks the internal identifier to users.
 _STEP_LABELS = {
     "director": "Director planning story structure",
+    "structure_reviewer": "Auditing story structure",
+    "director_step2_redo": "Director revising the scene plan",
+    "director_full_redo": "Director replanning the story",
+    "state_orchestrator": "Resolving scene state",
+    "thinking_fanout": "Planning scene-by-scene reasoning",
+    "cross_ref_sync": "Syncing cross-scene references",
     "writer": "Writer creating dialogue",
     "reviewer": "Reviewer checking quality",
     "asset_generation": "Generating assets (characters, scenes, music)",
