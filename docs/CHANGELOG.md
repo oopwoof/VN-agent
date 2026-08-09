@@ -15,6 +15,26 @@
 
 ## [Unreleased]
 
+### 2026-08-09 | 实现 - 2026-08-09 20:55
+
+**变更文件** (2 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/services/job_events.py`
+
+**测试变更** (1 文件):
+  - `tests/test_services/test_job_events.py`
+
+**变更统计**:
+```
+src/vn_agent/services/job_events.py    | 17 +++++++
+ tests/test_services/test_job_events.py | 87 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 104 insertions(+)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-09 | 杂项 - 2026-08-09 20:50
 
 **变更文件** (12 个):
