@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import api, { type FeedbackSummary } from '../api'
+import { useT } from '../i18n/useT'
 
 // v4 P1-4: creator 👍/👎 into the data flywheel.
 // Reason is optional but strongly encouraged — the BM25 injector (P1-2)
@@ -16,6 +17,7 @@ interface Props {
 }
 
 export default function FeedbackWidget({ jobId, sceneId, variant = 'compact', onSubmit }: Props) {
+  const t = useT()
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [flash, setFlash] = useState<'up' | 'down' | 'error' | null>(null)
@@ -49,7 +51,7 @@ export default function FeedbackWidget({ jobId, sceneId, variant = 'compact', on
         <textarea
           value={reason}
           onChange={e => setReason(e.target.value)}
-          placeholder="可选：说明理由（例如'对白太啰嗦'）— 会用于后续训练"
+          placeholder={t('feedback.reasonPlaceholderFull')}
           rows={2}
           disabled={busy}
           className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -63,7 +65,7 @@ export default function FeedbackWidget({ jobId, sceneId, variant = 'compact', on
             flash === 'up' ? 'bg-emerald-600 text-white' :
             'bg-gray-800 hover:bg-emerald-900/50 text-emerald-400 border border-emerald-900/60'
           } disabled:opacity-40`}
-          title="Thumbs up"
+          title={t('feedback.thumbsUp')}
         >
           👍
         </button>
@@ -74,7 +76,7 @@ export default function FeedbackWidget({ jobId, sceneId, variant = 'compact', on
             flash === 'down' ? 'bg-red-600 text-white' :
             'bg-gray-800 hover:bg-red-900/50 text-red-400 border border-red-900/60'
           } disabled:opacity-40`}
-          title="Thumbs down"
+          title={t('feedback.thumbsDown')}
         >
           👎
         </button>
@@ -82,13 +84,13 @@ export default function FeedbackWidget({ jobId, sceneId, variant = 'compact', on
           <input
             value={reason}
             onChange={e => setReason(e.target.value)}
-            placeholder="可选理由…"
+            placeholder={t('feedback.reasonPlaceholderCompact')}
             disabled={busy}
             className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
         )}
         {flash === 'error' && (
-          <span className="text-[10px] text-red-400">提交失败</span>
+          <span className="text-[10px] text-red-400">{t('feedback.submitFailed')}</span>
         )}
       </div>
     </div>

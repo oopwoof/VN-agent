@@ -15,6 +15,34 @@
 
 ## [Unreleased]
 
+### 2026-08-10 | 杂项 - 2026-08-10 00:06
+
+**变更文件** (9 个):
+**其他变更** (9 文件):
+  - `frontend/src/components/AssetPanel.tsx`
+  - `frontend/src/components/FeedbackWidget.tsx`
+  - `frontend/src/components/JobHistory.tsx`
+  - `frontend/src/components/PlaytestPane.tsx`
+  - `frontend/src/components/PreviewPanel.tsx`
+
+**变更统计**:
+```
+frontend/src/components/AssetPanel.tsx     |  97 +++++-----
+ frontend/src/components/FeedbackWidget.tsx |  12 +-
+ frontend/src/components/JobHistory.tsx     |  14 +-
+ frontend/src/components/PlaytestPane.tsx   |  47 ++---
+ frontend/src/components/PreviewPanel.tsx   |  19 +-
+ frontend/src/components/ScriptPanel.tsx    |  32 ++--
+ frontend/src/components/SettingPanel.tsx   |  34 ++--
+ frontend/src/components/StatusBar.tsx      |  19 +-
+ frontend/src/i18n/dict.ts                  | 274 +++++++++++++++++++++++++++++
+ 9 files changed, 411 insertions(+), 137 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-09 | 杂项 - 2026-08-09 21:50
 
 **变更文件** (2 个):

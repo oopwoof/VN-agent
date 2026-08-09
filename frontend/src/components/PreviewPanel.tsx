@@ -4,8 +4,9 @@ import SettingPanel from './SettingPanel'
 import ScriptPanel from './ScriptPanel'
 import AssetPanel from './AssetPanel'
 import VNPreview from './VNPreview'
+import { useT } from '../i18n/useT'
 
-const STEPS = ['Setting', 'Script', 'Review', 'Assets', 'Done']
+const STEP_KEYS = ['steps.setting', 'steps.script', 'steps.review', 'steps.assets', 'steps.done'] as const
 
 function stepIndex(step: string, progress: string): number {
   const p = (progress + ' ' + step).toLowerCase()
@@ -19,6 +20,8 @@ function stepIndex(step: string, progress: string): number {
 
 export default function PreviewPanel() {
   const { step, progress, errors, elapsed, vnPreview, blackboard, streamActive, toggleVNPreview } = useStore()
+  const t = useT()
+  const STEPS = STEP_KEYS.map(k => t(k))
 
   // VN Preview mode takes over the entire panel
   if (vnPreview) return <VNPreview />
@@ -28,7 +31,7 @@ export default function PreviewPanel() {
       <div className="flex items-center justify-center h-full text-gray-600">
         <div className="text-center space-y-2">
           <div className="text-4xl">&#127918;</div>
-          <p className="text-sm">Enter a theme to start generating</p>
+          <p className="text-sm">{t('preview.empty')}</p>
         </div>
       </div>
     )
@@ -55,15 +58,15 @@ export default function PreviewPanel() {
             <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
               <div className="flex items-center gap-3">
                 <div className="spinner" />
-                <span className="text-sm text-gray-300">{progress || 'Working...'}</span>
+                <span className="text-sm text-gray-300">{progress || t('preview.working')}</span>
                 {streamActive && (
                   <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium uppercase tracking-wider">
                     <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                    Live
+                    {t('preview.live')}
                   </span>
                 )}
               </div>
-              <p className="text-xs text-gray-600 mt-2">Elapsed: {elapsed}s</p>
+              <p className="text-xs text-gray-600 mt-2">{t('preview.elapsed')}: {elapsed}s</p>
               {/* v4 P2 ⑤: JIT playback — scenes stream into blackboard.scene_scripts
                   as Writer finishes them, so preview can start before the full
                   script (and Reviewer pass) is done. */}
@@ -72,7 +75,7 @@ export default function PreviewPanel() {
                   onClick={toggleVNPreview}
                   className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
                 >
-                  ▶ Watch Live ({(blackboard.scene_scripts as unknown[]).length} scene{(blackboard.scene_scripts as unknown[]).length === 1 ? '' : 's'} ready)
+                  ▶ {t('preview.watchLive')}（{(blackboard.scene_scripts as unknown[]).length} {t('preview.scenesReady')}）
                 </button>
               )}
             </div>
@@ -86,10 +89,10 @@ export default function PreviewPanel() {
                 <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
-                <span className="text-red-400 font-medium">Generation failed</span>
+                <span className="text-red-400 font-medium">{t('preview.failed')}</span>
               </div>
               <pre className="text-xs text-red-300 bg-gray-950 rounded p-3 overflow-x-auto whitespace-pre-wrap">
-                {errors.join('\n') || 'Unknown error'}
+                {errors.join('\n') || t('preview.unknownError')}
               </pre>
             </div>
           </div>

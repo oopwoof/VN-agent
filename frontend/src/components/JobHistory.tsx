@@ -34,10 +34,10 @@ export default function JobHistory() {
         `dialogue ${s.dialogue_before}→${s.dialogue_after}`,
       ]
       if (s.snapshots_merged) parts.push(`merged ${s.snapshots_merged}/${s.snapshots_found} snapshots`)
-      alert('Salvage:\n' + parts.join('\n') + (res.compiled ? '\n✓ compiled' : res.next_step ? '\n' + res.next_step : ''))
+      alert(t('history.salvageSummary') + '\n' + parts.join('\n') + (res.compiled ? '\n' + t('history.compiled') : res.next_step ? '\n' + res.next_step : ''))
       await refreshJobs()
     } catch (err) {
-      alert('Salvage failed: ' + String(err))
+      alert(t('history.salvageFailed') + String(err))
     } finally {
       setSalvaging(s => ({ ...s, [jobId]: false }))
     }
@@ -61,10 +61,10 @@ export default function JobHistory() {
         </button>
       </div>
       <div className="px-3 pt-3">
-        <h2 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">History</h2>
+        <h2 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">{t('history.title')}</h2>
       </div>
       <div className="flex-1 overflow-y-auto px-3 space-y-1 custom-scrollbar">
-        {jobs.length === 0 && <p className="text-xs text-gray-700 px-2">No jobs yet</p>}
+        {jobs.length === 0 && <p className="text-xs text-gray-700 px-2">{t('history.empty')}</p>}
         {jobs.map(j => (
           <div
             key={j.job_id}
@@ -92,16 +92,16 @@ export default function JobHistory() {
                     onClick={e => handleSalvage(j.job_id, e)}
                     disabled={!!salvaging[j.job_id]}
                     className="text-[10px] text-amber-500 hover:text-amber-300 disabled:opacity-40"
-                    title="Merge on-disk snapshots into vn_script.json and (if text-only) compile"
+                    title={t('history.salvageHint')}
                   >
-                    {salvaging[j.job_id] ? 'salvaging…' : 'salvage'}
+                    {salvaging[j.job_id] ? t('history.salvaging') : t('history.salvage')}
                   </button>
                 )}
                 <button
                   onClick={e => { e.stopPropagation(); deleteJob(j.job_id) }}
                   className="text-[10px] text-gray-600 hover:text-red-400"
                 >
-                  delete
+                  {t('history.delete')}
                 </button>
               </div>
             </div>

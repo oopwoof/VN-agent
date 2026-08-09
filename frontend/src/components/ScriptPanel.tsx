@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import useStore from '../store'
 import api from '../api'
+import { useT } from '../i18n/useT'
 
 interface DialogueLine {
   character_id: string | null
@@ -29,6 +30,7 @@ const EMOTIONS = ['neutral', 'happy', 'sad', 'angry', 'surprised', 'scared', 'th
 
 export default function ScriptPanel() {
   const { blackboard, currentJobId, step } = useStore()
+  const t = useT()
   const scenes = (blackboard.scene_scripts || []) as SceneScript[]
   const reviewer = (blackboard.reviewer || {}) as {
     passed?: boolean; feedback?: string; revision_count?: number;
@@ -58,7 +60,7 @@ export default function ScriptPanel() {
       })
       setEditing(false)
     } catch (e) {
-      alert(`Save failed: ${e}`)
+      alert(t('setting.saveFailed') + e)
     }
   }
 
@@ -74,7 +76,7 @@ export default function ScriptPanel() {
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) {
-      alert(`Export failed: ${e}`)
+      alert(t('script.exportFailed') + e)
     }
   }
 
@@ -87,7 +89,7 @@ export default function ScriptPanel() {
         reviewer.passed ? 'bg-green-950/50 border-green-800/50 text-green-400' : 'bg-yellow-950/50 border-yellow-800/50 text-yellow-400'
       }`}>
         <span className="font-semibold">
-          {reviewer.passed ? '\u2705 Reviewer: PASS' : `\u26A0\uFE0F Reviewer: ${reviewer.revision_count || 0} revision(s)`}
+          {reviewer.passed ? t('script.reviewPass') : `${t('script.reviewRevisions')} ${reviewer.revision_count || 0} ${t('script.revisionsUnit')}`}
         </span>
         {reviewer.scores && (
           <span className="ml-3 text-[10px] opacity-70">
@@ -124,11 +126,11 @@ export default function ScriptPanel() {
             <div className="flex items-center justify-between">
               <h3 className="font-medium text-gray-200">{scene.title}</h3>
               {!editing ? (
-                <button onClick={startEdit} className="text-xs text-indigo-400 hover:text-indigo-300">Edit</button>
+                <button onClick={startEdit} className="text-xs text-indigo-400 hover:text-indigo-300">{t('setting.edit')}</button>
               ) : (
                 <div className="flex gap-2">
-                  <button onClick={saveEdit} className="text-xs text-green-400 hover:text-green-300">Save</button>
-                  <button onClick={() => setEditing(false)} className="text-xs text-gray-500 hover:text-gray-400">Cancel</button>
+                  <button onClick={saveEdit} className="text-xs text-green-400 hover:text-green-300">{t('setting.save')}</button>
+                  <button onClick={() => setEditing(false)} className="text-xs text-gray-500 hover:text-gray-400">{t('setting.cancel')}</button>
                 </div>
               )}
             </div>
@@ -138,7 +140,7 @@ export default function ScriptPanel() {
               {scene.narrative_strategy && (
                 <span className="bg-indigo-950 px-2 py-0.5 rounded text-indigo-400">{scene.narrative_strategy}</span>
               )}
-              <span className="text-gray-600">{scene.dialogue.length} lines</span>
+              <span className="text-gray-600">{scene.dialogue.length} {t('script.linesUnit')}</span>
             </div>
           </div>
 
@@ -158,7 +160,7 @@ export default function ScriptPanel() {
                           updated[i] = { ...d, character_id: e.target.value || null }
                           setEditDialogue(updated)
                         }}
-                        placeholder="narrator"
+                        placeholder={t('script.narrator')}
                         className="bg-gray-800 border border-gray-700 rounded px-2 py-1 w-32 text-gray-300"
                       />
                       <select
@@ -190,7 +192,7 @@ export default function ScriptPanel() {
                       {d.character_id ? (
                         <span className="text-xs font-semibold text-indigo-400">{d.character_id}</span>
                       ) : (
-                        <span className="text-xs text-gray-600">Narrator</span>
+                        <span className="text-xs text-gray-600">{t('script.narrator')}</span>
                       )}
                       <span className="text-[10px] bg-gray-800 px-1.5 py-0.5 rounded text-gray-500">{d.emotion}</span>
                     </div>
@@ -204,7 +206,7 @@ export default function ScriptPanel() {
           {/* Branches */}
           {scene.branches.length > 0 && (
             <div className="mt-4 p-3 bg-indigo-950/30 border border-indigo-800/30 rounded-lg">
-              <p className="text-xs text-indigo-400 font-semibold mb-2">Player Choices:</p>
+              <p className="text-xs text-indigo-400 font-semibold mb-2">{t('script.choices')}</p>
               {scene.branches.map((b, i) => (
                 <div key={i} className="flex items-center gap-2 text-sm text-gray-300 py-1">
                   <span className="text-indigo-500">&rarr;</span>
@@ -224,31 +226,31 @@ export default function ScriptPanel() {
             onClick={() => useStore.getState().confirmScript()}
             className="px-5 py-2 bg-green-600 hover:bg-green-500 text-white text-sm font-medium rounded-lg transition-colors"
           >
-            Confirm & Continue
+            {t('script.confirm')}
           </button>
           <button
             onClick={() => useStore.getState().confirmSetting()}
             className="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 text-white text-sm font-medium rounded-lg transition-colors"
           >
-            Regenerate Script
+            {t('script.regenerate')}
           </button>
           <button
             onClick={() => useStore.getState().toggleVNPreview()}
             className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
           >
-            Preview VN
+            {t('script.preview')}
           </button>
           <button
             onClick={exportJSON}
             className="px-5 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm font-medium rounded-lg transition-colors"
           >
-            Export JSON
+            {t('script.export')}
           </button>
           <button
             onClick={() => useStore.setState({ step: 'setting_review' })}
             className="px-5 py-2 bg-gray-800 hover:bg-gray-700 text-gray-400 text-sm rounded-lg transition-colors"
           >
-            Back to Setting
+            {t('script.backToSetting')}
           </button>
         </div>
       )}
