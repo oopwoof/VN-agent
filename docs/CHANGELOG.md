@@ -15,6 +15,24 @@
 
 ## [Unreleased]
 
+### 2026-08-09 | 杂项 - 2026-08-09 21:50
+
+**变更文件** (2 个):
+**其他变更** (2 文件):
+  - `frontend/src/components/ChatPanel.tsx`
+  - `frontend/src/components/VNPreview.tsx`
+
+**变更统计**:
+```
+frontend/src/components/ChatPanel.tsx | 51 ++++++++++++++++++-----------------
+ frontend/src/components/VNPreview.tsx | 20 +++++++-------
+ 2 files changed, 38 insertions(+), 33 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-09 | 杂项 - 2026-08-09 21:24
 
 **变更文件** (4 个):
