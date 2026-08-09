@@ -15,6 +15,28 @@
 
 ## [Unreleased]
 
+### 2026-08-09 | 杂项 - 2026-08-09 21:13
+
+**变更文件** (4 个):
+**其他变更** (4 文件):
+  - `frontend/package-lock.json`
+  - `frontend/package.json`
+  - `frontend/src/design/tokens.css`
+  - `frontend/src/index.css`
+
+**变更统计**:
+```
+frontend/package-lock.json     | 53 ++++++++++++++++++++++++++++++++--
+ frontend/package.json          |  2 ++
+ frontend/src/design/tokens.css | 65 ++++++++++++++++++++++++++++++++++++++++++
+ frontend/src/index.css         |  1 +
+ 4 files changed, 118 insertions(+), 3 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-09 | 实现 - 2026-08-09 21:05
 
 **变更文件** (2 个):

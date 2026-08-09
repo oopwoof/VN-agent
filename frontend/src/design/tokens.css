@@ -1,0 +1,65 @@
+/* VN-Agent Studio design tokens — single source of truth for colour and
+   type. See docs/v4/FRONTEND_REDESIGN_v4.md §3.
+
+   Dark ground is functional, not stylistic: this is an authoring tool for a
+   visual medium, and generated art can only be judged against a neutral dark
+   surround (same reason Figma / Premiere / Lightroom are dark).
+
+   Saturated colour is reserved for the player — that is the generated work's
+   own colour. The workbench stays neutral plus a single brass accent. */
+
+:root {
+  /* Ground → raised, cool-shifted neutrals (not pure grey) */
+  --ground: #0e1012;
+  --surface: #16191c;
+  --surface-raised: #1d2125;
+  --rule: #282d32;
+
+  /* Text, three levels */
+  --ink: #e6e9ec;
+  --ink-soft: #9aa3ab;
+  --ink-faint: #69727a;
+
+  /* Accent: brass/amber — instrument-panel association. Deliberately not
+     the indigo the old shell used, and not "AI purple". */
+  --instrument: #c8944a;
+  --instrument-wash: #2a2116;
+
+  /* Semantic — independent of the accent, never used for branding */
+  --ok: #4a9d6e;
+  --warn: #c9873f;
+  --crit: #c15550;
+
+  /* Type: the instrument/narrative split is what carries the
+     workbench-vs-artifact contrast. Colour alone would not. */
+  --font-instrument: ui-sans-serif, -apple-system, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-narrative: Georgia, "Songti SC", "Source Han Serif SC",
+    "Noto Serif CJK SC", serif;
+  --font-numeric: ui-monospace, "SF Mono", Consolas, monospace;
+}
+
+/* Instrument surfaces: dense, tabular digits, slightly open tracking. */
+.face-instrument {
+  font-family: var(--font-instrument);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+/* Narrative surfaces: scene titles, character names, dialogue.
+   CJK needs a looser leading and must NOT get letter-spacing. */
+.face-narrative {
+  font-family: var(--font-narrative);
+  line-height: 1.75;
+  letter-spacing: normal;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
