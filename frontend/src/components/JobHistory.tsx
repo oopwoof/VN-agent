@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import useStore from '../store'
 import api from '../api'
+import { useT } from '../i18n/useT'
 
 const BADGE: Record<string, string> = {
   pending: 'bg-gray-700 text-gray-400',
@@ -11,6 +12,9 @@ const BADGE: Record<string, string> = {
 
 export default function JobHistory() {
   const { jobs, refreshJobs, selectJob, deleteJob, currentJobId } = useStore()
+  const t = useT()
+  const lang = useStore(s => s.lang)
+  const setLang = useStore(s => s.setLang)
   // v4 P0-resume: per-job salvage-in-progress flag so the button doesn't
   // hammer the endpoint when a click already fired. Keyed by job_id.
   const [salvaging, setSalvaging] = useState<Record<string, boolean>>({})
@@ -41,9 +45,20 @@ export default function JobHistory() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-4 border-b border-gray-800">
-        <h1 className="text-lg font-bold text-indigo-400">VN-Agent Studio</h1>
-        <p className="text-[10px] text-gray-500 mt-0.5">AI Visual Novel Generator</p>
+      <div className="p-4 border-b border-gray-800 flex items-start justify-between gap-2">
+        <div>
+          <h1 className="text-lg font-bold text-indigo-400">VN-Agent Studio</h1>
+          <p className="text-[10px] text-gray-500 mt-0.5">AI Visual Novel Generator</p>
+        </div>
+        <button
+          onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+          title={t('lang.toggleHint')}
+          className="text-[10px] px-2 py-1 rounded border border-gray-700 text-gray-400
+            hover:text-gray-200 hover:border-gray-500 transition-colors shrink-0
+            focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500"
+        >
+          {t('lang.toggle')}
+        </button>
       </div>
       <div className="px-3 pt-3">
         <h2 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">History</h2>

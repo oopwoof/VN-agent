@@ -15,6 +15,28 @@
 
 ## [Unreleased]
 
+### 2026-08-09 | 杂项 - 2026-08-09 21:24
+
+**变更文件** (4 个):
+**其他变更** (4 文件):
+  - `frontend/src/components/JobHistory.tsx`
+  - `frontend/src/i18n/dict.ts`
+  - `frontend/src/i18n/useT.ts`
+  - `frontend/src/store.ts`
+
+**变更统计**:
+```
+frontend/src/components/JobHistory.tsx | 21 +++++++--
+ frontend/src/i18n/dict.ts              | 82 ++++++++++++++++++++++++++++++++++
+ frontend/src/i18n/useT.ts              | 11 +++++
+ frontend/src/store.ts                  |  8 ++++
+ 4 files changed, 119 insertions(+), 3 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-09 | 杂项 - 2026-08-09 21:13
 
 **变更文件** (4 个):

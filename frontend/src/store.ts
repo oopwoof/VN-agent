@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { AssetManifest, ChatMessage, GenerateConfig, JobSummary } from './types'
 import api, { type ChatTurn } from './api'
+import type { Lang } from './i18n/dict'
 
 export type AppStep =
   | 'idle' | 'generating_setting' | 'setting_review'
@@ -28,6 +29,9 @@ interface AppState {
   // here — they resolve straight into a chat message.
   pendingChatTurn: ChatTurn | null
   chatBusy: boolean
+  // v4 P6: UI-chrome language. Chinese is the default (primary demo
+  // audience); generated content language is driven by the theme, not this.
+  lang: Lang
 
   setConfig: (partial: Partial<GenerateConfig>) => void
   generate: () => Promise<void>
@@ -46,6 +50,7 @@ interface AppState {
   sendChatMessage: (message: string) => Promise<void>
   confirmChatTurn: () => Promise<void>
   cancelChatTurn: () => void
+  setLang: (lang: Lang) => void
   // Gate for ChatPanel: is there a generated script to chat-edit right now?
   chatOpsAvailable: () => boolean
 }
@@ -97,6 +102,7 @@ const useStore = create<AppState>((set, get) => ({
   streamActive: false,
   pendingChatTurn: null,
   chatBusy: false,
+  lang: 'zh',
 
   setConfig: (partial) => set({ config: { ...get().config, ...partial } }),
 
@@ -389,6 +395,8 @@ const useStore = create<AppState>((set, get) => ({
     addMsg(get, set, 'system', 'Cancelled.')
     set({ pendingChatTurn: null })
   },
+
+  setLang: (lang) => set({ lang }),
 }))
 
 export default useStore
