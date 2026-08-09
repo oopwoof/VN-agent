@@ -53,6 +53,11 @@ interface AppState {
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let elapsedTimer: ReturnType<typeof setInterval> | null = null
 let sceneStream: EventSource | null = null
+// Guards against overlapping setInterval ticks: if api.status() takes longer
+// than the poll period, multiple ticks can be in flight at once and each
+// independently see status === 'completed', each firing the completion
+// side effects (including api.compile() in fast_mode) more than once.
+let pollInFlight = false
 
 function stopSceneStream() {
   if (sceneStream) { sceneStream.close(); sceneStream = null }
@@ -185,6 +190,8 @@ const useStore = create<AppState>((set, get) => ({
     try {
       await api.generateScript(currentJobId)
       pollTimer = setInterval(async () => {
+        if (pollInFlight) return
+        pollInFlight = true
         try {
           const res = await api.status(currentJobId)
           set({ progress: res.progress })
@@ -218,6 +225,8 @@ const useStore = create<AppState>((set, get) => ({
           stopTimers()
           stopSceneStream()
           set({ streamActive: false, step: 'failed', errors: ['Connection lost'] })
+        } finally {
+          pollInFlight = false
         }
       }, 1500)
     } catch (e) {
