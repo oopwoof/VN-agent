@@ -50,16 +50,35 @@ def _linear_gradient(size, top_rgb, bottom_rgb):
     return img
 
 
+# Arial has no CJK glyphs, so the Chinese `sub` captions (e.g. "教室 · 白天")
+# baked into the 8 seed backgrounds rendered as tofu boxes. Same font
+# candidate list used by playtest/frame_compositor.py's earlier fix for the
+# same bug class — reused here rather than reinvented.
+_CJK_FONT_CANDIDATES = [
+    "C:/Windows/Fonts/msyh.ttc",  # Windows: Microsoft YaHei
+    "C:/Windows/Fonts/simhei.ttf",  # Windows: SimHei
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Debian/Ubuntu fonts-noto-cjk
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",  # Debian/Ubuntu fonts-wqy-zenhei
+    "/System/Library/Fonts/PingFang.ttc",  # macOS
+]
+
+
+def _font(size: int) -> ImageFont.ImageFont:
+    for path in _CJK_FONT_CANDIDATES:
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                continue
+    return ImageFont.load_default()
+
+
 def _label(img, text, sub=""):
     """Overlay a subtle label so debug is obvious. Font fallback keeps
     the script runnable even without a Windows font available."""
     draw = ImageDraw.Draw(img)
-    try:
-        font = ImageFont.truetype("arial.ttf", 48)
-        subfont = ImageFont.truetype("arial.ttf", 22)
-    except OSError:
-        font = ImageFont.load_default()
-        subfont = ImageFont.load_default()
+    font = _font(48)
+    subfont = _font(22)
     box = draw.textbbox((0, 0), text, font=font)
     x = (img.width - (box[2] - box[0])) // 2
     y = img.height // 2 - 30

@@ -17,6 +17,37 @@
 
 ### 2026-08-09 | 杂项 - 2026-08-09 20:50
 
+**变更文件** (12 个):
+**其他变更** (12 文件):
+  - `data/assets/opensource/cafe_warm.png`
+  - `data/assets/opensource/forest_dawn.png`
+  - `data/assets/opensource/rooftop_day.png`
+  - `data/assets/opensource/rooftop_night.png`
+  - `data/assets/opensource/school_day.png`
+
+**变更统计**:
+```
+data/assets/opensource/cafe_warm.png              | Bin 16841 -> 20679 bytes
+ data/assets/opensource/forest_dawn.png            | Bin 17332 -> 21449 bytes
+ data/assets/opensource/rooftop_day.png            | Bin 16376 -> 19440 bytes
+ data/assets/opensource/rooftop_night.png          | Bin 16259 -> 20454 bytes
+ data/assets/opensource/school_day.png             | Bin 16732 -> 19426 bytes
+ data/assets/opensource/school_dusk.png            | Bin 17830 -> 20753 bytes
+ data/assets/opensource/school_night.png           | Bin 16556 -> 20503 bytes
+ data/assets/opensource/shrine_cool.png            | Bin 16546 -> 19145 bytes
+ data/assets/opensource/student_female_neutral.png | Bin 14338 -> 14206 bytes
+ data/assets/opensource/student_male_neutral.png   | Bin 14854 -> 14845 bytes
+ data/assets/opensource/teacher_neutral.png        | Bin 11034 -> 10757 bytes
+ scripts/seed_opensource_library.py                |  31 +++++++++++++++++-----
+ 12 files changed, 25 insertions(+), 6 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-09 | 杂项 - 2026-08-09 20:50
+
 **变更文件** (1 个):
 **其他变更** (1 文件):
   - `frontend/src/store.ts`
