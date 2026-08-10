@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
 import ChatPanel from '../components/ChatPanel'
 import JobHistory from '../components/JobHistory'
 import StatusBar from '../components/StatusBar'
@@ -106,20 +105,13 @@ export default function WorkbenchShell() {
             <ChatPanel />
           </div>
 
-          {/* Main region — cross-dissolve between forms */}
+          {/* Main region — fades in on each form change. Keying on `form`
+              makes React remount the wrapper, which restarts the CSS
+              animation; see .vn-fade-in in design/tokens.css. */}
           <div className="flex-1 overflow-y-auto custom-scrollbar relative">
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.div
-                key={form}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.25 }}
-                className="h-full"
-              >
-                {main}
-              </motion.div>
-            </AnimatePresence>
+            <div key={form} className="h-full vn-fade-in">
+              {main}
+            </div>
           </div>
         </div>
         <StatusBar />

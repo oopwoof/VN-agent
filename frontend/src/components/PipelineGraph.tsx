@@ -1,4 +1,3 @@
-import { motion } from 'framer-motion'
 import useStore from '../store'
 import { useT } from '../i18n/useT'
 import type { TKey } from '../i18n/dict'
@@ -52,8 +51,10 @@ export default function PipelineGraph() {
                 style={{ background: !skipped && (isDone || isActive) ? 'var(--instrument)' : 'var(--rule)' }}
               />
             )}
-            <motion.span
-              className="relative px-2.5 py-1 rounded text-[11px] border whitespace-nowrap"
+            <span
+              className={`relative px-2.5 py-1 rounded text-[11px] border whitespace-nowrap${
+                isActive && !skipped ? ' vn-pulse' : ''
+              }`}
               style={{
                 color,
                 borderColor: isActive && !skipped ? 'var(--instrument)' : 'var(--rule)',
@@ -61,12 +62,6 @@ export default function PipelineGraph() {
                 fontWeight: isActive && !skipped ? 600 : 400,
                 opacity: skipped ? 0.45 : 1,
               }}
-              animate={isActive && !skipped ? { opacity: [1, 0.55, 1] } : { opacity: skipped ? 0.45 : 1 }}
-              transition={
-                isActive && !skipped
-                  ? { duration: 1.6, repeat: Infinity, ease: 'easeInOut' }
-                  : { duration: 0.2 }
-              }
             >
               {t(`node.${node}` as TKey)}
               {node === 'structure_reviewer' && revising && (
@@ -79,7 +74,7 @@ export default function PipelineGraph() {
                   {t('pipeline.skipped')}
                 </span>
               )}
-            </motion.span>
+            </span>
           </li>
         )
       })}

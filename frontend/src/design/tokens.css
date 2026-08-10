@@ -54,6 +54,38 @@
   letter-spacing: normal;
 }
 
+/* Motion.
+   These are plain CSS rather than a JS animation library on purpose. The two
+   effects the workbench needs are a breathing pulse on the running pipeline
+   node and a fade when the main region changes form — together they were not
+   worth the ~44 kB gzipped that framer-motion added to the bundle.
+
+   The CSS route is also strictly more correct for accessibility: a JS library
+   animating inline styles bypasses the prefers-reduced-motion block below,
+   whereas these honour it automatically. */
+
+/* Running pipeline node. Opacity only — no transform, so it cannot cause
+   layout shift in the node spine. */
+@keyframes vn-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.vn-pulse {
+  animation: vn-pulse 1.6s ease-in-out infinite;
+}
+
+/* Main-region form change. Applied to an element keyed by form, so React
+   remounts it and the animation restarts on every transition. */
+@keyframes vn-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.vn-fade-in {
+  animation: vn-fade-in 0.25s ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

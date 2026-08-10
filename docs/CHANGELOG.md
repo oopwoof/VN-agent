@@ -15,6 +15,30 @@
 
 ## [Unreleased]
 
+### 2026-08-10 | 杂项 - 2026-08-10 23:35
+
+**变更文件** (5 个):
+**其他变更** (5 文件):
+  - `frontend/package-lock.json`
+  - `frontend/package.json`
+  - `frontend/src/components/PipelineGraph.tsx`
+  - `frontend/src/design/tokens.css`
+  - `frontend/src/shell/WorkbenchShell.tsx`
+
+**变更统计**:
+```
+frontend/package-lock.json                | 43 +++----------------------------
+ frontend/package.json                     |  1 -
+ frontend/src/components/PipelineGraph.tsx | 15 ++++-------
+ frontend/src/design/tokens.css            | 32 +++++++++++++++++++++++
+ frontend/src/shell/WorkbenchShell.tsx     | 20 +++++---------
+ 5 files changed, 46 insertions(+), 65 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-10 | 杂项 - 2026-08-10 23:26
 
 **变更文件** (1 个):
