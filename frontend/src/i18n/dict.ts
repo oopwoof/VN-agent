@@ -236,6 +236,17 @@ export const dict = {
     // Sent into the Chat Ops intent router, so it follows the UI language
     // rather than being pinned to Chinese.
     'board.rewritePrompt': '改写场景「{title}」',
+    // ── 阶段进度（store 写入 key，渲染时解析）──
+    'progress.creatingProject': '正在创建项目…',
+    'progress.directorPlanning': '导演正在规划故事结构',
+    'progress.fastAutoConfirm': '快速模式：正在自动确认设定…',
+    'progress.settingReady': '设定已就绪，待审阅',
+    'progress.writerCreating': '编剧正在创作对白…',
+    'progress.regeneratingSetting': '正在重新生成设定…',
+    'progress.compiling': '正在编译 Ren\'Py 项目…',
+    'progress.assetsReady': '素材已就绪，待审阅',
+    'progress.recompiling': '正在用更新后的素材重新编译…',
+    'progress.projectReady': '项目已就绪，可以下载',
   },
   en: {
     // ── ChatPanel ──
@@ -467,6 +478,17 @@ export const dict = {
     'card.rewrite': 'Rewrite this scene',
     'board.backToBoard': 'Back to board',
     'board.rewritePrompt': 'Rewrite the scene "{title}"',
+    // ── phase progress (store writes a key, resolved at render) ──
+    'progress.creatingProject': 'Creating project…',
+    'progress.directorPlanning': 'Director planning story structure',
+    'progress.fastAutoConfirm': 'Fast mode: auto-confirming setting…',
+    'progress.settingReady': 'Setting ready for review',
+    'progress.writerCreating': 'Writer creating dialogue…',
+    'progress.regeneratingSetting': 'Regenerating setting…',
+    'progress.compiling': 'Compiling Ren\'Py project…',
+    'progress.assetsReady': 'Assets ready for review',
+    'progress.recompiling': 'Re-compiling with updated assets…',
+    'progress.projectReady': 'Project ready for download',
   },
 } as const
 

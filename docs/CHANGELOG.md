@@ -15,6 +15,31 @@
 
 ## [Unreleased]
 
+### 2026-08-11 | 杂项 - 2026-08-11 00:10
+
+**变更文件** (6 个):
+**其他变更** (6 文件):
+  - `frontend/src/components/ChatPanel.tsx`
+  - `frontend/src/components/PipelineStage.tsx`
+  - `frontend/src/components/PreviewPanel.tsx`
+  - `frontend/src/i18n/dict.ts`
+  - `frontend/src/i18n/useT.ts`
+
+**变更统计**:
+```
+frontend/src/components/ChatPanel.tsx     | 11 ++++++++---
+ frontend/src/components/PipelineStage.tsx | 13 ++++---------
+ frontend/src/components/PreviewPanel.tsx  | 13 ++++---------
+ frontend/src/i18n/dict.ts                 | 22 ++++++++++++++++++++++
+ frontend/src/i18n/useT.ts                 | 27 +++++++++++++++++++++++++++
+ frontend/src/store.ts                     | 26 ++++++++++++++++----------
+ 6 files changed, 81 insertions(+), 31 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-10 | 杂项 - 2026-08-10 23:35
 
 **变更文件** (5 个):

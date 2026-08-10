@@ -4,7 +4,7 @@ import SettingPanel from './SettingPanel'
 import ScriptPanel from './ScriptPanel'
 import AssetPanel from './AssetPanel'
 import VNPreview from './VNPreview'
-import { useT, useNodeLabel } from '../i18n/useT'
+import { useT, useActivityLine } from '../i18n/useT'
 
 const STEP_KEYS = ['steps.setting', 'steps.script', 'steps.review', 'steps.assets', 'steps.done'] as const
 
@@ -38,19 +38,14 @@ function stepIndex(step: AppStep, pipelineActive: string | null): number {
 }
 
 export default function PreviewPanel() {
-  const { step, progress, errors, elapsed, vnPreview, blackboard, streamActive, toggleVNPreview } = useStore()
+  const { step, progress, progressKey, errors, elapsed, vnPreview, blackboard, streamActive, toggleVNPreview } = useStore()
   const pipelineActive = useStore(s => s.pipelineActive)
   const pipelineLabel = useStore(s => s.pipelineLabel)
   const t = useT()
-  const nodeLabel = useNodeLabel()
+  const activityLine = useActivityLine()
   const STEPS = STEP_KEYS.map(k => t(k))
 
-  // v4 P6 i18n: while the graph is running, `progress` is just the English
-  // _STEP_LABELS sentence the backend also sent structurally on the node
-  // event. Prefer the localised sentence keyed off the node id; an id the
-  // dictionary does not know degrades to the server's own label, and with no
-  // node active at all we are back to the plain `progress` string.
-  const activity = nodeLabel(pipelineActive, pipelineLabel) || progress || t('preview.working')
+  const activity = activityLine(pipelineActive, pipelineLabel, progressKey, progress) || t('preview.working')
 
   // VN Preview mode takes over the entire panel
   if (vnPreview) return <VNPreview />

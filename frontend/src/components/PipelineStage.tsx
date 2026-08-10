@@ -1,6 +1,6 @@
 import useStore from '../store'
 import PipelineGraph from './PipelineGraph'
-import { useT, useNodeLabel } from '../i18n/useT'
+import { useT, useActivityLine } from '../i18n/useT'
 
 interface SceneLike { id: string; title?: string }
 
@@ -9,18 +9,13 @@ interface SceneLike { id: string; title?: string }
  *  pipeline is the product's differentiator and was previously invisible. */
 export default function PipelineStage() {
   const t = useT()
-  const nodeLabel = useNodeLabel()
-  const { pipelineActive, pipelineLabel, progress, elapsed, blackboard, tokenUsage, streamActive, toggleVNPreview } = useStore()
+  const activityLine = useActivityLine()
+  const { pipelineActive, pipelineLabel, progress, progressKey, elapsed, blackboard, tokenUsage, streamActive, toggleVNPreview } = useStore()
   const scenes = (blackboard.scene_scripts as SceneLike[] | undefined) ?? []
   const maxScenes = useStore(s => s.config.max_scenes)
   const slots = Math.max(maxScenes, scenes.length)
 
-  // Prefer the localised sentence keyed off the structured node id. The
-  // backend deliberately keeps emitting English prose (it also feeds
-  // `progress`, which non-UI consumers read), so translation lives here.
-  // An id the dictionary does not know degrades to the server's own label;
-  // with no node active at all we fall back to `progress`.
-  const headline = nodeLabel(pipelineActive, pipelineLabel) || progress || t('preview.working')
+  const headline = activityLine(pipelineActive, pipelineLabel, progressKey, progress) || t('preview.working')
 
   return (
     <div className="flex flex-col h-full p-6 gap-6">

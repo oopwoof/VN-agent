@@ -42,6 +42,33 @@ export function useTVars(): (
  *  as returning `string`, but a key outside `TKey` resolves to undefined at
  *  runtime, so the guard is load-bearing.
  */
+/** The one-line "what is happening right now" string, with a single precedence
+ *  chain shared by PipelineStage and PreviewPanel (they previously carried
+ *  identical copy-pasted expressions).
+ *
+ *  Order: the running graph node, then the phase the store is in, then the raw
+ *  server progress string, then a generic fallback. The node wins because it is
+ *  the most specific thing we know; `progress` survives underneath because it
+ *  can carry server prose that has no key. */
+export function useActivityLine(): (
+  node: string | null,
+  nodeFallback: string,
+  progressKey: TKey | null,
+  progress: string,
+) => string {
+  const lang = useStore(s => s.lang)
+  const nodeLabel = useNodeLabel()
+  return (node, nodeFallback, progressKey, progress) => {
+    const fromNode = nodeLabel(node, '')
+    if (fromNode) return fromNode
+    if (progressKey) {
+      const phase: string | undefined = dict[lang][progressKey] ?? dict.zh[progressKey]
+      if (phase) return phase
+    }
+    return nodeFallback || progress
+  }
+}
+
 export function useNodeLabel(): (node: string | null, fallback?: string) => string {
   const lang = useStore(s => s.lang)
   return (node, fallback = '') => {

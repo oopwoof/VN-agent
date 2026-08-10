@@ -18,7 +18,11 @@ export type PipelineNodeState = 'pending' | 'active' | 'done'
 interface AppState {
   currentJobId: string | null
   step: AppStep
+  // `progress` stays the raw (English / server-supplied) string: it is what
+  // survives when a phase has no key. `progressKey` is what the UI prefers —
+  // same content/tkey split the chat log uses.
   progress: string
+  progressKey: TKey | null
   errors: string[]
   blackboard: Record<string, unknown>
   messages: ChatMessage[]
@@ -141,6 +145,7 @@ const useStore = create<AppState>((set, get) => ({
   currentJobId: null,
   step: 'idle',
   progress: '',
+  progressKey: null,
   errors: [],
   blackboard: {},
   messages: [keyedMsg('system', 'chat.msg.welcome')],
@@ -170,7 +175,7 @@ const useStore = create<AppState>((set, get) => ({
     stopSceneStream()
     addMsg(get, set, 'user', config.theme)
     set({
-      step: 'generating_setting', progress: 'Creating project...', errors: [], blackboard: {},
+      step: 'generating_setting', progress: 'Creating project...', progressKey: 'progress.creatingProject', errors: [], blackboard: {},
       assets: null, vnPreview: false, streamActive: false,
       pipelineNodes: {}, pipelineActive: null, pipelineLabel: '', tokenUsage: null,
     })
@@ -183,7 +188,7 @@ const useStore = create<AppState>((set, get) => ({
       get().refreshJobs()
 
       addKeyedMsg(get, set, 'system', 'chat.msg.directorPlanning')
-      set({ progress: 'Director planning story structure' })
+      set({ progress: 'Director planning story structure', progressKey: 'progress.directorPlanning' })
       const { blackboard } = await api.generateSetting(job_id)
       stopTimers()
 
@@ -191,14 +196,14 @@ const useStore = create<AppState>((set, get) => ({
 
       if (get().config.fast_mode) {
         // Fast mode: skip setting review, auto-confirm
-        set({ blackboard, progress: 'Fast mode: auto-confirming setting...' })
+        set({ blackboard, progress: 'Fast mode: auto-confirming setting...', progressKey: 'progress.fastAutoConfirm' })
         addKeyedMsg(get, set, 'system', 'chat.msg.fastModeStory', { title: ws?.title || 'Untitled' })
         get().refreshJobs()
         await get().confirmSetting()
         return
       }
 
-      set({ step: 'setting_review', blackboard, progress: 'Setting ready for review' })
+      set({ step: 'setting_review', blackboard, progress: 'Setting ready for review', progressKey: 'progress.settingReady' })
       addKeyedMsg(get, set, 'system', 'chat.msg.outlineReady', { title: ws?.title || 'Untitled' })
       get().refreshJobs()
     } catch (e) {
@@ -220,6 +225,7 @@ const useStore = create<AppState>((set, get) => ({
     set({
       step: 'generating_script',
       progress: 'Writer creating dialogue...',
+      progressKey: 'progress.writerCreating',
       pipelineNodes: { ...get().pipelineNodes, director: 'done' },
     })
     startElapsed(set, get)
@@ -334,14 +340,14 @@ const useStore = create<AppState>((set, get) => ({
     const { currentJobId } = get()
     if (!currentJobId) return
 
-    set({ step: 'generating_setting', progress: 'Regenerating setting...' })
+    set({ step: 'generating_setting', progress: 'Regenerating setting...', progressKey: 'progress.regeneratingSetting' })
     startElapsed(set, get)
     addKeyedMsg(get, set, 'system', 'chat.msg.regenerating')
 
     try {
       const { blackboard } = await api.generateSetting(currentJobId)
       stopTimers()
-      set({ step: 'setting_review', blackboard, progress: 'Setting ready for review' })
+      set({ step: 'setting_review', blackboard, progress: 'Setting ready for review', progressKey: 'progress.settingReady' })
       addKeyedMsg(get, set, 'system', 'chat.msg.settingRegenerated')
     } catch (e) {
       stopTimers()
@@ -353,13 +359,13 @@ const useStore = create<AppState>((set, get) => ({
     const { currentJobId } = get()
     if (!currentJobId) return
 
-    set({ step: 'compiling', progress: 'Compiling Ren\'Py project...' })
+    set({ step: 'compiling', progress: 'Compiling Ren\'Py project...', progressKey: 'progress.compiling' })
     addKeyedMsg(get, set, 'system', 'chat.msg.scriptConfirmed')
 
     try {
       await api.compile(currentJobId)
       await get().fetchAssets()
-      set({ step: 'asset_management', progress: 'Assets ready for review' })
+      set({ step: 'asset_management', progress: 'Assets ready for review', progressKey: 'progress.assetsReady' })
       addKeyedMsg(get, set, 'system', 'chat.msg.compiled')
       get().refreshJobs()
     } catch (e) {
@@ -386,11 +392,11 @@ const useStore = create<AppState>((set, get) => ({
   recompile: async () => {
     const { currentJobId } = get()
     if (!currentJobId) return
-    set({ step: 'compiling', progress: 'Re-compiling with updated assets...' })
+    set({ step: 'compiling', progress: 'Re-compiling with updated assets...', progressKey: 'progress.recompiling' })
     try {
       await api.compile(currentJobId)
       await get().fetchAssets()
-      set({ step: 'completed', progress: 'Project ready for download' })
+      set({ step: 'completed', progress: 'Project ready for download', progressKey: 'progress.projectReady' })
       addKeyedMsg(get, set, 'system', 'chat.msg.recompiled')
       get().refreshJobs()
     } catch (e) {

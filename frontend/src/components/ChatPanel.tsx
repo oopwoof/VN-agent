@@ -212,14 +212,19 @@ export default function ChatPanel() {
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
             placeholder={chatOps ? t('chat.placeholderChatOps') : t('chat.placeholderTheme')}
             disabled={busy || !!pendingChatTurn}
-            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm
+            className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm
               text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2
               focus:ring-indigo-500 disabled:opacity-50"
           />
+          {/* shrink-0 + nowrap: the v2 shell narrows this column to 20rem while
+              the pipeline runs, and without these the buttons are the flex
+              items that give — 「发送」wrapped to two lines and 「一键生成」
+              was clipped by the column edge. The input absorbs the squeeze
+              instead, which needs min-w-0 to shrink past its content width. */}
           <button
             onClick={handleSend}
             disabled={!input.trim() || busy || !!pendingChatTurn}
-            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium
+            className="shrink-0 whitespace-nowrap px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium
               rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {busy ? t('chat.sending') : t('chat.send')}
@@ -232,7 +237,7 @@ export default function ChatPanel() {
               onClick={handleAutopilot}
               disabled={!input.trim() || busy || !!pendingChatTurn}
               title={t('chat.autopilotHint')}
-              className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium
+              className="shrink-0 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium
                 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
             >
               ⚡ {t('chat.autopilot')}
