@@ -176,6 +176,19 @@ export const dict = {
     'feedback.thumbsUp': '赞',
     'feedback.thumbsDown': '踩',
     'feedback.submitFailed': '提交失败',
+    // ── 流水线节点（对应 agents/graph.py 的节点名）──
+    'node.director': '导演',
+    'node.structure_reviewer': '结构审校',
+    'node.state_orchestrator': '状态编排',
+    'node.thinking_fanout': '分场推理',
+    'node.cross_ref_sync': '交叉引用',
+    'node.writer': '编剧',
+    'node.reviewer': '质量审校',
+    'node.asset_generation': '素材生成',
+    'pipeline.revising': '修订中',
+    'pipeline.skipped': '已跳过',
+    'pipeline.scenes': '场景',
+    'pipeline.cost': '花费',
   },
   en: {
     // ── ChatPanel ──
@@ -349,6 +362,19 @@ export const dict = {
     'feedback.thumbsUp': 'Thumbs up',
     'feedback.thumbsDown': 'Thumbs down',
     'feedback.submitFailed': 'Submit failed',
+    // ── pipeline nodes (mirrors agents/graph.py node names) ──
+    'node.director': 'Director',
+    'node.structure_reviewer': 'Structure',
+    'node.state_orchestrator': 'State',
+    'node.thinking_fanout': 'Reasoning',
+    'node.cross_ref_sync': 'Cross-ref',
+    'node.writer': 'Writer',
+    'node.reviewer': 'Review',
+    'node.asset_generation': 'Assets',
+    'pipeline.revising': 'revising',
+    'pipeline.skipped': 'skipped',
+    'pipeline.scenes': 'Scenes',
+    'pipeline.cost': 'Cost',
   },
 } as const
 

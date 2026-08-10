@@ -167,7 +167,16 @@ const useStore = create<AppState>((set, get) => ({
     const { currentJobId } = get()
     if (!currentJobId) return
 
-    set({ step: 'generating_script', progress: 'Writer creating dialogue...' })
+    // `director` never reports over the node stream: publish_node is wired
+    // only into _run_script_generation, which enters the graph with the
+    // outline already built ("skip director since we already have plan",
+    // web/app.py). Reaching this call means director HAS run, so seed it as
+    // done rather than leaving the pipeline's first node stuck on 'pending'.
+    set({
+      step: 'generating_script',
+      progress: 'Writer creating dialogue...',
+      pipelineNodes: { ...get().pipelineNodes, director: 'done' },
+    })
     startElapsed(set, get)
     addMsg(get, set, 'system', 'Setting confirmed. Writer is creating dialogue...')
 

@@ -15,6 +15,26 @@
 
 ## [Unreleased]
 
+### 2026-08-10 | 杂项 - 2026-08-10 22:59
+
+**变更文件** (3 个):
+**其他变更** (3 文件):
+  - `frontend/src/components/PipelineGraph.tsx`
+  - `frontend/src/i18n/dict.ts`
+  - `frontend/src/store.ts`
+
+**变更统计**:
+```
+frontend/src/components/PipelineGraph.tsx | 88 +++++++++++++++++++++++++++++++
+ frontend/src/i18n/dict.ts                 | 26 +++++++++
+ frontend/src/store.ts                     | 11 +++-
+ 3 files changed, 124 insertions(+), 1 deletion(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-10 | 杂项 - 2026-08-10 22:56
 
 **变更文件** (2 个):
