@@ -15,6 +15,24 @@
 
 ## [Unreleased]
 
+### 2026-08-10 | 杂项 - 2026-08-10 23:22
+
+**变更文件** (2 个):
+**其他变更** (2 文件):
+  - `frontend/src/components/SceneCard.tsx`
+  - `frontend/src/i18n/dict.ts`
+
+**变更统计**:
+```
+frontend/src/components/SceneCard.tsx | 84 +++++++++++++++++++++++++++++++++++
+ frontend/src/i18n/dict.ts             | 10 +++++
+ 2 files changed, 94 insertions(+)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-10 | 杂项 - 2026-08-10 23:20
 
 **变更文件** (4 个):

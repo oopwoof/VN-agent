@@ -227,6 +227,11 @@ export const dict = {
     'nodeLabel.writer': '编剧正在创作对白',
     'nodeLabel.reviewer': '审校正在检查质量',
     'nodeLabel.asset_generation': '正在生成素材（角色、场景、音乐）',
+    // ── SceneCard ──
+    'card.lines': '句对白',
+    'card.branches': '个分支',
+    'card.play': '从这里播放',
+    'card.rewrite': '改写这一场',
   },
   en: {
     // ── ChatPanel ──
@@ -451,6 +456,11 @@ export const dict = {
     'nodeLabel.writer': 'Writer creating dialogue',
     'nodeLabel.reviewer': 'Reviewer checking quality',
     'nodeLabel.asset_generation': 'Generating assets (characters, scenes, music)',
+    // ── SceneCard ──
+    'card.lines': 'lines',
+    'card.branches': 'branches',
+    'card.play': 'Play from here',
+    'card.rewrite': 'Rewrite this scene',
   },
 } as const
 
