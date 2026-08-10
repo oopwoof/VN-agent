@@ -15,6 +15,22 @@
 
 ## [Unreleased]
 
+### 2026-08-11 | 杂项 - 2026-08-11 00:21
+
+**变更文件** (1 个):
+**其他变更** (1 文件):
+  - `frontend/src/shell/useShellVariant.ts`
+
+**变更统计**:
+```
+frontend/src/shell/useShellVariant.ts | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-11 | 杂项 - 2026-08-11 00:10
 
 **变更文件** (6 个):

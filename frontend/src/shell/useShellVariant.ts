@@ -4,10 +4,9 @@ export type ShellVariant = 'v1' | 'v2'
 
 const STORAGE_KEY = 'vn-agent.shell'
 
-// Stays 'v1' until the L5 cutover task flips it. Keeping the old shell as
-// the default through L3/L4 means an in-progress redesign can never break
-// the working UI — including during a live demo.
-const DEFAULT_VARIANT: ShellVariant = 'v1'
+// L5 cutover: v2 is now the default. ?shell=v1 still reaches the legacy
+// shell until Task 15 removes it.
+const DEFAULT_VARIANT: ShellVariant = 'v2'
 
 function isVariant(value: string | null): value is ShellVariant {
   return value === 'v1' || value === 'v2'
