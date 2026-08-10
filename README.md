@@ -33,8 +33,21 @@ a creator can actually sit in front of.
 | **Autopilot** | 一句话主题 → 零点击 → 直接进播放器 | 完整 demo 闭环 |
 | **P6 工作台改版** | 流水线实时可视化、故事板、形态驱动布局、中英双语 | 把产品最值钱的东西（多 Agent 协作）从不可见变成主舞台 |
 
-**工作台界面**（`npm run dev` 后访问 `localhost:5173`）：流水线剧场实时点亮每个
-Agent 节点、场景卡片网格、卡片内改写、全幅播放器、中英实时切换。
+### 工作台界面
+
+`npm run dev` 后访问 `localhost:5173`。界面形态跟随工作阶段变化，而不是固定的左右分栏。
+
+**生成中——流水线剧场**：每个 Agent 节点由后端 `graph.astream()` 的真实事件驱动依次点亮，
+不是进度条动画。纯文本模式下 `素材生成` 显示「已跳过」而非一直转圈。
+
+![流水线剧场](./docs/v4/assets/workbench-pipeline-theatre.jpg)
+
+**完成后——全幅播放器**：Autopilot 零点击直达，工作台让位给作品本身。
+
+![播放器](./docs/v4/assets/workbench-player.jpg)
+
+> 两张截图都来自 mock 模式的一次真实运行（`calls: 0`，零 API 花费）。
+> 演示步骤见 [docs/v4/SHOWCASE_v4.md](./docs/v4/SHOWCASE_v4.md)。
 
 ---
 

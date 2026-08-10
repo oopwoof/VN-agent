@@ -15,6 +15,25 @@
 
 ## [Unreleased]
 
+### 2026-08-11 | 文档 - 2026-08-11 02:26
+
+**变更文件** (4 个):
+**其他变更** (1 文件):
+  - `README.md`
+
+**变更统计**:
+```
+README.md                                     |  17 +++++++++++++++--
+ docs/v4/SHOWCASE_v4.md                        |  14 ++++++++++++--
+ docs/v4/assets/workbench-pipeline-theatre.jpg | Bin 0 -> 59296 bytes
+ docs/v4/assets/workbench-player.jpg           | Bin 0 -> 36232 bytes
+ 4 files changed, 27 insertions(+), 4 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-11 | 文档 - 2026-08-11 02:09
 
 **变更文件** (21 个):
