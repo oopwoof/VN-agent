@@ -43,6 +43,31 @@ _OUTPUT_DIR = os.environ.get("VN_AGENT_OUTPUT_DIR", "")
 _MOCK_MODE = os.environ.get("VN_AGENT_MOCK", "").lower() in ("1", "true", "yes")
 
 
+def _resolve_mock(requested: bool) -> bool:
+    """Resolve the effective mock flag for one request.
+
+    VN_AGENT_MOCK=1 is a hard floor: it can force mock ON, never off. That
+    makes the env var an actual guarantee rather than a partial one —
+    `mock_mode_var` is the single gate consulted by BOTH `ainvoke_llm`
+    (llm.py) and `image_gen.py`, so flooring it here covers every agent and
+    the image providers, not just the handful `_lifespan` patches.
+
+    The floor is applied per request rather than once in `_lifespan` because
+    a ContextVar set inside the lifespan coroutine is NOT inherited by
+    request handlers — each request runs in its own Task, which copies the
+    context at creation time from the server, not from lifespan. A
+    lifespan-level `mock_mode_var.set(...)` would silently do nothing.
+
+    Found 2026-08-11: `_lifespan` patched only 5 of the 10 agents that
+    import `ainvoke_llm` (missing structure_reviewer, state_orchestrator,
+    thinking, summarizer, baseline_runners) and never touched
+    `mock_mode_var`, so `VN_AGENT_MOCK=1` runs with `mock:false` in the body
+    still made real, billable calls — and image generation was not blocked
+    at all. Same class as the 2026-08-03 image_gen incident.
+    """
+    return bool(requested) or _MOCK_MODE
+
+
 @asynccontextmanager
 async def _lifespan(application: FastAPI):  # noqa: ARG001
     """Patch LLM calls with mock responses if VN_AGENT_MOCK is set."""
@@ -298,7 +323,7 @@ async def generate_setting(job_id: str):
     config = job.get("config", {})
     job_tracker = TokenTracker()
     tracker_token = current_tracker.set(job_tracker)
-    mock_token = mock_mode_var.set(bool(config.get("mock", False)))
+    mock_token = mock_mode_var.set(_resolve_mock(config.get("mock", False)))
     # P5 Autopilot: per-job Settings override, re-derived from the job's own
     # config blob (ContextVars don't propagate across separate HTTP requests,
     # so this must be re-set here — mirrors mock_token above, not set once
@@ -525,7 +550,7 @@ async def chat_preview(job_id: str, req: ChatMessageRequest):
     bb = job.get("blackboard", {})
     output_dir = job.get("output_dir", ".")
     # v4 P0-7 pattern: per-request mock, scoped to this call only.
-    mock_token = mock_mode_var.set(bool(job.get("config", {}).get("mock", False)))
+    mock_token = mock_mode_var.set(_resolve_mock(job.get("config", {}).get("mock", False)))
     try:
         result = await preview_turn(output_dir, bb, req.message)
     finally:
@@ -556,7 +581,7 @@ async def chat_execute(job_id: str, req: ChatTurnRequest):
         instruction=req.instruction, reasoning=req.reasoning,
         preview_text=req.preview_text, requires_confirmation=True,
     )
-    mock_token = mock_mode_var.set(bool(job.get("config", {}).get("mock", False)))
+    mock_token = mock_mode_var.set(_resolve_mock(job.get("config", {}).get("mock", False)))
     try:
         result = await _execute_turn(output_dir, preview)
     finally:
@@ -603,7 +628,7 @@ async def run_playtest_endpoint(job_id: str, req: PlaytestRunRequest = PlaytestR
     from vn_agent.playtest.agent import PlaytestError, run_playtest
     from vn_agent.services.llm import mock_mode_var
 
-    mock_token = mock_mode_var.set(bool(job.get("config", {}).get("mock", False)))
+    mock_token = mock_mode_var.set(_resolve_mock(job.get("config", {}).get("mock", False)))
     try:
         report = await run_playtest(output_dir, max_frames=req.max_frames)
     except PlaytestError as e:
@@ -1107,7 +1132,7 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
     job_tracker = TokenTracker()
     tracker_token = current_tracker.set(job_tracker)
     config = job.get("config", {})
-    mock_token = mock_mode_var.set(bool(config.get("mock", False)))
+    mock_token = mock_mode_var.set(_resolve_mock(config.get("mock", False)))
     # P5 Autopilot: same per-job Settings override as generate_setting() —
     # graph.astream() below runs entirely within this coroutine (no nested
     # create_task), so the ContextVar propagates correctly through
@@ -1156,6 +1181,10 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
                 if node_name != "__end__":
                     label = _STEP_LABELS.get(node_name, f"Running {node_name}")
                     store.update_status(job_id, "running", progress=label)
+                    # v4 P6: publish the node identity structurally so the
+                    # frontend can drive the pipeline view off real events
+                    # instead of substring-matching the progress string.
+                    job_events.publish_node(node_name, label)
                 if isinstance(chunk, dict):
                     final_state.update(chunk)
 
@@ -1332,8 +1361,17 @@ def _write_autopilot_run_meta(job_id: str, preset: str, run_start: datetime) -> 
 
 # ── Background runner ────────────────────────────────────────────────────────
 
+# One entry per node in agents/graph.py's compiled graph. Kept exhaustive by
+# tests/test_web/test_pipeline_labels.py — an unlabelled node falls back to
+# f"Running {node_name}", which leaks the internal identifier to users.
 _STEP_LABELS = {
     "director": "Director planning story structure",
+    "structure_reviewer": "Auditing story structure",
+    "director_step2_redo": "Director revising the scene plan",
+    "director_full_redo": "Director replanning the story",
+    "state_orchestrator": "Resolving scene state",
+    "thinking_fanout": "Planning scene-by-scene reasoning",
+    "cross_ref_sync": "Syncing cross-scene references",
     "writer": "Writer creating dialogue",
     "reviewer": "Reviewer checking quality",
     "asset_generation": "Generating assets (characters, scenes, music)",
@@ -1356,7 +1394,7 @@ async def _run_job(job_id: str, req: GenerateRequest, output_dir: Path) -> None:
 
         job_tracker = TokenTracker()
         tracker_token = current_tracker.set(job_tracker)
-        mock_token = mock_mode_var.set(bool(req.mock))
+        mock_token = mock_mode_var.set(_resolve_mock(req.mock))
         # P5 Autopilot: headless-caller parity with generate_setting/
         # _run_script_generation. The SPA never reaches this function
         # (interactive=True skips it) — this only matters for a caller that

@@ -15,6 +15,429 @@
 
 ## [Unreleased]
 
+### 2026-08-11 | 文档 - 2026-08-11 02:09
+
+**变更文件** (21 个):
+**其他变更** (8 文件):
+  - `.claude/settings.local.json`
+  - `.gitignore`
+  - `README.md`
+  - `data/autopilot/runs.jsonl`
+  - `eval_ollama_results.json`
+
+**变更统计**:
+```
+.claude/settings.local.json                |  35 --
+ .gitignore                                 |  21 ++
+ README.md                                  |  73 +++-
+ data/autopilot/runs.jsonl                  |   6 +
+ docs/ARCHITECTURE.md                       | 464 ++++++++++++++++++++++++
+ docs/AUDITS.md                             | 103 ++++++
+ docs/DESIGN_DECISIONS.md                   | 212 +++++++++++
+ docs/archive/DEV_LOG_legacy.md             | 407 +--------------------
+ docs/v3/BYTE_AI_PLATFORM_EVAL_INTERVIEW.md | 351 ++++++++++++++++++
+ docs/v3/SHOWCASE_v3.md                     | 293 +++++++++++++++
+ docs/v3/pipeline_graph.mmd                 |  36 ++
+ docs/v3/pipeline_graph.png                 | Bin 0 -> 42612 bytes
+ docs/v3/pipeline_writer_graph.mmd          |  24 ++
+ docs/v3/pipeline_writer_graph.png          | Bin 0 -> 20564 bytes
+ docs/v4/RESUME_BRIEF_v4.md                 | 564 +++++++++++++++++++++++++++++
+ docs/v4/RESUME_BRIEF_v4_CN.md              | 564 +++++++++++++++++++++++++++++
+ docs/v4/SHOWCASE_v4.md                     | 151 ++++++++
+ eval_ollama_results.json                   | 158 --------
+ eval_strategy_results.json                 |  93 -----
+ eval_structural_results.json               |  66 ----
+ scripts/dump_langgraph_diagram.py          |  52 +++
+ 21 files changed, 2912 insertions(+), 761 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-11 | 实现 - 2026-08-11 01:55
+
+**变更文件** (2 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/web/app.py`
+
+**测试变更** (1 文件):
+  - `tests/test_web/test_mock_floor.py`
+
+**变更统计**:
+```
+src/vn_agent/web/app.py           |  37 ++++++++++---
+ tests/test_web/test_mock_floor.py | 110 ++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 141 insertions(+), 6 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-11 | 杂项 - 2026-08-11 00:21
+
+**变更文件** (1 个):
+**其他变更** (1 文件):
+  - `frontend/src/shell/useShellVariant.ts`
+
+**变更统计**:
+```
+frontend/src/shell/useShellVariant.ts | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-11 | 杂项 - 2026-08-11 00:10
+
+**变更文件** (6 个):
+**其他变更** (6 文件):
+  - `frontend/src/components/ChatPanel.tsx`
+  - `frontend/src/components/PipelineStage.tsx`
+  - `frontend/src/components/PreviewPanel.tsx`
+  - `frontend/src/i18n/dict.ts`
+  - `frontend/src/i18n/useT.ts`
+
+**变更统计**:
+```
+frontend/src/components/ChatPanel.tsx     | 11 ++++++++---
+ frontend/src/components/PipelineStage.tsx | 13 ++++---------
+ frontend/src/components/PreviewPanel.tsx  | 13 ++++---------
+ frontend/src/i18n/dict.ts                 | 22 ++++++++++++++++++++++
+ frontend/src/i18n/useT.ts                 | 27 +++++++++++++++++++++++++++
+ frontend/src/store.ts                     | 26 ++++++++++++++++----------
+ 6 files changed, 81 insertions(+), 31 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-10 | 杂项 - 2026-08-10 23:35
+
+**变更文件** (5 个):
+**其他变更** (5 文件):
+  - `frontend/package-lock.json`
+  - `frontend/package.json`
+  - `frontend/src/components/PipelineGraph.tsx`
+  - `frontend/src/design/tokens.css`
+  - `frontend/src/shell/WorkbenchShell.tsx`
+
+**变更统计**:
+```
+frontend/package-lock.json                | 43 +++----------------------------
+ frontend/package.json                     |  1 -
+ frontend/src/components/PipelineGraph.tsx | 15 ++++-------
+ frontend/src/design/tokens.css            | 32 +++++++++++++++++++++++
+ frontend/src/shell/WorkbenchShell.tsx     | 20 +++++---------
+ 5 files changed, 46 insertions(+), 65 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-10 | 杂项 - 2026-08-10 23:26
+
+**变更文件** (1 个):
+**其他变更** (1 文件):
+  - `frontend/src/shell/WorkbenchShell.tsx`
+
+**变更统计**:
+```
+frontend/src/shell/WorkbenchShell.tsx | 92 ++++++++++++++++++++++++++++++++---
+ 1 file changed, 84 insertions(+), 8 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-10 | 杂项 - 2026-08-10 23:25
+
+**变更文件** (6 个):
+**其他变更** (6 文件):
+  - `frontend/src/components/SceneCard.tsx`
+  - `frontend/src/components/ScriptPanel.tsx`
+  - `frontend/src/components/StoryboardBoard.tsx`
+  - `frontend/src/components/VNPreview.tsx`
+  - `frontend/src/i18n/dict.ts`
+
+**变更统计**:
+```
+frontend/src/components/SceneCard.tsx       | 12 +++--
+ frontend/src/components/ScriptPanel.tsx     |  5 +-
+ frontend/src/components/StoryboardBoard.tsx | 79 +++++++++++++++++++++++++++++
+ frontend/src/components/VNPreview.tsx       |  5 +-
+ frontend/src/i18n/dict.ts                   |  6 +++
+ frontend/src/store.ts                       | 11 ++++
+ 6 files changed, 113 insertions(+), 5 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-10 | 杂项 - 2026-08-10 23:22
+
+**变更文件** (2 个):
+**其他变更** (2 文件):
+  - `frontend/src/components/SceneCard.tsx`
+  - `frontend/src/i18n/dict.ts`
+
+**变更统计**:
+```
+frontend/src/components/SceneCard.tsx | 84 +++++++++++++++++++++++++++++++++++
+ frontend/src/i18n/dict.ts             | 10 +++++
+ 2 files changed, 94 insertions(+)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-10 | 杂项 - 2026-08-10 23:20
+
+**变更文件** (4 个):
+**其他变更** (4 文件):
+  - `frontend/src/components/PipelineStage.tsx`
+  - `frontend/src/components/PreviewPanel.tsx`
+  - `frontend/src/components/StatusBar.tsx`
+  - `frontend/src/store.ts`
+
+**变更统计**:
+```
+frontend/src/components/PipelineStage.tsx | 89 +++++++++++++++++++++++++++++++
+ frontend/src/components/PreviewPanel.tsx  | 39 ++++++++++----
+ frontend/src/components/StatusBar.tsx     | 25 ++++-----
+ frontend/src/store.ts                     | 25 ++++++++-
+ 4 files changed, 151 insertions(+), 27 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-10 | 杂项 - 2026-08-10 23:12
+
+**变更文件** (8 个):
+**其他变更** (8 文件):
+  - `frontend/src/components/ChatPanel.tsx`
+  - `frontend/src/components/JobHistory.tsx`
+  - `frontend/src/components/PreviewPanel.tsx`
+  - `frontend/src/i18n/dict.ts`
+  - `frontend/src/i18n/interpolate.ts`
+
+**变更统计**:
+```
+frontend/src/components/ChatPanel.tsx    | 18 +++++--
+ frontend/src/components/JobHistory.tsx   |  2 +-
+ frontend/src/components/PreviewPanel.tsx | 14 ++++-
+ frontend/src/i18n/dict.ts                | 76 ++++++++++++++++++++++++++++
+ frontend/src/i18n/interpolate.ts         | 19 +++++++
+ frontend/src/i18n/useT.ts                | 42 +++++++++++++++
+ frontend/src/store.ts                    | 87 +++++++++++++++++++++++---------
+ frontend/src/types.ts                    | 10 ++++
+ 8 files changed, 239 insertions(+), 29 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-10 | 杂项 - 2026-08-10 22:59
+
+**变更文件** (3 个):
+**其他变更** (3 文件):
+  - `frontend/src/components/PipelineGraph.tsx`
+  - `frontend/src/i18n/dict.ts`
+  - `frontend/src/store.ts`
+
+**变更统计**:
+```
+frontend/src/components/PipelineGraph.tsx | 88 +++++++++++++++++++++++++++++++
+ frontend/src/i18n/dict.ts                 | 26 +++++++++
+ frontend/src/store.ts                     | 11 +++-
+ 3 files changed, 124 insertions(+), 1 deletion(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-10 | 杂项 - 2026-08-10 22:56
+
+**变更文件** (2 个):
+**其他变更** (2 文件):
+  - `frontend/src/api.ts`
+  - `frontend/src/store.ts`
+
+**变更统计**:
+```
+frontend/src/api.ts   |  5 +++++
+ frontend/src/store.ts | 36 ++++++++++++++++++++++++++++++++++--
+ 2 files changed, 39 insertions(+), 2 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-10 | 杂项 - 2026-08-10 22:48
+
+**变更文件** (4 个):
+**其他变更** (4 文件):
+  - `frontend/src/App.tsx`
+  - `frontend/src/shell/LegacyShell.tsx`
+  - `frontend/src/shell/WorkbenchShell.tsx`
+  - `frontend/src/shell/useShellVariant.ts`
+
+**变更统计**:
+```
+frontend/src/App.tsx                  | 53 ++++-----------------------------
+ frontend/src/shell/LegacyShell.tsx    | 55 +++++++++++++++++++++++++++++++++++
+ frontend/src/shell/WorkbenchShell.tsx | 53 +++++++++++++++++++++++++++++++++
+ frontend/src/shell/useShellVariant.ts | 44 ++++++++++++++++++++++++++++
+ 4 files changed, 157 insertions(+), 48 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-10 | 杂项 - 2026-08-10 00:06
+
+**变更文件** (9 个):
+**其他变更** (9 文件):
+  - `frontend/src/components/AssetPanel.tsx`
+  - `frontend/src/components/FeedbackWidget.tsx`
+  - `frontend/src/components/JobHistory.tsx`
+  - `frontend/src/components/PlaytestPane.tsx`
+  - `frontend/src/components/PreviewPanel.tsx`
+
+**变更统计**:
+```
+frontend/src/components/AssetPanel.tsx     |  97 +++++-----
+ frontend/src/components/FeedbackWidget.tsx |  12 +-
+ frontend/src/components/JobHistory.tsx     |  14 +-
+ frontend/src/components/PlaytestPane.tsx   |  47 ++---
+ frontend/src/components/PreviewPanel.tsx   |  19 +-
+ frontend/src/components/ScriptPanel.tsx    |  32 ++--
+ frontend/src/components/SettingPanel.tsx   |  34 ++--
+ frontend/src/components/StatusBar.tsx      |  19 +-
+ frontend/src/i18n/dict.ts                  | 274 +++++++++++++++++++++++++++++
+ 9 files changed, 411 insertions(+), 137 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-09 | 杂项 - 2026-08-09 21:50
+
+**变更文件** (2 个):
+**其他变更** (2 文件):
+  - `frontend/src/components/ChatPanel.tsx`
+  - `frontend/src/components/VNPreview.tsx`
+
+**变更统计**:
+```
+frontend/src/components/ChatPanel.tsx | 51 ++++++++++++++++++-----------------
+ frontend/src/components/VNPreview.tsx | 20 +++++++-------
+ 2 files changed, 38 insertions(+), 33 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-09 | 杂项 - 2026-08-09 21:24
+
+**变更文件** (4 个):
+**其他变更** (4 文件):
+  - `frontend/src/components/JobHistory.tsx`
+  - `frontend/src/i18n/dict.ts`
+  - `frontend/src/i18n/useT.ts`
+  - `frontend/src/store.ts`
+
+**变更统计**:
+```
+frontend/src/components/JobHistory.tsx | 21 +++++++--
+ frontend/src/i18n/dict.ts              | 82 ++++++++++++++++++++++++++++++++++
+ frontend/src/i18n/useT.ts              | 11 +++++
+ frontend/src/store.ts                  |  8 ++++
+ 4 files changed, 119 insertions(+), 3 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-09 | 杂项 - 2026-08-09 21:13
+
+**变更文件** (4 个):
+**其他变更** (4 文件):
+  - `frontend/package-lock.json`
+  - `frontend/package.json`
+  - `frontend/src/design/tokens.css`
+  - `frontend/src/index.css`
+
+**变更统计**:
+```
+frontend/package-lock.json     | 53 ++++++++++++++++++++++++++++++++--
+ frontend/package.json          |  2 ++
+ frontend/src/design/tokens.css | 65 ++++++++++++++++++++++++++++++++++++++++++
+ frontend/src/index.css         |  1 +
+ 4 files changed, 118 insertions(+), 3 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-09 | 实现 - 2026-08-09 21:05
+
+**变更文件** (2 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/web/app.py`
+
+**测试变更** (1 文件):
+  - `tests/test_web/test_pipeline_labels.py`
+
+**变更统计**:
+```
+src/vn_agent/web/app.py                | 13 +++++++++++++
+ tests/test_web/test_pipeline_labels.py | 26 ++++++++++++++++++++++++++
+ 2 files changed, 39 insertions(+)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-09 | 实现 - 2026-08-09 20:55
+
+**变更文件** (2 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/services/job_events.py`
+
+**测试变更** (1 文件):
+  - `tests/test_services/test_job_events.py`
+
+**变更统计**:
+```
+src/vn_agent/services/job_events.py    | 17 +++++++
+ tests/test_services/test_job_events.py | 87 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 104 insertions(+)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-09 | 杂项 - 2026-08-09 20:50
 
 **变更文件** (12 个):

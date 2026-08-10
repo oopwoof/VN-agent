@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import useStore from '../store'
 import FeedbackWidget from './FeedbackWidget'
+import { useT } from '../i18n/useT'
 
 interface DialogueLine { character_id: string | null; text: string; emotion: string }
 interface Branch { text: string; next_scene_id: string }
@@ -12,10 +13,14 @@ interface SceneScript {
 
 export default function VNPreview() {
   const { blackboard, currentJobId, toggleVNPreview } = useStore()
+  const t = useT()
   const scenes = (blackboard.scene_scripts || []) as SceneScript[]
   const chars = (blackboard.characters || blackboard._characters_json || {}) as Record<string, { name?: string; color?: string }>
 
-  const [sceneIdx, setSceneIdx] = useState(0)
+  // Storyboard "Play from here" sets playFromScene before flipping vnPreview,
+  // so the player mounts already positioned on the picked scene.
+  const playFromScene = useStore(s => s.playFromScene)
+  const [sceneIdx, setSceneIdx] = useState(playFromScene)
   const [lineIdx, setLineIdx] = useState(-1) // -1 = scene title card
   const [ended, setEnded] = useState(false)
 
@@ -55,7 +60,7 @@ export default function VNPreview() {
       <div className="absolute top-2 right-2 z-20">
         <button onClick={toggleVNPreview}
           className="px-3 py-1 bg-gray-800/80 hover:bg-gray-700 text-gray-300 text-xs rounded transition-colors">
-          Back to Editor
+          {t('vn.backToEditor')}
         </button>
       </div>
 
@@ -91,8 +96,8 @@ export default function VNPreview() {
         {lineIdx === -1 && (
           <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/60">
             <div className="text-center">
-              <h2 className="text-2xl font-bold text-white mb-2">{scene.title}</h2>
-              <p className="text-sm text-gray-400">Click to start</p>
+              <h2 className="face-narrative text-2xl font-bold text-white mb-2">{scene.title}</h2>
+              <p className="text-sm text-gray-400">{t('vn.clickToStart')}</p>
             </div>
           </div>
         )}
@@ -103,9 +108,9 @@ export default function VNPreview() {
             {charName && (
               <p className="text-sm font-bold mb-1" style={{ color: charColor }}>{charName}</p>
             )}
-            <p className="text-base text-white leading-relaxed">{line.text}</p>
+            <p className="face-narrative text-base text-white">{line.text}</p>
             {!showBranches && (
-              <p className="text-[10px] text-gray-500 mt-2 text-right">Click to continue</p>
+              <p className="text-[10px] text-gray-500 mt-2 text-right">{t('vn.clickToContinue')}</p>
             )}
           </div>
         )}
@@ -126,10 +131,10 @@ export default function VNPreview() {
         {ended && (
           <div className="absolute inset-0 flex items-center justify-center z-20 bg-black/80">
             <div className="text-center">
-              <h2 className="text-2xl font-bold text-white mb-4">Fin</h2>
+              <h2 className="text-2xl font-bold text-white mb-4">{t('vn.fin')}</h2>
               <button onClick={toggleVNPreview}
                 className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors">
-                Back to Editor
+                {t('vn.backToEditor')}
               </button>
             </div>
           </div>
@@ -138,8 +143,8 @@ export default function VNPreview() {
 
       {/* Status */}
       <div className="px-4 py-1 bg-gray-950 text-[10px] text-gray-600 flex justify-between">
-        <span>Scene {sceneIdx + 1}/{scenes.length}: {scene.title}</span>
-        <span>Line {Math.max(lineIdx + 1, 0)}/{scene.dialogue.length}</span>
+        <span>{t('vn.scene')} {sceneIdx + 1}/{scenes.length}: {scene.title}</span>
+        <span>{t('vn.line')} {Math.max(lineIdx + 1, 0)}/{scene.dialogue.length}</span>
       </div>
     </div>
   )

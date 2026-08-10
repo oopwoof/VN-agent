@@ -35,6 +35,18 @@
 
 **Task 1 开始前**先与用户确认这两项是单独提交还是保留在工作区。若保留，后续所有 `git add` **必须逐文件指定路径**，禁止 `git add -A` / `git add .`，避免把它们卷进改版提交。
 
+> **2026-08-09 更新**：这两个修复已分别提交为 `645c175`（`store.ts` 轮询互斥）与 `8573753`（种子图 CJK 字体）。工作区剩余的未提交改动仍与本计划无关，逐文件 `git add` 的纪律继续适用。
+
+### `docs/CHANGELOG.md` 会出现在每个代码提交里（预期行为，非违规）
+
+仓库配置了 `core.hooksPath=.githooks`，`.githooks/pre-commit` 会在任何**非文档**文件进入暂存区时运行 `scripts/update_docs.py`，后者自行 `git add docs/CHANGELOG.md`。因此**每个代码提交都会额外包含 `docs/CHANGELOG.md`**，这不是实施者越权。
+
+绕过它需要 `--no-verify`，而跳过钩子是被禁止的。所以：
+
+- 各任务「只允许改动 X、Y 两个文件」一类的约束，**隐含允许 `docs/CHANGELOG.md`**。
+- 实施者在报告里应把钩子新增的文件**显式列为一条偏差**，而不是写「无偏差」再在别处补一句。
+- 审查者不应把 `docs/CHANGELOG.md` 出现在 diff 里判为违规。
+
 ---
 
 ## File Structure

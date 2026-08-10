@@ -168,6 +168,9 @@ const api = {
   // manually — it self-closes on 'done'/'failed'.
   streamScenes(jobId: string, handlers: {
     onScene: (scene: Record<string, unknown>) => void
+    // v4 P6: graph-node transitions, published alongside scene_ready on the
+    // same stream. Optional so existing callers are unaffected.
+    onNode?: (node: string, label: string) => void
     onDone?: () => void
     onError?: (error?: string) => void
   }): EventSource {
@@ -177,6 +180,8 @@ const api = {
         const data = JSON.parse(ev.data)
         if (data.event === 'scene_ready') {
           handlers.onScene(data.scene)
+        } else if (data.event === 'node') {
+          handlers.onNode?.(data.node, data.label)
         } else if (data.event === 'done') {
           handlers.onDone?.()
           es.close()

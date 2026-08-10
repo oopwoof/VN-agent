@@ -3,22 +3,14 @@ import useStore from '../store'
 import api, { type UploadResult } from '../api'
 import type { AssetEntry } from '../types'
 import PlaytestPane from './PlaytestPane'
+import { useT } from '../i18n/useT'
 
 type Tab = 'backgrounds' | 'characters' | 'bgm' | 'world_docs' | 'playtest'
-
-// v4 P0-7: text-upload license options — labels the creator picks from
-// so the export gate (P0-4) can trust the metadata later. Matches the
-// backend whitelist in assets/license_gate.py.
-const _LICENSE_OPTIONS: { value: string; label: string }[] = [
-  { value: 'user_owned', label: '我自己写的（user_owned）' },
-  { value: 'CC0', label: 'CC0 / 公共领域' },
-  { value: 'CC-BY', label: 'CC-BY 署名' },
-  { value: 'CC-BY-SA', label: 'CC-BY-SA 相同方式共享' },
-]
 
 const _TEXT_ACCEPT = '.md,.txt,.markdown,.pdf,.docx'
 
 function AssetCard({ asset, onUpload, type }: { asset: AssetEntry; onUpload: (file: File) => void; type: Tab }) {
+  const t = useT()
   const [dragOver, setDragOver] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -26,7 +18,7 @@ function AssetCard({ asset, onUpload, type }: { asset: AssetEntry; onUpload: (fi
 
   const handleFile = (file: File) => {
     const maxSize = type === 'bgm' ? 10 * 1024 * 1024 : 5 * 1024 * 1024
-    if (file.size > maxSize) { alert(`File too large (max ${maxSize / 1024 / 1024}MB)`); return }
+    if (file.size > maxSize) { alert(`${t('asset.fileTooLarge')}${maxSize / 1024 / 1024}MB`); return }
     onUpload(file)
   }
 
@@ -52,7 +44,7 @@ function AssetCard({ asset, onUpload, type }: { asset: AssetEntry; onUpload: (fi
       {type !== 'bgm' ? (
         <div className="aspect-video bg-gray-950 flex items-center justify-center">
           {asset.is_placeholder ? (
-            <span className="text-gray-700 text-xs">No image</span>
+            <span className="text-gray-700 text-xs">{t('asset.noImage')}</span>
           ) : (
             <img src={asset.url} alt={label} className="w-full h-full object-cover" />
           )}
@@ -74,14 +66,14 @@ function AssetCard({ asset, onUpload, type }: { asset: AssetEntry; onUpload: (fi
       <div className="px-3 py-2 flex items-center justify-between">
         <span className="text-xs text-gray-400 truncate">{label}</span>
         {asset.is_placeholder && (
-          <span className="text-[9px] bg-yellow-900/50 text-yellow-400 px-1.5 py-0.5 rounded">placeholder</span>
+          <span className="text-[9px] bg-yellow-900/50 text-yellow-400 px-1.5 py-0.5 rounded">{t('asset.placeholder')}</span>
         )}
       </div>
 
       {/* Drag overlay */}
       {dragOver && (
         <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center">
-          <span className="text-indigo-300 text-sm font-medium">Drop to upload</span>
+          <span className="text-indigo-300 text-sm font-medium">{t('asset.dropToUpload')}</span>
         </div>
       )}
     </div>
@@ -96,6 +88,13 @@ function AssetCard({ asset, onUpload, type }: { asset: AssetEntry; onUpload: (fi
 type UploadSummary = NonNullable<UploadResult['summary']>
 
 function WorldDocsPane({ jobId }: { jobId: string }) {
+  const t = useT()
+  const licenseOptions: { value: string; label: string }[] = [
+    { value: 'user_owned', label: t('asset.licenseUserOwned') },
+    { value: 'CC0', label: t('asset.licenseCC0') },
+    { value: 'CC-BY', label: t('asset.licenseCCBY') },
+    { value: 'CC-BY-SA', label: t('asset.licenseCCBYSA') },
+  ]
   const [license, setLicense] = useState<string>('user_owned')
   const [dragOver, setDragOver] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -129,7 +128,7 @@ function WorldDocsPane({ jobId }: { jobId: string }) {
   const doUpload = async (file: File) => {
     setError(null)
     if (file.size > 20 * 1024 * 1024) {
-      setError('文件超过 20 MB — 请拆分或压缩')
+      setError(t('asset.textFileTooLarge'))
       return
     }
     // Backend expects an asset_id token — derive one from the filename
@@ -163,7 +162,7 @@ function WorldDocsPane({ jobId }: { jobId: string }) {
       }
       setSummary(s)
     } catch (e) {
-      setError(`删除失败：${e}`)
+      setError(`${t('asset.deleteFailed')}${e}`)
     } finally {
       setDeleting(d => ({ ...d, [filename]: false }))
     }
@@ -171,7 +170,7 @@ function WorldDocsPane({ jobId }: { jobId: string }) {
 
   const clearAll = async () => {
     if (!summary || summary.chunks === 0) return
-    if (!confirm(`将清空当前 job 的全部 ${summary.chunks} 块上传素材，确认？`)) return
+    if (!confirm(`${t('asset.clearAllConfirmPrefix')}${summary.chunks}${t('asset.clearAllConfirmSuffix')}`)) return
     setError(null)
     try {
       const res = await api.deleteUpload(jobId)  // no filename → clear all
@@ -183,7 +182,7 @@ function WorldDocsPane({ jobId }: { jobId: string }) {
       }
       setSummary(s)
     } catch (e) {
-      setError(`清空失败：${e}`)
+      setError(`${t('asset.clearFailed')}${e}`)
     }
   }
 
@@ -195,18 +194,17 @@ function WorldDocsPane({ jobId }: { jobId: string }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="text-[11px] text-gray-500 leading-relaxed">
-        上传世界观 / 角色设定 / 参考文档，会被自动切块并进入 RAG，下一次生成时 Writer 可以引用。
-        支持 md / txt / pdf / docx，最大 20 MB。中英文均自动分块（CJK 密度触发中文分块设置）。
+        {t('asset.uploadIntro')}
       </div>
 
       <div className="flex items-center gap-2">
-        <label className="text-xs text-gray-400 whitespace-nowrap">授权声明</label>
+        <label className="text-xs text-gray-400 whitespace-nowrap">{t('asset.licenseLabel')}</label>
         <select
           value={license}
           onChange={e => setLicense(e.target.value)}
           className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
         >
-          {_LICENSE_OPTIONS.map(o => (
+          {licenseOptions.map(o => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
@@ -236,17 +234,17 @@ function WorldDocsPane({ jobId }: { jobId: string }) {
           onChange={e => { const f = e.target.files?.[0]; if (f) setStaged(f) }}
         />
         {uploading ? (
-          <div className="text-sm text-indigo-300">正在切块 + 嵌入…</div>
+          <div className="text-sm text-indigo-300">{t('asset.chunking')}</div>
         ) : staged ? (
           <>
-            <div className="text-sm text-emerald-200 truncate">已选择：{staged.name}</div>
+            <div className="text-sm text-emerald-200 truncate">{t('asset.selected')}{staged.name}</div>
             <div className="text-[10px] text-gray-500 mt-1">
-              {(staged.size / 1024).toFixed(1)} KB — 授权 “{license}”
+              {(staged.size / 1024).toFixed(1)} KB {t('asset.licensedAs')} "{license}"
             </div>
           </>
         ) : (
           <>
-            <div className="text-sm text-gray-300">拖拽文件到这里，或点击选择</div>
+            <div className="text-sm text-gray-300">{t('asset.dragOrClick')}</div>
             <div className="text-[10px] text-gray-500 mt-2">{_TEXT_ACCEPT}</div>
           </>
         )}
@@ -258,46 +256,46 @@ function WorldDocsPane({ jobId }: { jobId: string }) {
             onClick={() => doUpload(staged)}
             className="flex-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs py-2 font-medium"
           >
-            确认上传 · {staged.name}
+            {t('asset.confirmUpload')}{staged.name}
           </button>
           <button
             onClick={() => setStaged(null)}
             className="rounded border border-gray-700 hover:border-gray-500 text-xs px-3 text-gray-300"
           >
-            取消选中
+            {t('asset.cancelSelection')}
           </button>
         </div>
       )}
 
       {error && (
         <div className="rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-300">
-          上传失败：{error}
+          {t('asset.uploadFailed')}{error}
         </div>
       )}
 
       {lastResult && (
         <div className="rounded border border-emerald-900 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-200">
-          最近上传：
+          {t('asset.lastUpload')}
           <span className="ml-1 text-emerald-100">{lastResult.asset_id}</span>
-          — 切块 {lastResult.chunks ?? '?'} 个
-          {lastResult.cjk_dominant ? '（中文分块）' : '（英文分块）'}
+          {t('asset.chunkedInto')} {lastResult.chunks ?? '?'} {t('asset.chunkUnit')}
+          {lastResult.cjk_dominant ? t('asset.chunkModeCJK') : t('asset.chunkModeLatin')}
         </div>
       )}
 
       {summary && summary.chunks > 0 && (
         <div className="rounded border border-gray-800 bg-gray-900/60 p-3 space-y-2">
           <div className="flex items-center justify-between">
-            <div className="text-xs text-gray-400">当前 job 累积</div>
+            <div className="text-xs text-gray-400">{t('asset.currentJobTotal')}</div>
             <button
               onClick={clearAll}
               className="text-[10px] text-red-400 hover:text-red-300"
-              title="清空当前 job 全部上传素材"
+              title={t('asset.clearAllHint')}
             >
-              清空全部
+              {t('asset.clearAll')}
             </button>
           </div>
           <div className="text-sm text-gray-100">
-            共 <span className="text-indigo-300">{totalChunks}</span> 块，来自 {files.length} 个来源
+            {t('asset.totalChunksPrefix')}<span className="text-indigo-300">{totalChunks}</span>{t('asset.chunksFromLabel')}{files.length}{t('asset.sourcesUnit')}
           </div>
           {sources.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
@@ -322,7 +320,7 @@ function WorldDocsPane({ jobId }: { jobId: string }) {
                     onClick={() => doDelete(f)}
                     disabled={!!deleting[f]}
                     className="text-red-400 hover:text-red-300 disabled:opacity-40 text-[10px]"
-                    title="从 RAG 池删除该文件的全部 chunks"
+                    title={t('asset.deleteFileHint')}
                   >
                     {deleting[f] ? '…' : '×'}
                   </button>
@@ -339,6 +337,7 @@ function WorldDocsPane({ jobId }: { jobId: string }) {
 
 export default function AssetPanel() {
   const { assets, currentJobId, uploadAsset, recompile, step } = useStore()
+  const t = useT()
   const [tab, setTab] = useState<Tab>('backgrounds')
 
   if (!assets || !currentJobId) return null
@@ -348,29 +347,29 @@ export default function AssetPanel() {
   }
 
   const tabs: { key: Tab; label: string; count?: number }[] = [
-    { key: 'backgrounds', label: 'Backgrounds', count: assets.backgrounds.length },
-    { key: 'characters', label: 'Characters', count: assets.characters.length },
-    { key: 'bgm', label: 'BGM', count: assets.bgm.length },
+    { key: 'backgrounds', label: t('asset.tabBackgrounds'), count: assets.backgrounds.length },
+    { key: 'characters', label: t('asset.tabCharacters'), count: assets.characters.length },
+    { key: 'bgm', label: t('asset.tabBGM'), count: assets.bgm.length },
     // v4 P0-7: text uploads live in their own tab because they don't have
     // per-slot placeholders like image/audio assets — they're a stream of
     // creator-provided reference material, counted at the job level.
-    { key: 'world_docs', label: 'World Docs' },
+    { key: 'world_docs', label: t('asset.tabWorldDocs') },
     // v4 P4: PlaytestAgent — opt-in, post-completion only, so it lives
     // alongside the other post-generation panes rather than as its own
     // top-level route.
-    { key: 'playtest', label: 'Playtest' },
+    { key: 'playtest', label: t('asset.tabPlaytest') },
   ]
 
   return (
     <div className="flex flex-col h-full">
       {/* Tabs */}
       <div className="flex gap-1 px-3 py-2 border-b border-gray-800">
-        {tabs.map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)}
+        {tabs.map(tb => (
+          <button key={tb.key} onClick={() => setTab(tb.key)}
             className={`px-4 py-1.5 rounded text-xs transition-colors ${
-              tab === t.key ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+              tab === tb.key ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
             }`}>
-            {t.label}{t.count !== undefined ? ` (${t.count})` : ''}
+            {tb.label}{tb.count !== undefined ? ` (${tb.count})` : ''}
           </button>
         ))}
       </div>
@@ -383,7 +382,7 @@ export default function AssetPanel() {
           <PlaytestPane jobId={currentJobId} />
         ) : (
           <>
-            <p className="text-[10px] text-gray-600 mb-3">Click or drag-drop to upload replacements</p>
+            <p className="text-[10px] text-gray-600 mb-3">{t('asset.uploadHint')}</p>
             <div className={`grid gap-3 ${tab === 'bgm' ? 'grid-cols-1' : 'grid-cols-2'}`}>
               {tab === 'backgrounds' && assets.backgrounds.map(a => (
                 <AssetCard key={a.id} asset={a} type="backgrounds" onUpload={handleUpload('background', a.id || '')} />
@@ -406,11 +405,11 @@ export default function AssetPanel() {
           <>
             <button onClick={recompile}
               className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors">
-              Re-compile & Download
+              {t('asset.recompile')}
             </button>
             <a href={api.downloadUrl(currentJobId)}
               className="px-5 py-2 bg-green-600 hover:bg-green-500 text-white text-sm font-medium rounded-lg transition-colors">
-              Download ZIP
+              {t('asset.downloadZip')}
             </a>
           </>
         )}

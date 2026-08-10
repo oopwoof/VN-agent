@@ -53,6 +53,23 @@ def publish_scene_ready(scene: dict) -> None:
     publish(job_id, {"event": "scene_ready", "scene": scene})
 
 
+def publish_node(node: str, label: str) -> None:
+    """Publish a graph-node transition to whichever job is active in this
+    async context.
+
+    v4 P6: the pipeline already emits one `graph.astream()` update per node,
+    but the web layer used to collapse that into a single `progress` string
+    which the frontend then had to substring-match to guess where it was.
+    This publishes the node identity structurally instead. No-op if
+    `current_job_id` was never set (CLI runs, tests, the headless
+    `_run_job` path) — same contract as `publish_scene_ready`.
+    """
+    job_id = current_job_id.get()
+    if not job_id:
+        return
+    publish(job_id, {"event": "node", "node": node, "label": label})
+
+
 async def subscribe(job_id: str) -> AsyncGenerator[dict, None]:
     """Yield events for `job_id` as they're published; stops after a
     terminal `done`/`failed` event."""

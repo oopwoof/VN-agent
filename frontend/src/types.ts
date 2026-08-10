@@ -17,7 +17,17 @@ export interface GenerateConfig {
 
 export interface ChatMessage {
   role: 'user' | 'system'
+  /** Pre-rendered text. Always populated. It is the ONLY source for messages
+   *  that embed server-supplied prose (reviewer output, chat-ops results),
+   *  and the fallback whenever `tkey` cannot be resolved. */
   content: string
+  // v4 P6 i18n: keyed messages. Storing an already-translated string would
+  // freeze the chat log in whatever language was active when it was written,
+  // so static messages carry their dictionary key plus its `{name}` variables
+  // instead and ChatPanel resolves them at paint time — flipping the language
+  // retranslates the entire history, not just the next message.
+  tkey?: string
+  tvars?: Record<string, string | number>
   timestamp: number
 }
 

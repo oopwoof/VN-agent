@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import useStore from '../store'
 import api from '../api'
+import { useT } from '../i18n/useT'
 
 interface Character {
   id?: string; name?: string; role?: string; personality?: string; background?: string; color?: string
@@ -11,6 +12,7 @@ interface Scene {
 
 export default function SettingPanel() {
   const { blackboard, confirmSetting, regenerateSetting, step, currentJobId } = useStore()
+  const t = useT()
   const ws = (blackboard.world_setting || {}) as Record<string, string>
   const chars = (blackboard.characters || {}) as Record<string, Character>
   const outline = (blackboard.plot_outline || {}) as { scenes?: Scene[]; start_scene_id?: string }
@@ -44,7 +46,7 @@ export default function SettingPanel() {
       })
       setEditing(false)
     } catch (e) {
-      alert(`Save failed: ${e}`)
+      alert(t('setting.saveFailed') + e)
     }
   }
 
@@ -57,46 +59,46 @@ export default function SettingPanel() {
       {/* World Setting */}
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-5">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider">World Setting</h3>
+          <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider">{t('setting.world')}</h3>
           {step === 'setting_review' && !editing && (
-            <button onClick={startEdit} className="text-xs text-indigo-400 hover:text-indigo-300">Edit</button>
+            <button onClick={startEdit} className="text-xs text-indigo-400 hover:text-indigo-300">{t('setting.edit')}</button>
           )}
           {editing && (
             <div className="flex gap-2">
-              <button onClick={saveEdit} className="text-xs text-green-400 hover:text-green-300">Save</button>
-              <button onClick={() => setEditing(false)} className="text-xs text-gray-500 hover:text-gray-400">Cancel</button>
+              <button onClick={saveEdit} className="text-xs text-green-400 hover:text-green-300">{t('setting.save')}</button>
+              <button onClick={() => setEditing(false)} className="text-xs text-gray-500 hover:text-gray-400">{t('setting.cancel')}</button>
             </div>
           )}
         </div>
         {editing ? (
           <div className="space-y-2">
             <input value={editTitle} onChange={e => setEditTitle(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200" placeholder="Title" />
+              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200" placeholder={t('setting.title')} />
             <textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={2}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 resize-none" placeholder="Description" />
+              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 resize-none" placeholder={t('setting.description')} />
           </div>
         ) : (
           <div className="space-y-2 text-sm">
-            <div><span className="text-gray-500">Title: </span><span className="text-gray-200 font-medium">{ws.title || '—'}</span></div>
-            <div><span className="text-gray-500">Description: </span><span className="text-gray-300">{ws.description || '—'}</span></div>
+            <div><span className="text-gray-500">{t('setting.title')}: </span><span className="text-gray-200 font-medium">{ws.title || '—'}</span></div>
+            <div><span className="text-gray-500">{t('setting.description')}: </span><span className="text-gray-300">{ws.description || '—'}</span></div>
           </div>
         )}
       </div>
 
       {/* Characters */}
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-5">
-        <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider mb-3">Characters ({Object.keys(chars).length})</h3>
+        <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider mb-3">{t('setting.characters')}（{Object.keys(chars).length}）</h3>
         <div className="space-y-3">
           {Object.entries(editing ? editChars : chars).map(([id, c]) => (
             <div key={id} className="bg-gray-950 rounded-md p-3 border border-gray-800">
               {editing ? (
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <input value={c.name || ''} onChange={e => updateChar(id, 'name', e.target.value)}
-                    className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-200" placeholder="Name" />
+                    className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-200" placeholder={t('setting.name')} />
                   <input value={c.role || ''} onChange={e => updateChar(id, 'role', e.target.value)}
-                    className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-200" placeholder="Role" />
+                    className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-200" placeholder={t('setting.role')} />
                   <input value={c.personality || ''} onChange={e => updateChar(id, 'personality', e.target.value)}
-                    className="col-span-2 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-200" placeholder="Personality" />
+                    className="col-span-2 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-200" placeholder={t('setting.personality')} />
                 </div>
               ) : (
                 <>
@@ -116,7 +118,7 @@ export default function SettingPanel() {
 
       {/* Plot Outline */}
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-5">
-        <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider mb-3">Plot Outline ({scenes.length} scenes)</h3>
+        <h3 className="text-sm font-semibold text-indigo-400 uppercase tracking-wider mb-3">{t('setting.outline')}（{scenes.length} {t('setting.scenesUnit')}）</h3>
         <div className="space-y-2">
           {scenes.map((s, i) => (
             <div key={s.id || i} className="flex gap-3 text-xs">
@@ -141,11 +143,11 @@ export default function SettingPanel() {
         <div className="flex gap-3">
           <button onClick={confirmSetting}
             className="px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white font-medium rounded-lg transition-colors">
-            Confirm & Generate Script
+            {t('setting.confirm')}
           </button>
           <button onClick={regenerateSetting}
             className="px-6 py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium rounded-lg transition-colors">
-            Regenerate
+            {t('setting.regenerate')}
           </button>
         </div>
       )}

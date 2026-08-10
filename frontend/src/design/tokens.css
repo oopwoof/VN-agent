@@ -1,0 +1,97 @@
+/* VN-Agent Studio design tokens — single source of truth for colour and
+   type. See docs/v4/FRONTEND_REDESIGN_v4.md §3.
+
+   Dark ground is functional, not stylistic: this is an authoring tool for a
+   visual medium, and generated art can only be judged against a neutral dark
+   surround (same reason Figma / Premiere / Lightroom are dark).
+
+   Saturated colour is reserved for the player — that is the generated work's
+   own colour. The workbench stays neutral plus a single brass accent. */
+
+:root {
+  /* Ground → raised, cool-shifted neutrals (not pure grey) */
+  --ground: #0e1012;
+  --surface: #16191c;
+  --surface-raised: #1d2125;
+  --rule: #282d32;
+
+  /* Text, three levels */
+  --ink: #e6e9ec;
+  --ink-soft: #9aa3ab;
+  --ink-faint: #69727a;
+
+  /* Accent: brass/amber — instrument-panel association. Deliberately not
+     the indigo the old shell used, and not "AI purple". */
+  --instrument: #c8944a;
+  --instrument-wash: #2a2116;
+
+  /* Semantic — independent of the accent, never used for branding */
+  --ok: #4a9d6e;
+  --warn: #c9873f;
+  --crit: #c15550;
+
+  /* Type: the instrument/narrative split is what carries the
+     workbench-vs-artifact contrast. Colour alone would not. */
+  --font-instrument: ui-sans-serif, -apple-system, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-narrative: Georgia, "Songti SC", "Source Han Serif SC",
+    "Noto Serif CJK SC", serif;
+  --font-numeric: ui-monospace, "SF Mono", Consolas, monospace;
+}
+
+/* Instrument surfaces: dense, tabular digits, slightly open tracking. */
+.face-instrument {
+  font-family: var(--font-instrument);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+/* Narrative surfaces: scene titles, character names, dialogue.
+   CJK needs a looser leading and must NOT get letter-spacing. */
+.face-narrative {
+  font-family: var(--font-narrative);
+  line-height: 1.75;
+  letter-spacing: normal;
+}
+
+/* Motion.
+   These are plain CSS rather than a JS animation library on purpose. The two
+   effects the workbench needs are a breathing pulse on the running pipeline
+   node and a fade when the main region changes form — together they were not
+   worth the ~44 kB gzipped that framer-motion added to the bundle.
+
+   The CSS route is also strictly more correct for accessibility: a JS library
+   animating inline styles bypasses the prefers-reduced-motion block below,
+   whereas these honour it automatically. */
+
+/* Running pipeline node. Opacity only — no transform, so it cannot cause
+   layout shift in the node spine. */
+@keyframes vn-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.vn-pulse {
+  animation: vn-pulse 1.6s ease-in-out infinite;
+}
+
+/* Main-region form change. Applied to an element keyed by form, so React
+   remounts it and the animation restarts on every transition. */
+@keyframes vn-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.vn-fade-in {
+  animation: vn-fade-in 0.25s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

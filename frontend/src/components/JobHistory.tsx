@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import useStore from '../store'
 import api from '../api'
+import { useT } from '../i18n/useT'
 
 const BADGE: Record<string, string> = {
   pending: 'bg-gray-700 text-gray-400',
@@ -11,6 +12,9 @@ const BADGE: Record<string, string> = {
 
 export default function JobHistory() {
   const { jobs, refreshJobs, selectJob, deleteJob, currentJobId } = useStore()
+  const t = useT()
+  const lang = useStore(s => s.lang)
+  const setLang = useStore(s => s.setLang)
   // v4 P0-resume: per-job salvage-in-progress flag so the button doesn't
   // hammer the endpoint when a click already fired. Keyed by job_id.
   const [salvaging, setSalvaging] = useState<Record<string, boolean>>({})
@@ -30,10 +34,10 @@ export default function JobHistory() {
         `dialogue ${s.dialogue_before}→${s.dialogue_after}`,
       ]
       if (s.snapshots_merged) parts.push(`merged ${s.snapshots_merged}/${s.snapshots_found} snapshots`)
-      alert('Salvage:\n' + parts.join('\n') + (res.compiled ? '\n✓ compiled' : res.next_step ? '\n' + res.next_step : ''))
+      alert(t('history.salvageSummary') + '\n' + parts.join('\n') + (res.compiled ? '\n' + t('history.compiled') : res.next_step ? '\n' + res.next_step : ''))
       await refreshJobs()
     } catch (err) {
-      alert('Salvage failed: ' + String(err))
+      alert(t('history.salvageFailed') + String(err))
     } finally {
       setSalvaging(s => ({ ...s, [jobId]: false }))
     }
@@ -41,15 +45,26 @@ export default function JobHistory() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-4 border-b border-gray-800">
-        <h1 className="text-lg font-bold text-indigo-400">VN-Agent Studio</h1>
-        <p className="text-[10px] text-gray-500 mt-0.5">AI Visual Novel Generator</p>
+      <div className="p-4 border-b border-gray-800 flex items-start justify-between gap-2">
+        <div>
+          <h1 className="text-lg font-bold text-indigo-400">VN-Agent Studio</h1>
+          <p className="text-[10px] text-gray-500 mt-0.5">{t('brand.tagline')}</p>
+        </div>
+        <button
+          onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+          title={t('lang.toggleHint')}
+          className="text-[10px] px-2 py-1 rounded border border-gray-700 text-gray-400
+            hover:text-gray-200 hover:border-gray-500 transition-colors shrink-0
+            focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500"
+        >
+          {t('lang.toggle')}
+        </button>
       </div>
       <div className="px-3 pt-3">
-        <h2 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">History</h2>
+        <h2 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">{t('history.title')}</h2>
       </div>
       <div className="flex-1 overflow-y-auto px-3 space-y-1 custom-scrollbar">
-        {jobs.length === 0 && <p className="text-xs text-gray-700 px-2">No jobs yet</p>}
+        {jobs.length === 0 && <p className="text-xs text-gray-700 px-2">{t('history.empty')}</p>}
         {jobs.map(j => (
           <div
             key={j.job_id}
@@ -77,16 +92,16 @@ export default function JobHistory() {
                     onClick={e => handleSalvage(j.job_id, e)}
                     disabled={!!salvaging[j.job_id]}
                     className="text-[10px] text-amber-500 hover:text-amber-300 disabled:opacity-40"
-                    title="Merge on-disk snapshots into vn_script.json and (if text-only) compile"
+                    title={t('history.salvageHint')}
                   >
-                    {salvaging[j.job_id] ? 'salvaging…' : 'salvage'}
+                    {salvaging[j.job_id] ? t('history.salvaging') : t('history.salvage')}
                   </button>
                 )}
                 <button
                   onClick={e => { e.stopPropagation(); deleteJob(j.job_id) }}
                   className="text-[10px] text-gray-600 hover:text-red-400"
                 >
-                  delete
+                  {t('history.delete')}
                 </button>
               </div>
             </div>
