@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import useStore from '../store'
 import { useT } from '../i18n/useT'
 import type { TKey } from '../i18n/dict'
@@ -7,23 +7,18 @@ export default function StatusBar() {
   const { step, elapsed, currentJobId, config } = useStore()
   const t = useT()
   const busy = step.startsWith('generating') || step === 'compiling'
-  const [tokenInfo, setTokenInfo] = useState<{ tokens: number; cost: number } | null>(null)
+  // Reads the shared store value rather than owning a fetch: PipelineStage
+  // needs the same numbers, and two components each polling the same endpoint
+  // every 5s would double the request rate for no benefit.
+  const tokenInfo = useStore(s => s.tokenUsage)
+  const refreshTokenUsage = useStore(s => s.refreshTokenUsage)
 
   useEffect(() => {
-    if (!currentJobId || step === 'idle') { setTokenInfo(null); return }
-    const fetchUsage = async () => {
-      try {
-        const resp = await fetch(`/api/projects/${currentJobId}/token-usage`)
-        if (resp.ok) {
-          const data = await resp.json()
-          if (data.calls > 0) setTokenInfo({ tokens: data.total_input + data.total_output, cost: data.estimated_cost_usd })
-        }
-      } catch { /* ignore */ }
-    }
-    fetchUsage()
-    const timer = setInterval(fetchUsage, 5000)
+    if (!currentJobId || step === 'idle') return
+    refreshTokenUsage()
+    const timer = setInterval(refreshTokenUsage, 5000)
     return () => clearInterval(timer)
-  }, [currentJobId, step])
+  }, [currentJobId, step, refreshTokenUsage])
 
   return (
     <div className="flex items-center gap-4 px-4 py-1.5 border-t border-gray-800 text-[11px] text-gray-500 bg-gray-950">

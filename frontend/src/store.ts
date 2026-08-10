@@ -42,6 +42,9 @@ interface AppState {
   pipelineNodes: Record<string, PipelineNodeState>
   pipelineActive: string | null
   pipelineLabel: string
+  // Lifted out of StatusBar so StatusBar and PipelineStage share ONE 5s poll
+  // instead of each owning an interval against the same endpoint.
+  tokenUsage: { tokens: number; cost: number } | null
 
   setConfig: (partial: Partial<GenerateConfig>) => void
   generate: () => Promise<void>
@@ -61,6 +64,7 @@ interface AppState {
   confirmChatTurn: () => Promise<void>
   cancelChatTurn: () => void
   setLang: (lang: Lang) => void
+  refreshTokenUsage: () => Promise<void>
   // Gate for ChatPanel: is there a generated script to chat-edit right now?
   chatOpsAvailable: () => boolean
 }
@@ -147,6 +151,7 @@ const useStore = create<AppState>((set, get) => ({
   pipelineNodes: {},
   pipelineActive: null,
   pipelineLabel: '',
+  tokenUsage: null,
 
   setConfig: (partial) => set({ config: { ...get().config, ...partial } }),
 
@@ -159,7 +164,7 @@ const useStore = create<AppState>((set, get) => ({
     set({
       step: 'generating_setting', progress: 'Creating project...', errors: [], blackboard: {},
       assets: null, vnPreview: false, streamActive: false,
-      pipelineNodes: {}, pipelineActive: null, pipelineLabel: '',
+      pipelineNodes: {}, pipelineActive: null, pipelineLabel: '', tokenUsage: null,
     })
     startElapsed(set, get)
 
@@ -407,7 +412,10 @@ const useStore = create<AppState>((set, get) => ({
   deleteJob: async (jobId) => {
     if (get().currentJobId === jobId) { stopTimers(); stopSceneStream() }
     await api.deleteJob(jobId)
-    if (get().currentJobId === jobId) set({ currentJobId: null, step: 'idle', blackboard: {}, assets: null, streamActive: false })
+    // tokenUsage is cleared here now that it lives in the store: StatusBar used
+    // to null its own local copy when the job went away, and without this the
+    // deleted job's cost readout would stay on screen.
+    if (get().currentJobId === jobId) set({ currentJobId: null, step: 'idle', blackboard: {}, assets: null, streamActive: false, tokenUsage: null })
     get().refreshJobs()
   },
 
@@ -479,6 +487,19 @@ const useStore = create<AppState>((set, get) => ({
   },
 
   setLang: (lang) => set({ lang }),
+
+  refreshTokenUsage: async () => {
+    const { currentJobId } = get()
+    if (!currentJobId) { set({ tokenUsage: null }); return }
+    try {
+      const resp = await fetch(`/api/projects/${currentJobId}/token-usage`)
+      if (!resp.ok) return
+      const data = await resp.json()
+      if (data.calls > 0) {
+        set({ tokenUsage: { tokens: data.total_input + data.total_output, cost: data.estimated_cost_usd } })
+      }
+    } catch { /* transient — keep the last known value */ }
+  },
 }))
 
 export default useStore

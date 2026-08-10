@@ -15,6 +15,28 @@
 
 ## [Unreleased]
 
+### 2026-08-10 | 杂项 - 2026-08-10 23:20
+
+**变更文件** (4 个):
+**其他变更** (4 文件):
+  - `frontend/src/components/PipelineStage.tsx`
+  - `frontend/src/components/PreviewPanel.tsx`
+  - `frontend/src/components/StatusBar.tsx`
+  - `frontend/src/store.ts`
+
+**变更统计**:
+```
+frontend/src/components/PipelineStage.tsx | 89 +++++++++++++++++++++++++++++++
+ frontend/src/components/PreviewPanel.tsx  | 39 ++++++++++----
+ frontend/src/components/StatusBar.tsx     | 25 ++++-----
+ frontend/src/store.ts                     | 25 ++++++++-
+ 4 files changed, 151 insertions(+), 27 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-10 | 杂项 - 2026-08-10 23:12
 
 **变更文件** (8 个):

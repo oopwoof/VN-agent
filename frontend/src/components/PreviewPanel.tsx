@@ -1,4 +1,4 @@
-import useStore from '../store'
+import useStore, { type AppStep } from '../store'
 import ProgressBar from './ProgressBar'
 import SettingPanel from './SettingPanel'
 import ScriptPanel from './ScriptPanel'
@@ -8,14 +8,33 @@ import { useT, useNodeLabel } from '../i18n/useT'
 
 const STEP_KEYS = ['steps.setting', 'steps.script', 'steps.review', 'steps.assets', 'steps.done'] as const
 
-function stepIndex(step: string, progress: string): number {
-  const p = (progress + ' ' + step).toLowerCase()
-  if (p.includes('setting')) return 0
-  if (p.includes('script') || p.includes('writer')) return 1
-  if (p.includes('review') || p.includes('reviewer')) return 2
-  if (p.includes('asset') || p.includes('compil')) return 3
-  if (p.includes('completed') || p.includes('done')) return 4
-  return -1
+// Which of STEP_KEYS the progress bar sits on, derived from the state machine
+// and the live graph node.
+//
+// This used to lowercase `progress + step` and substring-match English tokens
+// ('setting', 'writer', 'compil'). That was the exact defect
+// FRONTEND_REDESIGN_v4.md §1 names — a structured signal downgraded to prose
+// and then guessed back out of it — and it had two concrete consequences:
+// the step could never be localised (translating `progress` would silently
+// break the bar), and index 2 ('审校'/Review) was UNREACHABLE, because the
+// 'script' test fired first for every step whose name contains "script".
+const STEP_OF: Record<AppStep, number> = {
+  idle: -1,
+  generating_setting: 0,
+  setting_review: 0,
+  generating_script: 1,
+  script_review: 2,
+  asset_management: 3,
+  compiling: 3,
+  completed: 4,
+  failed: -1,
+}
+
+function stepIndex(step: AppStep, pipelineActive: string | null): number {
+  // The reviewer node runs inside generating_script, so surface the review
+  // step while it is active instead of leaving the bar parked on "script".
+  if (step === 'generating_script' && pipelineActive === 'reviewer') return 2
+  return STEP_OF[step]
 }
 
 export default function PreviewPanel() {
@@ -47,7 +66,7 @@ export default function PreviewPanel() {
     )
   }
 
-  const si = step === 'completed' ? STEPS.length : stepIndex(step, progress)
+  const si = step === 'completed' ? STEPS.length : stepIndex(step, pipelineActive)
   const pct = step === 'completed' ? 100 : Math.min(10 + (si + 1) * 18, 90)
 
   return (
