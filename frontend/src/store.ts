@@ -8,6 +8,12 @@ export type AppStep =
   | 'generating_script' | 'script_review'
   | 'asset_management' | 'compiling' | 'completed' | 'failed'
 
+// v4 P6: per-node state for the pipeline view. 'active' is the node the
+// graph is currently executing; loop-backs (the director redo nodes) can
+// re-activate a node already marked 'done', which is the correct display
+// for a revision round.
+export type PipelineNodeState = 'pending' | 'active' | 'done'
+
 interface AppState {
   currentJobId: string | null
   step: AppStep
@@ -32,6 +38,9 @@ interface AppState {
   // v4 P6: UI-chrome language. Chinese is the default (primary demo
   // audience); generated content language is driven by the theme, not this.
   lang: Lang
+  pipelineNodes: Record<string, PipelineNodeState>
+  pipelineActive: string | null
+  pipelineLabel: string
 
   setConfig: (partial: Partial<GenerateConfig>) => void
   generate: () => Promise<void>
@@ -103,6 +112,9 @@ const useStore = create<AppState>((set, get) => ({
   pendingChatTurn: null,
   chatBusy: false,
   lang: 'zh',
+  pipelineNodes: {},
+  pipelineActive: null,
+  pipelineLabel: '',
 
   setConfig: (partial) => set({ config: { ...get().config, ...partial } }),
 
@@ -112,7 +124,11 @@ const useStore = create<AppState>((set, get) => ({
 
     stopSceneStream()
     addMsg(get, set, 'user', config.theme)
-    set({ step: 'generating_setting', progress: 'Creating project...', errors: [], blackboard: {}, assets: null, vnPreview: false, streamActive: false })
+    set({
+      step: 'generating_setting', progress: 'Creating project...', errors: [], blackboard: {},
+      assets: null, vnPreview: false, streamActive: false,
+      pipelineNodes: {}, pipelineActive: null, pipelineLabel: '',
+    })
     startElapsed(set, get)
 
     try {
@@ -189,7 +205,23 @@ const useStore = create<AppState>((set, get) => ({
           }
         }
       },
-      onDone: () => set({ streamActive: false }),
+      onNode: (node, label) => {
+        const next: Record<string, PipelineNodeState> = { ...get().pipelineNodes }
+        // The graph only ever runs one node at a time, so whatever was
+        // active has finished by the time the next node reports in.
+        for (const key of Object.keys(next)) {
+          if (next[key] === 'active') next[key] = 'done'
+        }
+        next[node] = 'active'
+        set({ pipelineNodes: next, pipelineActive: node, pipelineLabel: label })
+      },
+      onDone: () => {
+        const next: Record<string, PipelineNodeState> = { ...get().pipelineNodes }
+        for (const key of Object.keys(next)) {
+          if (next[key] === 'active') next[key] = 'done'
+        }
+        set({ streamActive: false, pipelineNodes: next, pipelineActive: null })
+      },
       onError: () => set({ streamActive: false }),
     })
 
