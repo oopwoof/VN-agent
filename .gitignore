@@ -1,3 +1,6 @@
+# Superpowers brainstorming visual companion (local mockup sessions, not project artifacts)
+.superpowers/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -243,3 +246,21 @@ vn_jobs.db
 # Written to cwd by services.llm._log_key_rotation during tests / ad-hoc runs.
 # Not a persisted dataset — always rewritten, never consumed programmatically.
 api_key_rotations.jsonl
+
+# ── Local scratch / machine-specific, deliberately not shared ───────────────
+# Session handoff notes between agent worktrees: branch names, unpushed commit
+# chains, running API-spend tallies. Useful locally, noise in a public repo.
+VNAGENTDISPATCHHANDOFF.md
+# Raw LLM response dumps from debugging sessions.
+debug/
+# Personal Claude Code tooling + a permission allowlist containing local
+# absolute paths. `.local` in the name says it: it is per-machine.
+.claude/commands/
+.claude/settings.local.json
+# Regenerable script output written to the repo root by scripts/eval_*.py
+# and cli.py. Build litter, not a dataset.
+eval_*_results.json
+# Interview prep: personal rehearsal material (STAR stories, my own weakness
+# list, internal metric contradictions). Kept local on purpose — the factual
+# source of truth, RESUME_BRIEF_v4*.md, IS committed.
+docs/v4/INTERVIEW_PREP_v4_CN.md

@@ -15,6 +15,46 @@
 
 ## [Unreleased]
 
+### 2026-08-11 | 文档 - 2026-08-11 02:09
+
+**变更文件** (21 个):
+**其他变更** (8 文件):
+  - `.claude/settings.local.json`
+  - `.gitignore`
+  - `README.md`
+  - `data/autopilot/runs.jsonl`
+  - `eval_ollama_results.json`
+
+**变更统计**:
+```
+.claude/settings.local.json                |  35 --
+ .gitignore                                 |  21 ++
+ README.md                                  |  73 +++-
+ data/autopilot/runs.jsonl                  |   6 +
+ docs/ARCHITECTURE.md                       | 464 ++++++++++++++++++++++++
+ docs/AUDITS.md                             | 103 ++++++
+ docs/DESIGN_DECISIONS.md                   | 212 +++++++++++
+ docs/archive/DEV_LOG_legacy.md             | 407 +--------------------
+ docs/v3/BYTE_AI_PLATFORM_EVAL_INTERVIEW.md | 351 ++++++++++++++++++
+ docs/v3/SHOWCASE_v3.md                     | 293 +++++++++++++++
+ docs/v3/pipeline_graph.mmd                 |  36 ++
+ docs/v3/pipeline_graph.png                 | Bin 0 -> 42612 bytes
+ docs/v3/pipeline_writer_graph.mmd          |  24 ++
+ docs/v3/pipeline_writer_graph.png          | Bin 0 -> 20564 bytes
+ docs/v4/RESUME_BRIEF_v4.md                 | 564 +++++++++++++++++++++++++++++
+ docs/v4/RESUME_BRIEF_v4_CN.md              | 564 +++++++++++++++++++++++++++++
+ docs/v4/SHOWCASE_v4.md                     | 151 ++++++++
+ eval_ollama_results.json                   | 158 --------
+ eval_strategy_results.json                 |  93 -----
+ eval_structural_results.json               |  66 ----
+ scripts/dump_langgraph_diagram.py          |  52 +++
+ 21 files changed, 2912 insertions(+), 761 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-11 | 实现 - 2026-08-11 01:55
 
 **变更文件** (2 个):

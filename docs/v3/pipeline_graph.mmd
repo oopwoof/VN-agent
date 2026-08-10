@@ -1,0 +1,36 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	director(director)
+	structure_reviewer(structure_reviewer)
+	director_step2_redo(director_step2_redo)
+	director_full_redo(director_full_redo)
+	state_orchestrator(state_orchestrator)
+	thinking_fanout(thinking_fanout)
+	cross_ref_sync(cross_ref_sync)
+	writer(writer)
+	reviewer(reviewer)
+	asset_generation(asset_generation)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> director;
+	cross_ref_sync --> writer;
+	director --> structure_reviewer;
+	director_full_redo --> structure_reviewer;
+	director_step2_redo --> structure_reviewer;
+	reviewer -. &nbsp;end&nbsp; .-> __end__;
+	reviewer -. &nbsp;proceed&nbsp; .-> asset_generation;
+	reviewer -. &nbsp;revise&nbsp; .-> writer;
+	state_orchestrator --> thinking_fanout;
+	structure_reviewer -. &nbsp;step1_step2&nbsp; .-> director_full_redo;
+	structure_reviewer -. &nbsp;step2_only&nbsp; .-> director_step2_redo;
+	structure_reviewer -. &nbsp;accept&nbsp; .-> state_orchestrator;
+	thinking_fanout --> cross_ref_sync;
+	writer --> reviewer;
+	asset_generation --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

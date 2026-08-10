@@ -6,6 +6,70 @@
 
 ---
 
+## The pipeline / 流水线
+
+A LangGraph state machine, not a single prompt. Ten nodes, with two revision
+loop-backs from the structure reviewer:
+
+![LangGraph pipeline](./docs/v3/pipeline_graph.png)
+
+> Regenerate with `PYTHONPATH=src python scripts/dump_langgraph_diagram.py`
+> — the diagram is derived from the compiled graph, so it cannot drift from
+> the code.
+
+---
+
+## What v4 adds / v4 新增能力
+
+v1–v3 built the generation pipeline. v4 turned it into a product — a workbench
+a creator can actually sit in front of.
+
+| 方向 | 做了什么 | 为什么 |
+|---|---|---|
+| **多源素材融合** | 上传文档 / 联网检索 / 本地开源素材库 / LLM 生成，四通道融合，跨源去重（pHash + embedding），版权白名单 gate | 直面「AI 生成内容同质化」——非 LLM 素材占比可量化 |
+| **数据飞轮** | 👍/👎 反馈落 JSONL → BM25 检索注入 Writer few-shot → Reflection Agent 提炼元规则 | AI Ops 闭环：用户反馈真的回流到下一次生成 |
+| **Chat Ops** | 意图分类器 → 意图预览卡片 → 确认后执行；改写场景 / 加角色 / 改素材 | 从「提交后等一条流水线跑完」变成「任意节点介入」 |
+| **PlaytestAgent + Vision Judge** | 自动遍历分支、合成代表帧、喂 Vision LLM 打 6 个维度 | 评测从「离线跑分」变成「发布前一键体检」 |
+| **Autopilot** | 一句话主题 → 零点击 → 直接进播放器 | 完整 demo 闭环 |
+| **P6 工作台改版** | 流水线实时可视化、故事板、形态驱动布局、中英双语 | 把产品最值钱的东西（多 Agent 协作）从不可见变成主舞台 |
+
+**工作台界面**（`npm run dev` 后访问 `localhost:5173`）：流水线剧场实时点亮每个
+Agent 节点、场景卡片网格、卡片内改写、全幅播放器、中英实时切换。
+
+---
+
+## Docs / 文档导航
+
+**当前生效（v4，2026-07-08 起）**：
+
+| 文件 | 内容 |
+|---|---|
+| [docs/v4/PRODUCT_v4.md](./docs/v4/PRODUCT_v4.md) | **v4 产品北极星** — 工作台形态、5 大方向、AI PM 校招叙事 |
+| [docs/v4/README_v4.md](./docs/v4/README_v4.md) | v4 目录导航 + 与 v1–v3 的关系 |
+| [docs/v4/FRONTEND_REDESIGN_v4.md](./docs/v4/FRONTEND_REDESIGN_v4.md) | P6 工作台改版设计稿 — 问题定义、形态跟随状态、视觉系统、六层迁移策略 |
+| [docs/v4/SHOWCASE_v4.md](./docs/v4/SHOWCASE_v4.md) | 现场 demo 运行手册 — 零花费启动、演示动线、故障预案 |
+| [docs/v4/RESUME_BRIEF_v4.md](./docs/v4/RESUME_BRIEF_v4.md) · [_CN](./docs/v4/RESUME_BRIEF_v4_CN.md) | 事实清单：每条声明都带 commit / 文件路径，并明确区分「已实测」与「仍是目标值」 |
+
+**持续更新的工程/审计文档**：
+
+| 文件 | 内容 |
+|---|---|
+| [docs/DESIGN_DECISIONS.md](./docs/DESIGN_DECISIONS.md) | 关键决策的"为什么" |
+| [docs/AUDITS.md](./docs/AUDITS.md) | 已知技术债 + 未完成修复分析 |
+| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | 长期架构路线（四通道 RAG / 自我进化 Agent / Ren'Py 表现力） |
+| [docs/CHANGELOG.md](./docs/CHANGELOG.md) | 每日 commit 流水（pre-commit hook 自动追加） |
+
+**🔒 SHELVED（保留但搁置，v1–v3 时代）**：
+
+| 文件 | 内容 |
+|---|---|
+| [docs/PRODUCT.md](./docs/PRODUCT.md) | v1–v3 产品需求（Phase 1–13 里程碑） |
+
+历史开发日志归档在 `docs/archive/DEV_LOG_legacy.md`（2026-04-23 切分前的内容）。
+v2/v3 时代的 SHOWCASE 与面试口径在 `docs/v2/` 和 `docs/v3/`（仍可用于校招）。
+
+---
+
 ## Architecture / 架构
 
 ```
@@ -75,7 +139,7 @@ User: "A lighthouse keeper must choose between saving a ship or abandoning the p
 | Quality assurance / 质量保证 | Cross-model judge (Sonnet + GPT-4o) + 5-dim rubric + BFS reachability + persona fingerprint drift audit |
 | Cost optimization / 成本优化 | Multi-model routing + prompt caching (Anthropic ephemeral) + per-job TokenTracker |
 | Web API / Web 接口 | FastAPI async + SQLite job store + SSE streaming |
-| CI/CD | GitHub Actions (ruff + mypy + 352 pytest + coverage ≥60%) + Docker |
+| CI/CD | GitHub Actions (ruff + mypy + 947 pytest + coverage ≥60%) + Docker |
 
 ---
 
@@ -199,7 +263,7 @@ src/vn_agent/
 ├── web/                 # FastAPI + SSE + SQLite job store
 ├── cli.py               # Typer: generate / continue-outline / regen / eval / ...
 └── config.py            # pydantic-settings + YAML + coupled sprite/BG knobs
-tests/                   # 352 pytest cases across 11 test modules
+tests/                   # 947 pytest cases across 20+ test modules
 ```
 
 ---
@@ -207,7 +271,7 @@ tests/                   # 352 pytest cases across 11 test modules
 ## Development / 开发
 
 ```bash
-uv run pytest -m "not slow"                         # 352 tests pass
+uv run pytest -m "not slow"                         # 947 tests pass
 uv run ruff check src/ tests/                       # Lint
 uv run mypy src/vn_agent/ --ignore-missing-imports  # Type check (clean)
 uv run pytest --cov=src/vn_agent --cov-report=term  # Coverage (66%)
@@ -219,9 +283,8 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest + coverage floor 60% o
 
 ## Documentation / 文档
 
-- [Development Log / 开发日志](docs/DEV_LOG.md) — sprint-by-sprint record + future architecture routes (4-channel RAG, self-evolving agent)
+- [Development Log / 开发日志](docs/archive/DEV_LOG_legacy.md) — sprint-by-sprint record (archived 2026-04-23)
 - [Product Spec / 产品文档](docs/PRODUCT.md) — status, metrics, roadmap
-- [Ren'Py Gotchas / Ren'Py 踩坑笔记](~/.claude/projects/.../memory/project_renpy_gotchas.md) — image discovery, text escape, style inheritance, sprite scaling
 
 ---
 
