@@ -29,6 +29,29 @@ export const dict = {
     'intent.add_character': '新增角色',
     'intent.edit_asset': '修改素材',
     'intent.unknown': '未识别意图',
+    // ── 对话流水（store.ts 写入，ChatPanel 渲染时才解析）──
+    // 占位符用 {name}，变量由 addKeyedMsg 的 tvars 带过来。
+    'chat.msg.welcome': '欢迎使用 VN-Agent Studio！输入一个故事主题，即可生成一部视觉小说。',
+    'chat.msg.projectCreated': '项目 {id} 已创建。',
+    'chat.msg.directorPlanning': '导演正在规划故事结构…',
+    'chat.msg.fastModeStory': '故事《{title}》已成型。快速模式——正在自动生成剧本…',
+    'chat.msg.outlineReady': '故事大纲已就绪：《{title}》。请审阅并确认。',
+    'chat.msg.settingConfirmed': '设定已确认。编剧正在创作对白…',
+    'chat.msg.sceneReadyLive': '场景《{title}》已就绪——正在实时播放。',
+    'chat.msg.sceneReadyWatch': '场景《{title}》已就绪——其余场景生成期间即可边生成边看。',
+    'chat.msg.scriptDoneFast': '剧本已完成。快速模式——正在编译…',
+    'chat.msg.scriptReady': '剧本已就绪！{progress}。请审阅并确认。',
+    'chat.msg.regenerating': '正在重新生成设定…',
+    'chat.msg.settingRegenerated': '新的设定已生成。请审阅并确认。',
+    'chat.msg.scriptConfirmed': '剧本已确认。正在编译项目…',
+    'chat.msg.compiled': '项目编译完成！可以查看素材、上传替换素材，或直接下载。',
+    'chat.msg.recompiled': '重新编译完成！可以下载你的项目了。',
+    'chat.msg.error': '出错了：{error}',
+    'chat.msg.failed': '生成失败：{errors}',
+    'chat.msg.chatError': '对话出错：{error}',
+    'chat.msg.done': '已完成。',
+    'chat.msg.actionFailed': '执行失败。',
+    'chat.msg.cancelled': '已取消。',
     // ── VNPreview ──
     'vn.backToEditor': '返回工作台',
     'vn.clickToStart': '点击开始',
@@ -66,6 +89,8 @@ export const dict = {
     'preview.failed': '生成失败',
     'preview.unknownError': '未知错误',
     // ── JobHistory ──
+    // 品牌名 "VN-Agent Studio" 刻意保持英文，不进字典。
+    'brand.tagline': 'AI 视觉小说生成器',
     'history.title': '历史记录',
     'history.empty': '暂无记录',
     'history.salvage': '抢救',
@@ -189,6 +214,19 @@ export const dict = {
     'pipeline.skipped': '已跳过',
     'pipeline.scenes': '场景',
     'pipeline.cost': '花费',
+    // 整句版节点标签，对应后端 _STEP_LABELS（web/app.py）。node.* 是流水线
+    // 图上的短徽标，两者不通用：这里是进度行读的完整句子。后端刻意只发
+    // 稳定的英文标识，翻译落在前端，见 nodeLabel 的 en 块。
+    'nodeLabel.director': '导演正在规划故事结构',
+    'nodeLabel.structure_reviewer': '正在审查故事结构',
+    'nodeLabel.director_step2_redo': '导演正在修订分场方案',
+    'nodeLabel.director_full_redo': '导演正在重新规划整个故事',
+    'nodeLabel.state_orchestrator': '正在解析场景状态',
+    'nodeLabel.thinking_fanout': '正在逐场推演剧情',
+    'nodeLabel.cross_ref_sync': '正在同步跨场景引用',
+    'nodeLabel.writer': '编剧正在创作对白',
+    'nodeLabel.reviewer': '审校正在检查质量',
+    'nodeLabel.asset_generation': '正在生成素材（角色、场景、音乐）',
   },
   en: {
     // ── ChatPanel ──
@@ -215,6 +253,28 @@ export const dict = {
     'intent.add_character': 'Add character',
     'intent.edit_asset': 'Edit asset',
     'intent.unknown': 'Unrecognised intent',
+    // ── chat log (written by store.ts, resolved at render in ChatPanel) ──
+    'chat.msg.welcome': 'Welcome to VN-Agent Studio! Enter a story theme to generate a visual novel.',
+    'chat.msg.projectCreated': 'Project {id} created.',
+    'chat.msg.directorPlanning': 'Director is planning the story…',
+    'chat.msg.fastModeStory': 'Story: "{title}". Fast mode — auto-generating script…',
+    'chat.msg.outlineReady': 'Story outline ready: "{title}". Review and confirm.',
+    'chat.msg.settingConfirmed': 'Setting confirmed. Writer is creating dialogue…',
+    'chat.msg.sceneReadyLive': 'Scene "{title}" ready — playing live.',
+    'chat.msg.sceneReadyWatch': 'Scene "{title}" ready — you can Watch Live while the rest generates.',
+    'chat.msg.scriptDoneFast': 'Script done. Fast mode — compiling…',
+    'chat.msg.scriptReady': 'Script ready! {progress}. Review and confirm.',
+    'chat.msg.regenerating': 'Regenerating setting…',
+    'chat.msg.settingRegenerated': 'New setting generated. Review and confirm.',
+    'chat.msg.scriptConfirmed': 'Script confirmed. Compiling project…',
+    'chat.msg.compiled': 'Project compiled! Review assets, upload replacements, or download.',
+    'chat.msg.recompiled': 'Re-compiled! Download your project.',
+    'chat.msg.error': 'Error: {error}',
+    'chat.msg.failed': 'Failed: {errors}',
+    'chat.msg.chatError': 'Chat error: {error}',
+    'chat.msg.done': 'Done.',
+    'chat.msg.actionFailed': 'Failed.',
+    'chat.msg.cancelled': 'Cancelled.',
     // ── VNPreview ──
     'vn.backToEditor': 'Back to Editor',
     'vn.clickToStart': 'Click to start',
@@ -252,6 +312,8 @@ export const dict = {
     'preview.failed': 'Generation failed',
     'preview.unknownError': 'Unknown error',
     // ── JobHistory ──
+    // The brand name "VN-Agent Studio" stays English on purpose.
+    'brand.tagline': 'AI Visual Novel Generator',
     'history.title': 'History',
     'history.empty': 'No jobs yet',
     'history.salvage': 'salvage',
@@ -375,6 +437,20 @@ export const dict = {
     'pipeline.skipped': 'skipped',
     'pipeline.scenes': 'Scenes',
     'pipeline.cost': 'Cost',
+    // Full-sentence node labels. These MUST stay byte-identical to
+    // _STEP_LABELS in src/vn_agent/web/app.py: the backend keeps emitting
+    // stable English identifiers and the frontend owns the translation, so
+    // the English rendering has to be a no-op against today's server string.
+    'nodeLabel.director': 'Director planning story structure',
+    'nodeLabel.structure_reviewer': 'Auditing story structure',
+    'nodeLabel.director_step2_redo': 'Director revising the scene plan',
+    'nodeLabel.director_full_redo': 'Director replanning the story',
+    'nodeLabel.state_orchestrator': 'Resolving scene state',
+    'nodeLabel.thinking_fanout': 'Planning scene-by-scene reasoning',
+    'nodeLabel.cross_ref_sync': 'Syncing cross-scene references',
+    'nodeLabel.writer': 'Writer creating dialogue',
+    'nodeLabel.reviewer': 'Reviewer checking quality',
+    'nodeLabel.asset_generation': 'Generating assets (characters, scenes, music)',
   },
 } as const
 

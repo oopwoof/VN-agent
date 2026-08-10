@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import type { AssetManifest, ChatMessage, GenerateConfig, JobSummary } from './types'
 import api, { type ChatTurn } from './api'
-import type { Lang } from './i18n/dict'
+import { dict, type Lang, type TKey } from './i18n/dict'
+import { interpolate } from './i18n/interpolate'
 
 export type AppStep =
   | 'idle' | 'generating_setting' | 'setting_review'
@@ -77,8 +78,39 @@ function stopSceneStream() {
   if (sceneStream) { sceneStream.close(); sceneStream = null }
 }
 
+/** Append a message whose text is genuinely dynamic — the creator's own
+ *  input, or prose the server produced. Nothing to translate, so it is
+ *  stored as-is. */
 function addMsg(get: () => AppState, set: (s: Partial<AppState>) => void, role: 'user' | 'system', content: string) {
   set({ messages: [...get().messages, { role, content, timestamp: Date.now() }] })
+}
+
+/** Build a keyed message. Pure and store-free on purpose: the store's
+ *  initial `messages` array is evaluated *during* `create(...)`, so anything
+ *  that touched `useStore.getState()` would hit the TDZ and throw. It reads
+ *  only the static `dict` import.
+ *
+ *  `content` is filled with the Chinese rendering as a snapshot fallback for
+ *  any consumer that reads `content` directly; the live text a reader sees
+ *  comes from re-resolving `tkey` in ChatPanel. */
+function keyedMsg(
+  role: 'user' | 'system',
+  tkey: TKey,
+  tvars?: Record<string, string | number>,
+): ChatMessage {
+  return { role, content: interpolate(dict.zh[tkey] ?? tkey, tvars), tkey, tvars, timestamp: Date.now() }
+}
+
+/** Append a message that is static UI copy (optionally with `{name}` slots),
+ *  so it re-renders in whatever language is active at paint time. */
+function addKeyedMsg(
+  get: () => AppState,
+  set: (s: Partial<AppState>) => void,
+  role: 'user' | 'system',
+  tkey: TKey,
+  tvars?: Record<string, string | number>,
+) {
+  set({ messages: [...get().messages, keyedMsg(role, tkey, tvars)] })
 }
 
 function stopTimers() {
@@ -101,7 +133,7 @@ const useStore = create<AppState>((set, get) => ({
   progress: '',
   errors: [],
   blackboard: {},
-  messages: [{ role: 'system', content: 'Welcome to VN-Agent Studio! Enter a story theme to generate a visual novel.', timestamp: Date.now() }],
+  messages: [keyedMsg('system', 'chat.msg.welcome')],
   config: { theme: '', max_scenes: 5, num_characters: 3, text_only: true, fast_mode: false, mock: false, autopilot: false },
   jobs: [],
   assets: null,
@@ -134,10 +166,10 @@ const useStore = create<AppState>((set, get) => ({
     try {
       const { job_id } = await api.generate(config)
       set({ currentJobId: job_id })
-      addMsg(get, set, 'system', `Project ${job_id} created.`)
+      addKeyedMsg(get, set, 'system', 'chat.msg.projectCreated', { id: job_id })
       get().refreshJobs()
 
-      addMsg(get, set, 'system', 'Director is planning the story...')
+      addKeyedMsg(get, set, 'system', 'chat.msg.directorPlanning')
       set({ progress: 'Director planning story structure' })
       const { blackboard } = await api.generateSetting(job_id)
       stopTimers()
@@ -147,19 +179,19 @@ const useStore = create<AppState>((set, get) => ({
       if (get().config.fast_mode) {
         // Fast mode: skip setting review, auto-confirm
         set({ blackboard, progress: 'Fast mode: auto-confirming setting...' })
-        addMsg(get, set, 'system', `Story: "${ws?.title || 'Untitled'}". Fast mode — auto-generating script...`)
+        addKeyedMsg(get, set, 'system', 'chat.msg.fastModeStory', { title: ws?.title || 'Untitled' })
         get().refreshJobs()
         await get().confirmSetting()
         return
       }
 
       set({ step: 'setting_review', blackboard, progress: 'Setting ready for review' })
-      addMsg(get, set, 'system', `Story outline ready: "${ws?.title || 'Untitled'}". Review and confirm.`)
+      addKeyedMsg(get, set, 'system', 'chat.msg.outlineReady', { title: ws?.title || 'Untitled' })
       get().refreshJobs()
     } catch (e) {
       stopTimers()
       set({ step: 'failed', errors: [String(e)] })
-      addMsg(get, set, 'system', `Error: ${e}`)
+      addKeyedMsg(get, set, 'system', 'chat.msg.error', { error: String(e) })
     }
   },
 
@@ -178,7 +210,7 @@ const useStore = create<AppState>((set, get) => ({
       pipelineNodes: { ...get().pipelineNodes, director: 'done' },
     })
     startElapsed(set, get)
-    addMsg(get, set, 'system', 'Setting confirmed. Writer is creating dialogue...')
+    addKeyedMsg(get, set, 'system', 'chat.msg.settingConfirmed')
 
     // v4 P2 ⑤: open the scene stream BEFORE kicking off generation so the
     // subscriber is registered before Writer can finish scene 1 — events
@@ -208,9 +240,9 @@ const useStore = create<AppState>((set, get) => ({
             // `step`, so this stays showing through the rest of script
             // generation and the subsequent auto-compile.
             set({ vnPreview: true })
-            addMsg(get, set, 'system', `Scene "${scene.title || scene.id}" ready — playing live.`)
+            addKeyedMsg(get, set, 'system', 'chat.msg.sceneReadyLive', { title: String(scene.title || scene.id) })
           } else {
-            addMsg(get, set, 'system', `Scene "${scene.title || scene.id}" ready — you can Watch Live while the rest generates.`)
+            addKeyedMsg(get, set, 'system', 'chat.msg.sceneReadyWatch', { title: String(scene.title || scene.id) })
           }
         }
       },
@@ -252,20 +284,22 @@ const useStore = create<AppState>((set, get) => ({
             if (get().config.fast_mode) {
               // Fast mode: skip script review, auto-compile
               set({ blackboard, errors: res.errors })
-              addMsg(get, set, 'system', `Script done. Fast mode — compiling...`)
+              addKeyedMsg(get, set, 'system', 'chat.msg.scriptDoneFast')
               get().refreshJobs()
               await get().confirmScript()
               return
             }
 
             set({ step: 'script_review', blackboard, errors: res.errors })
-            addMsg(get, set, 'system', `Script ready! ${res.progress}. Review and confirm.`)
+            // res.progress is server prose ("done - 5 scenes"); it rides
+            // through as a variable so the surrounding sentence still flips.
+            addKeyedMsg(get, set, 'system', 'chat.msg.scriptReady', { progress: res.progress })
             get().refreshJobs()
           } else if (res.status === 'failed') {
             stopTimers()
             stopSceneStream()
             set({ streamActive: false, step: 'failed', errors: res.errors })
-            addMsg(get, set, 'system', `Failed: ${res.errors.join(', ')}`)
+            addKeyedMsg(get, set, 'system', 'chat.msg.failed', { errors: res.errors.join(', ') })
             get().refreshJobs()
           }
         } catch {
@@ -289,13 +323,13 @@ const useStore = create<AppState>((set, get) => ({
 
     set({ step: 'generating_setting', progress: 'Regenerating setting...' })
     startElapsed(set, get)
-    addMsg(get, set, 'system', 'Regenerating setting...')
+    addKeyedMsg(get, set, 'system', 'chat.msg.regenerating')
 
     try {
       const { blackboard } = await api.generateSetting(currentJobId)
       stopTimers()
       set({ step: 'setting_review', blackboard, progress: 'Setting ready for review' })
-      addMsg(get, set, 'system', 'New setting generated. Review and confirm.')
+      addKeyedMsg(get, set, 'system', 'chat.msg.settingRegenerated')
     } catch (e) {
       stopTimers()
       set({ step: 'failed', errors: [String(e)] })
@@ -307,13 +341,13 @@ const useStore = create<AppState>((set, get) => ({
     if (!currentJobId) return
 
     set({ step: 'compiling', progress: 'Compiling Ren\'Py project...' })
-    addMsg(get, set, 'system', 'Script confirmed. Compiling project...')
+    addKeyedMsg(get, set, 'system', 'chat.msg.scriptConfirmed')
 
     try {
       await api.compile(currentJobId)
       await get().fetchAssets()
       set({ step: 'asset_management', progress: 'Assets ready for review' })
-      addMsg(get, set, 'system', 'Project compiled! Review assets, upload replacements, or download.')
+      addKeyedMsg(get, set, 'system', 'chat.msg.compiled')
       get().refreshJobs()
     } catch (e) {
       set({ step: 'failed', errors: [String(e)] })
@@ -344,7 +378,7 @@ const useStore = create<AppState>((set, get) => ({
       await api.compile(currentJobId)
       await get().fetchAssets()
       set({ step: 'completed', progress: 'Project ready for download' })
-      addMsg(get, set, 'system', 'Re-compiled! Download your project.')
+      addKeyedMsg(get, set, 'system', 'chat.msg.recompiled')
       get().refreshJobs()
     } catch (e) {
       set({ step: 'failed', errors: [String(e)] })
@@ -400,11 +434,12 @@ const useStore = create<AppState>((set, get) => ({
       if (turn.requires_confirmation) {
         set({ pendingChatTurn: turn })
       } else {
-        // explain / unknown — already resolved, nothing to confirm.
+        // explain / unknown — already resolved, nothing to confirm. Pure
+        // server prose, so it stays on `content` and does not retranslate.
         addMsg(get, set, 'system', turn.result_text || turn.preview_text)
       }
     } catch (e) {
-      addMsg(get, set, 'system', `Chat error: ${e}`)
+      addKeyedMsg(get, set, 'system', 'chat.msg.chatError', { error: String(e) })
     } finally {
       set({ chatBusy: false })
     }
@@ -417,7 +452,13 @@ const useStore = create<AppState>((set, get) => ({
     set({ chatBusy: true })
     try {
       const resolved = await api.chatExecute(currentJobId, pendingChatTurn)
-      addMsg(get, set, 'system', resolved.result_text || (resolved.success ? 'Done.' : 'Failed.'))
+      // Server prose wins verbatim; only the bare success/failure fallback is
+      // ours to translate.
+      if (resolved.result_text) {
+        addMsg(get, set, 'system', resolved.result_text)
+      } else {
+        addKeyedMsg(get, set, 'system', resolved.success ? 'chat.msg.done' : 'chat.msg.actionFailed')
+      }
       if (resolved.success) {
         // local_regen mutated vn_script.json on disk directly — refetch the
         // blackboard the backend already re-synced from it (see chat_execute
@@ -426,14 +467,14 @@ const useStore = create<AppState>((set, get) => ({
         set({ blackboard })
       }
     } catch (e) {
-      addMsg(get, set, 'system', `Chat error: ${e}`)
+      addKeyedMsg(get, set, 'system', 'chat.msg.chatError', { error: String(e) })
     } finally {
       set({ pendingChatTurn: null, chatBusy: false })
     }
   },
 
   cancelChatTurn: () => {
-    addMsg(get, set, 'system', 'Cancelled.')
+    addKeyedMsg(get, set, 'system', 'chat.msg.cancelled')
     set({ pendingChatTurn: null })
   },
 

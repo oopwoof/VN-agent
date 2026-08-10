@@ -1,8 +1,9 @@
 import { useRef, useEffect, useState } from 'react'
 import useStore from '../store'
 import FeedbackWidget from './FeedbackWidget'
-import { useT } from '../i18n/useT'
+import { useT, useTVars } from '../i18n/useT'
 import type { TKey } from '../i18n/dict'
+import type { ChatMessage } from '../types'
 
 function TypewriterText({ text }: { text: string }) {
   const [displayed, setDisplayed] = useState('')
@@ -38,6 +39,17 @@ export default function ChatPanel() {
   const busy = generating || chatBusy
   const chatOps = chatOpsAvailable()
   const t = useT()
+  const tv = useTVars()
+
+  // v4 P6 i18n: the chat log is stored as key + variables, not as resolved
+  // text, so the whole history — welcome line included — retranslates when
+  // the language toggle flips. Messages carrying server prose have no `tkey`
+  // and fall through to their pre-rendered `content`, as does any key the
+  // dictionary no longer knows about.
+  const msgText = (m: ChatMessage): string => {
+    if (!m.tkey) return m.content
+    return tv(m.tkey, m.tvars) ?? m.content
+  }
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, pendingChatTurn])
 
@@ -78,9 +90,9 @@ export default function ChatPanel() {
                 : 'bg-gray-800 text-gray-200 rounded-bl-md'
             }`}>
               {m.role === 'system' && i === messages.length - 1 ? (
-                <TypewriterText text={m.content} />
+                <TypewriterText text={msgText(m)} />
               ) : (
-                m.content
+                msgText(m)
               )}
             </div>
           </div>

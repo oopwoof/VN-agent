@@ -15,6 +15,33 @@
 
 ## [Unreleased]
 
+### 2026-08-10 | 杂项 - 2026-08-10 23:12
+
+**变更文件** (8 个):
+**其他变更** (8 文件):
+  - `frontend/src/components/ChatPanel.tsx`
+  - `frontend/src/components/JobHistory.tsx`
+  - `frontend/src/components/PreviewPanel.tsx`
+  - `frontend/src/i18n/dict.ts`
+  - `frontend/src/i18n/interpolate.ts`
+
+**变更统计**:
+```
+frontend/src/components/ChatPanel.tsx    | 18 +++++--
+ frontend/src/components/JobHistory.tsx   |  2 +-
+ frontend/src/components/PreviewPanel.tsx | 14 ++++-
+ frontend/src/i18n/dict.ts                | 76 ++++++++++++++++++++++++++++
+ frontend/src/i18n/interpolate.ts         | 19 +++++++
+ frontend/src/i18n/useT.ts                | 42 +++++++++++++++
+ frontend/src/store.ts                    | 87 +++++++++++++++++++++++---------
+ frontend/src/types.ts                    | 10 ++++
+ 8 files changed, 239 insertions(+), 29 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-10 | 杂项 - 2026-08-10 22:59
 
 **变更文件** (3 个):

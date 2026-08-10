@@ -48,7 +48,7 @@ export default function JobHistory() {
       <div className="p-4 border-b border-gray-800 flex items-start justify-between gap-2">
         <div>
           <h1 className="text-lg font-bold text-indigo-400">VN-Agent Studio</h1>
-          <p className="text-[10px] text-gray-500 mt-0.5">AI Visual Novel Generator</p>
+          <p className="text-[10px] text-gray-500 mt-0.5">{t('brand.tagline')}</p>
         </div>
         <button
           onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}

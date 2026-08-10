@@ -4,7 +4,7 @@ import SettingPanel from './SettingPanel'
 import ScriptPanel from './ScriptPanel'
 import AssetPanel from './AssetPanel'
 import VNPreview from './VNPreview'
-import { useT } from '../i18n/useT'
+import { useT, useNodeLabel } from '../i18n/useT'
 
 const STEP_KEYS = ['steps.setting', 'steps.script', 'steps.review', 'steps.assets', 'steps.done'] as const
 
@@ -20,8 +20,18 @@ function stepIndex(step: string, progress: string): number {
 
 export default function PreviewPanel() {
   const { step, progress, errors, elapsed, vnPreview, blackboard, streamActive, toggleVNPreview } = useStore()
+  const pipelineActive = useStore(s => s.pipelineActive)
+  const pipelineLabel = useStore(s => s.pipelineLabel)
   const t = useT()
+  const nodeLabel = useNodeLabel()
   const STEPS = STEP_KEYS.map(k => t(k))
+
+  // v4 P6 i18n: while the graph is running, `progress` is just the English
+  // _STEP_LABELS sentence the backend also sent structurally on the node
+  // event. Prefer the localised sentence keyed off the node id; an id the
+  // dictionary does not know degrades to the server's own label, and with no
+  // node active at all we are back to the plain `progress` string.
+  const activity = nodeLabel(pipelineActive, pipelineLabel) || progress || t('preview.working')
 
   // VN Preview mode takes over the entire panel
   if (vnPreview) return <VNPreview />
@@ -58,7 +68,7 @@ export default function PreviewPanel() {
             <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
               <div className="flex items-center gap-3">
                 <div className="spinner" />
-                <span className="text-sm text-gray-300">{progress || t('preview.working')}</span>
+                <span className="text-sm text-gray-300">{activity}</span>
                 {streamActive && (
                   <span className="flex items-center gap-1 text-[10px] text-red-400 font-medium uppercase tracking-wider">
                     <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
