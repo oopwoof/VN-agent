@@ -15,6 +15,31 @@
 
 ## [Unreleased]
 
+### 2026-08-10 | 杂项 - 2026-08-10 23:25
+
+**变更文件** (6 个):
+**其他变更** (6 文件):
+  - `frontend/src/components/SceneCard.tsx`
+  - `frontend/src/components/ScriptPanel.tsx`
+  - `frontend/src/components/StoryboardBoard.tsx`
+  - `frontend/src/components/VNPreview.tsx`
+  - `frontend/src/i18n/dict.ts`
+
+**变更统计**:
+```
+frontend/src/components/SceneCard.tsx       | 12 +++--
+ frontend/src/components/ScriptPanel.tsx     |  5 +-
+ frontend/src/components/StoryboardBoard.tsx | 79 +++++++++++++++++++++++++++++
+ frontend/src/components/VNPreview.tsx       |  5 +-
+ frontend/src/i18n/dict.ts                   |  6 +++
+ frontend/src/store.ts                       | 11 ++++
+ 6 files changed, 113 insertions(+), 5 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-10 | 杂项 - 2026-08-10 23:22
 
 **变更文件** (2 个):

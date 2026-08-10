@@ -17,7 +17,10 @@ export default function VNPreview() {
   const scenes = (blackboard.scene_scripts || []) as SceneScript[]
   const chars = (blackboard.characters || blackboard._characters_json || {}) as Record<string, { name?: string; color?: string }>
 
-  const [sceneIdx, setSceneIdx] = useState(0)
+  // Storyboard "Play from here" sets playFromScene before flipping vnPreview,
+  // so the player mounts already positioned on the picked scene.
+  const playFromScene = useStore(s => s.playFromScene)
+  const [sceneIdx, setSceneIdx] = useState(playFromScene)
   const [lineIdx, setLineIdx] = useState(-1) // -1 = scene title card
   const [ended, setEnded] = useState(false)
 

@@ -232,6 +232,10 @@ export const dict = {
     'card.branches': '个分支',
     'card.play': '从这里播放',
     'card.rewrite': '改写这一场',
+    'board.backToBoard': '返回故事板',
+    // Sent into the Chat Ops intent router, so it follows the UI language
+    // rather than being pinned to Chinese.
+    'board.rewritePrompt': '改写场景「{title}」',
   },
   en: {
     // ── ChatPanel ──
@@ -461,6 +465,8 @@ export const dict = {
     'card.branches': 'branches',
     'card.play': 'Play from here',
     'card.rewrite': 'Rewrite this scene',
+    'board.backToBoard': 'Back to board',
+    'board.rewritePrompt': 'Rewrite the scene "{title}"',
   },
 } as const
 

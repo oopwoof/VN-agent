@@ -14,10 +14,11 @@ interface SceneCardProps {
   index: number
   jobId: string | null
   onPlay: (index: number) => void
+  onOpen: (index: number) => void
   onRewrite: (sceneId: string) => void
 }
 
-export default function SceneCard({ scene, index, jobId, onPlay, onRewrite }: SceneCardProps) {
+export default function SceneCard({ scene, index, jobId, onPlay, onOpen, onRewrite }: SceneCardProps) {
   const t = useT()
   // Same URL shape VNPreview uses for its backdrop, so a card and the player
   // resolve the identical file; a missing asset hides the img rather than
@@ -49,9 +50,14 @@ export default function SceneCard({ scene, index, jobId, onPlay, onRewrite }: Sc
       </div>
 
       <div className="flex flex-col gap-1 p-3 flex-1">
-        <h3 className="face-narrative text-sm" style={{ color: 'var(--ink)', lineHeight: 1.4 }}>
+        <button
+          onClick={() => onOpen(index)}
+          className="face-narrative text-sm text-left hover:underline
+            focus-visible:outline focus-visible:outline-2"
+          style={{ color: 'var(--ink)', lineHeight: 1.4 }}
+        >
           {scene.title || scene.id}
-        </h3>
+        </button>
         <span className="face-instrument text-[10px]" style={{ color: 'var(--ink-faint)' }}>
           {scene.dialogue.length} {t('card.lines')}
           {scene.branches.length > 0 && ` · ${scene.branches.length} ${t('card.branches')}`}

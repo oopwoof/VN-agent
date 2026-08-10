@@ -36,7 +36,10 @@ export default function ScriptPanel() {
     passed?: boolean; feedback?: string; revision_count?: number;
     scores?: Record<string, number> | null
   }
-  const [activeScene, setActiveScene] = useState(0)
+  // The storyboard focuses a scene before mounting this as the card detail
+  // view; remounting per open is what makes the initial value take effect.
+  const scriptFocusIndex = useStore(s => s.scriptFocusIndex)
+  const [activeScene, setActiveScene] = useState(scriptFocusIndex)
   const [editing, setEditing] = useState(false)
   const [editDialogue, setEditDialogue] = useState<DialogueLine[]>([])
 

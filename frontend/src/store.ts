@@ -45,6 +45,10 @@ interface AppState {
   // Lifted out of StatusBar so StatusBar and PipelineStage share ONE 5s poll
   // instead of each owning an interval against the same endpoint.
   tokenUsage: { tokens: number; cost: number } | null
+  // Storyboard → player / detail hand-off. Read as the initial index by
+  // VNPreview and ScriptPanel when they mount.
+  playFromScene: number
+  scriptFocusIndex: number
 
   setConfig: (partial: Partial<GenerateConfig>) => void
   generate: () => Promise<void>
@@ -65,6 +69,8 @@ interface AppState {
   cancelChatTurn: () => void
   setLang: (lang: Lang) => void
   refreshTokenUsage: () => Promise<void>
+  jumpToScene: (index: number) => void
+  focusScene: (index: number) => void
   // Gate for ChatPanel: is there a generated script to chat-edit right now?
   chatOpsAvailable: () => boolean
 }
@@ -152,6 +158,8 @@ const useStore = create<AppState>((set, get) => ({
   pipelineActive: null,
   pipelineLabel: '',
   tokenUsage: null,
+  playFromScene: 0,
+  scriptFocusIndex: 0,
 
   setConfig: (partial) => set({ config: { ...get().config, ...partial } }),
 
@@ -500,6 +508,9 @@ const useStore = create<AppState>((set, get) => ({
       }
     } catch { /* transient — keep the last known value */ }
   },
+
+  jumpToScene: (index) => set({ playFromScene: index, vnPreview: true }),
+  focusScene: (index) => set({ scriptFocusIndex: index }),
 }))
 
 export default useStore
