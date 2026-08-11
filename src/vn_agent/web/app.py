@@ -72,6 +72,17 @@ def _resolve_mock(requested: bool) -> bool:
 async def _lifespan(application: FastAPI):  # noqa: ARG001
     """Patch LLM calls with mock responses if VN_AGENT_MOCK is set."""
     logger.info(f"VN_AGENT_MOCK={os.environ.get('VN_AGENT_MOCK')!r}, _MOCK_MODE={_MOCK_MODE}")
+    # Print, don't just log: uvicorn configures handlers only for its own
+    # loggers, so this module's `logger.info` is dropped before it reaches a
+    # terminal. Whether billable calls are floored off is the one thing an
+    # operator must be able to read at a glance before a live demo — the
+    # 2026-08-03 and 2026-08-11 spend incidents both began with someone
+    # believing mock was on. `flush` because uvicorn may buffer stdout.
+    print(
+        f"[vn-agent] VN_AGENT_MOCK={os.environ.get('VN_AGENT_MOCK')!r} "
+        f"-> mock floor {'ON (no billable calls)' if _MOCK_MODE else 'OFF (real API calls possible)'}",
+        flush=True,
+    )
     if _MOCK_MODE:
         from unittest.mock import patch as _patch
 

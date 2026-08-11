@@ -13,6 +13,7 @@ so the single ContextVar every billable path already consults is forced on.
 """
 from __future__ import annotations
 
+import asyncio
 import importlib
 from pathlib import Path
 
@@ -98,6 +99,33 @@ class TestEveryBillablePathIsCovered:
                     f"{name} reaches a provider SDK directly, bypassing the "
                     f"mock_mode_var gate in ainvoke_llm: {forbidden!r}"
                 )
+
+
+class TestStartupBannerMakesTheGateVisible:
+    """An operator must be able to read the mock state before a live demo.
+
+    `_lifespan` logs it via `logger.info`, but uvicorn configures handlers
+    only for its own loggers, so this module's INFO records are dropped
+    before reaching a terminal — the runbook's "check the startup log"
+    instruction pointed at a line that never appeared. Both spend incidents
+    started with someone believing mock was on, so the banner is printed.
+    """
+
+    @pytest.mark.parametrize(
+        ("env_value", "expected"), [("1", "ON"), (None, "OFF")]
+    )
+    def test_lifespan_prints_the_effective_mock_state(self, monkeypatch, capsys, env_value, expected):
+        app_module = _reload_app_with_env(monkeypatch, env_value)
+
+        async def drive():
+            async with app_module._lifespan(app_module.app):
+                pass
+
+        asyncio.run(drive())
+
+        banner = [ln for ln in capsys.readouterr().out.splitlines() if "[vn-agent]" in ln]
+        assert banner, "startup must print the mock state to stdout, not only log it"
+        assert expected in banner[0], f"expected mock floor {expected} in {banner[0]!r}"
 
 
 class TestImageGenerationSharesTheSameGate:
