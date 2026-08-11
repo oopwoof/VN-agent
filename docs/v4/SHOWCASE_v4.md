@@ -169,7 +169,7 @@ Remove-Item Env:ANTHROPIC_API_KEY, Env:GOOGLE_API_KEY, Env:OPENAI_API_KEY -Error
 ## 4. 演示后可以顺手展开的三样东西
 
 - **LangGraph 拓扑图**：`README.md` 顶部（`scripts/dump_langgraph_diagram.py` 生成，10 节点）
-- **测试**：`947 passed`（2026-08-10 快照，`pytest --collect-only -q`）
+- **测试**：**957 passed / 959 collected**（2026-08-12 实跑；1 个已知 flaky，1 个 skipped）
 - **工程台账**：`.superpowers/sdd/FRONTEND_REDESIGN_PLAN_v4/progress.md` —— 六层迁移计划、每个任务的验证记录、以及**主动记录的偏差和未完成项**。被问「你怎么保证重构不出事」时直接翻这个。
 
 ---

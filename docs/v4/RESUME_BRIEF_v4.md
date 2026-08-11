@@ -182,7 +182,9 @@ Branch `feat/frontend-redesign-v4`, **19 commits** (`fa68464`..`1ac8ebf`, verifi
 - **Prompt caching factor**: first 1.25×, 5-min reuse 0.1× (Anthropic ephemeral cache spec + Sprint 8-4 verified)
 - **can_writer_fix routing savings**: ~$1.10 per 6-scene run avoided in wasted Writer cycles (`docs/v3/SHOWCASE_v3.md` §4.1)
 - **Real API smoke total spend**: ~$3.74 across 3 verified runs (M0 + mini #1 + mini #2)
-- **947 tests collected** (2026-08-10 `uv run pytest --collect-only -q`, on `feat/frontend-redesign-v4`) — up from 939 on 2026-07-29
+- **957 passed / 959 collected** (2026-08-12, executed on `main` in per-directory batches; 1 known flake `test_graph_routing.py::TestWarningsDedup`, 1 skipped). History: 939 (2026-07-29) → 947 (2026-08-10) → 959.
+  > ⚠️ **Which number is which**: 939 and 947 were `--collect-only` *collection* counts, not pass counts; earlier docs rendering "947 passed" were wrong. 959 is collected, 957 is the measured pass count. **Say "~950 tests, 957 passing on the last run" — do not mix the two.**
+  > Also note: running the whole suite in one process trips a torch/transformers Windows access violation partway (during `eval/embedder.py` index build); **run per directory and everything passes**, so it is single-process accumulated state, not a broken test. Confirmed unrelated to code changes by stashing and reproducing on pristine code.
 - **195 commits on the P6 branch / 176 on `main`** (2026-08-11 `git rev-list --count`). ⚠️ The older "166 commits" figure in this file and the "170 commits" figure in `docs/v3/SHOWCASE_v3.md` §6 and `docs/v4/PRODUCT_v4.md` §7.3 disagree with each other and are both stale; quote the current count or say "~190 commits"
 - **P6 pipeline labels**: 4 of 10 graph nodes labelled → 10 of 10 (`git show 6f7a285:src/vn_agent/web/app.py` vs current `src/vn_agent/web/app.py:1342`), exhaustiveness enforced by `tests/test_web/test_pipeline_labels.py`
 - **P6 i18n coverage**: 209 zh keys / 209 en keys, key sets identical, 10 of them `nodeLabel.*` (parsed from `frontend/src/i18n/dict.ts`); parity is enforced by `tsc`, not by discipline

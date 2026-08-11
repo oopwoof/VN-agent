@@ -15,6 +15,26 @@
 
 ## [Unreleased]
 
+### 2026-08-12 | 文档 - 2026-08-12 02:04
+
+**变更文件** (5 个):
+**其他变更** (1 文件):
+  - `README.md`
+
+**变更统计**:
+```
+README.md                     | 6 +++---
+ docs/PRODUCT.md               | 2 +-
+ docs/v4/RESUME_BRIEF_v4.md    | 4 +++-
+ docs/v4/RESUME_BRIEF_v4_CN.md | 4 +++-
+ docs/v4/SHOWCASE_v4.md        | 2 +-
+ 5 files changed, 11 insertions(+), 7 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-12 | 文档 - 2026-08-12 01:48
 
 **变更文件** (5 个):

@@ -152,7 +152,7 @@ User: "A lighthouse keeper must choose between saving a ship or abandoning the p
 | Quality assurance / 质量保证 | Cross-model judge (Sonnet + GPT-4o) + 5-dim rubric + BFS reachability + persona fingerprint drift audit |
 | Cost optimization / 成本优化 | Multi-model routing + prompt caching (Anthropic ephemeral) + per-job TokenTracker |
 | Web API / Web 接口 | FastAPI async + SQLite job store + SSE streaming |
-| CI/CD | GitHub Actions (ruff + mypy + 947 pytest + coverage ≥60%) + Docker |
+| CI/CD | GitHub Actions (ruff + mypy + 959 pytest + coverage ≥60%) + Docker |
 
 ---
 
@@ -276,7 +276,7 @@ src/vn_agent/
 ├── web/                 # FastAPI + SSE + SQLite job store
 ├── cli.py               # Typer: generate / continue-outline / regen / eval / ...
 └── config.py            # pydantic-settings + YAML + coupled sprite/BG knobs
-tests/                   # 947 pytest cases across 20+ test modules
+tests/                   # 959 pytest cases across 20+ test modules
 ```
 
 ---
@@ -284,7 +284,7 @@ tests/                   # 947 pytest cases across 20+ test modules
 ## Development / 开发
 
 ```bash
-uv run pytest -m "not slow"                         # 947 tests pass
+uv run pytest -m "not slow"                         # 957 of 959 pass (1 known flake, 1 skipped)
 uv run ruff check src/ tests/                       # Lint
 uv run mypy src/vn_agent/ --ignore-missing-imports  # Type check (clean)
 uv run pytest --cov=src/vn_agent --cov-report=term  # Coverage (66%)
