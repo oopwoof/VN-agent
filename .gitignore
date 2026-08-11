@@ -264,3 +264,7 @@ eval_*_results.json
 # list, internal metric contradictions). Kept local on purpose — the factual
 # source of truth, RESUME_BRIEF_v4*.md, IS committed.
 docs/v4/INTERVIEW_PREP_v4_CN.md
+# Same reason: quotes resume bullets verbatim, and §A⑤/§D catalogue this
+# project's weakest claims and its internal number conflicts. Useful to
+# rehearse against, not something to hand a stranger who clicks the repo.
+docs/v4/INTERVIEW_PACK_v4_CN.md

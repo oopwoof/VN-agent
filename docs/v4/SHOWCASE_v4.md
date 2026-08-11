@@ -12,20 +12,35 @@
 
 需要**两个终端**。没有一键启动脚本——这是已知的粗糙点，如果被问到就直说「M0 阶段没做，两条命令的事」。
 
+> ⚠️ **本节命令是 PowerShell 原生写法**，因为这台机器的默认终端是 PowerShell。
+> **不要照抄 bash 语法**——`VN_AGENT_MOCK=1 <命令>` 这种内联环境变量前缀在 PowerShell 里是解析错误，`unset` 不存在，`curl -s -o -w` 在 PS 5.1 里是 `Invoke-WebRequest` 的别名、参数全不认。
+> 用 Git Bash 的话，文末 §7 有 bash 对照版。
+
 ### 终端 1 · 后端
 
-```bash
+```powershell
 # ⚠️ 必须在仓库根目录执行
-cd D:/tasks/summer-intern/vn/VN-agent
-VN_AGENT_MOCK=1 .venv/Scripts/python.exe -m uvicorn vn_agent.web.app:app --port 8000
+cd D:\tasks\summer-intern\vn\VN-agent
+$env:VN_AGENT_MOCK = "1"
+.venv\Scripts\python.exe -m uvicorn vn_agent.web.app:app --port 8000
 ```
+
+启动后**第一眼就看这一行**（`app.py:81` 打印，不是 log 是 print，一定会出现）：
+
+```
+[vn-agent] VN_AGENT_MOCK='1' -> mock floor ON (no billable calls)
+```
+
+看到 `OFF (real API calls possible)` 就是环境变量没设上，**停下重来**。
+
+> `$env:VN_AGENT_MOCK` 只在**当前这个 PowerShell 窗口**里有效。换个窗口、或者关掉重开，都要重设——上次 $0.28 那次事故就是这个形状（详见 §6）。
 
 **为什么必须在根目录**：`src/vn_agent/assets/library.py:28` 的素材库 manifest 用的是相对路径 `data/assets/opensource/manifest.json`。换个目录启动不会报错，只会**静默变成空素材库**——多源素材那一段演示会什么都不显示，而且现场很难看出原因。
 
 ### 终端 2 · 前端
 
-```bash
-cd D:/tasks/summer-intern/vn/VN-agent/frontend
+```powershell
+cd D:\tasks\summer-intern\vn\VN-agent\frontend
 npm run dev
 ```
 
@@ -33,9 +48,9 @@ npm run dev
 
 ### 起完就验（30 秒，别跳过）
 
-```bash
-curl -s -o /dev/null -w "backend:%{http_code}\n" http://127.0.0.1:8000/jobs   # 期望 200
-curl -s -o /dev/null -w "frontend:%{http_code}\n" http://localhost:5173/       # 期望 200
+```powershell
+(Invoke-WebRequest http://127.0.0.1:8000/jobs -UseBasicParsing).StatusCode   # 期望 200
+(Invoke-WebRequest http://localhost:5173/ -UseBasicParsing).StatusCode        # 期望 200
 ```
 
 浏览器里确认三件事：左侧历史记录能加载、右侧是「输入一个主题开始生成」空态、底部状态条显示「就绪」。
@@ -56,20 +71,29 @@ curl -s -o /dev/null -w "frontend:%{http_code}\n" http://localhost:5173/       #
 
 跑一次生成后立刻查：
 
-```bash
-curl -s "http://127.0.0.1:8000/api/projects/<job_id>/token-usage"
+```powershell
+(Invoke-WebRequest "http://127.0.0.1:8000/api/projects/<job_id>/token-usage" -UseBasicParsing).Content
 ```
 
 **必须是 `"calls":0`**。任何非零都说明有真实调用，立刻停下。
 
 > 对照数据：修复前同样形状的请求是 `calls:3~5` / `$0.05~$0.11`；修复后实测 `calls:0` / `$0.0`（generate-setting 与 generate-script 两段都验过）。
 
+### 如果面试官问「这是真生成的吗」
+
+**必须直说是 mock。** 这个问题上含糊一次，后面所有数字都不可信了。
+
+> 「现在这一跑是 mock，返回的是预置 fixture，所以它不花钱、也不会在你面前挂掉。我演示的是**流水线的编排和状态**——哪个 Agent 在跑、节点之间怎么流转、失败怎么回退，这部分是真的，事件都是后端 `graph.astream()` 推上来的。
+> 真实生成的数据我有实测：6 幕含素材约 $1.7 / 30 分钟，双 Judge 一致性 Pearson r=0.643。要看真跑的话我可以给你看 `run_metrics.json` 和 trace。」
+
+**为什么不现场真跑**：一次 6 幕真实生成要 30 分钟，面试给不了这个时间；而且真调外部 API 在现场网络下是额外的失败面。
+
 ### 想要绝对保险
 
 演示用的 shell 里把 key 清掉，硬件级杜绝：
 
-```bash
-unset ANTHROPIC_API_KEY GOOGLE_API_KEY OPENAI_API_KEY
+```powershell
+Remove-Item Env:ANTHROPIC_API_KEY, Env:GOOGLE_API_KEY, Env:OPENAI_API_KEY -ErrorAction SilentlyContinue
 ```
 
 `_provider_has_credentials` 会跳过所有 provider。代价是真要现场跑真实生成就跑不了了——**建议演示全程用 mock**，真实成本数据用 `RESUME_BRIEF` 里已实测的数字讲。
@@ -82,9 +106,14 @@ unset ANTHROPIC_API_KEY GOOGLE_API_KEY OPENAI_API_KEY
 
 **目标：让面试官看见「多 Agent 流水线」这件事，而不是听我说。**
 
+> ⚠️ **演示主题必须用「樱花树下的转学生」，不要临场换别的。**
+> mock 的 fixture 是**按语言选的，不是按主题选的**（`services/mock_llm.py:356 _has_cjk`）：任何中文主题都会返回同一份校园恋爱 fixture——标题「樱花树下的约定」、角色「小雪（转学生）」、场景「初次相遇 / 午后对话 / 樱花下的约定」。
+> 所以输入「深海灯塔的守望者」，出来的会是一个樱花校园故事。**面试官一眼就能看出对不上**，而且这是现场最难圆的一种尴尬。用一个和 fixture 对得上的主题，画面就是自洽的。
+> （已入库的两张截图就带着这个错位：job `d93e856f` 主题是「黄昏的旧书店」，播放器里却是「初次相遇」。见 §3C。）
+
 | 步骤 | 操作 | 口播 |
 |---|---|---|
-| 1 | 输入主题「深海灯塔的守望者」 | 「输入只有一个主题，剩下的全部由流水线决定。」 |
+| 1 | 输入主题「樱花树下的转学生」 | 「输入只有一个主题，剩下的全部由流水线决定。」 |
 | 2 | 点 **⚡ 一键生成** | 「这是 Autopilot——它会跳过所有确认步骤。我一次都不会再点。」 |
 | 3 | **停下来，让节点依次点亮** | 「右边是真实的 LangGraph 执行状态：导演 → 结构审校 → 状态编排 → 分场推理 → 交叉引用 → 编剧 → 质量审校。**不是进度条动画**，每一格都是后端 `graph.astream()` 推上来的节点事件。」 |
 | 4 | 指「素材生成 · 已跳过」 | 「纯文本模式下这一步不跑，所以它显示『已跳过』而不是一直转圈——空状态也要说实话。」 |
@@ -117,8 +146,23 @@ unset ANTHROPIC_API_KEY GOOGLE_API_KEY OPENAI_API_KEY
 
 断网或时间不够时，按 §3A 的口播词讲这两张图即可——**信息量和现场跑基本相同，只是少了「它真的在动」这一层说服力**。
 
-> 录屏（GIF）尚未产出：录制工具导出的文件没有落盘（Chrome 下载位置需手动确认）。
-> 这是已知缺口，优先级低于上面两张截图。
+> ⚠️ **这两张截图带着 §3A 顶部说的那个主题错位**：job `d93e856f` 的主题是「黄昏的旧书店」，但播放器里显示的是「初次相遇」（樱花 fixture）。左侧历史栏也能看到 `mock gate check`、`节点事件验证` 这类调试用 job。
+> **要么**演示时不把截图放大到能看清这些细节，**要么**按 §3A 的主题重拍一次（重拍步骤见下方「待办」）。当前两张仍可用于讲流水线形态与播放器形态，那部分是准确的。
+
+### 已验证 / 未验证（2026-08-11 收尾）
+
+| 项 | 状态 | 证据 |
+|---|---|---|
+| PowerShell 启动命令（§1 全部） | ✅ 实跑通过 | 后端 200 / 前端 200 |
+| 启动 banner 显示 mock 状态 | ✅ 实跑通过 | `[vn-agent] VN_AGENT_MOCK='1' -> mock floor ON` |
+| 端到端 mock 生成（3 幕，主题「樱花树下的转学生」） | ✅ `completed` | job `6cec410d` |
+| **零花费** | ✅ | `{"calls":0,"estimated_cost_usd":0.0}`（生成中与完成后各查一次） |
+| 主题 / 标题 / 角色 / 场景自洽 | ✅ | 樱花树下的转学生 → 樱花树下的约定 · 小雪/小明 · 初次相遇/午后对话/樱花下的约定 |
+| **§3A 六步、§3B 八步的逐屏走查** | ❌ **未做** | Chrome 扩展本次全程未连上（`/compact` 同时报 403，是同一个登录过期）。上一次完整走查是 2026-08-11 早些时候的 10/10 通过 |
+| **录屏 GIF** | ❌ **仍未产出** | 同上，被扩展阻塞。这是第二次尝试失败 |
+
+**待办（需要人在场，几分钟）**：重新登录后，按 §3A 用主题「樱花树下的转学生」跑一遍，顺手重拍两张截图（换掉带主题错位的旧图）并录 GIF。
+**没做也能演**——上面那张表里所有「服务能起、跑得通、不花钱」的部分都已实跑验证过。
 
 ---
 
@@ -134,12 +178,12 @@ unset ANTHROPIC_API_KEY GOOGLE_API_KEY OPENAI_API_KEY
 
 | 症状 | 原因 | 现场怎么办 |
 |---|---|---|
-| 前端白屏 / 请求 502 | 8000 端口没起来或被别的进程占了 | `netstat -ano \| findstr :8000`。占用就杀掉，或换端口起后端并**临时**改 `frontend/vite.config.ts` 的 proxy target（改完记得别提交） |
+| 前端白屏 / 请求 502 | 8000 端口没起来或被别的进程占了 | `netstat -ano \| Select-String ":8000"`，最后一列是 PID；占用就 `Stop-Process -Id <PID>`，或换端口起后端并**临时**改 `frontend/vite.config.ts` 的 proxy target（改完记得别提交） |
 | Vite 起在 5174 | 5173 被占 | 直接用 5174，proxy 不受影响 |
 | 素材面板空的 | uvicorn 不是在仓库根目录起的 | 停掉，`cd` 到根目录重起（见 §1） |
 | 第一次生成卡很久 | 换了台机器，sentence-transformers / u2net 在冷下载（~90MB + ~170MB） | **不要在没预热过的机器上演示**。当前这台已缓存 |
 | 界面出问题 | v2 有 bug | 地址栏加 `?shell=v1` 立刻退回旧外壳（`useShellVariant.ts`）。旧壳完整保留，功能不缺，只是没有流水线剧场 |
-| `token-usage` 非零 | mock 闸门没生效 | **立刻停止演示**，检查后端启动时是否真的带了 `VN_AGENT_MOCK=1`（启动日志第一行会打印 `_MOCK_MODE=True`） |
+| `token-usage` 非零 | mock 闸门没生效 | **立刻停止演示**，回看后端启动那一行 banner 是不是 `mock floor ON`。是 `OFF` 就说明 `$env:VN_AGENT_MOCK` 没设在**这个**窗口里 |
 | 断网 / 投屏挂了 / 只剩 1 分钟 | — | 放录屏（`docs/v4/assets/`），照 §3A 的口播词讲。**准备这个的意义就在这里** |
 
 ---
@@ -158,4 +202,24 @@ unset ANTHROPIC_API_KEY GOOGLE_API_KEY OPENAI_API_KEY
 
 ---
 
-_运行手册结束。话术见 `docs/v4/INTERVIEW_PREP_v4_CN.md`，事实核对见 `docs/v4/RESUME_BRIEF_v4_CN.md`。_
+## 7. Git Bash 对照版（只在你确实用 bash 时看这里）
+
+正文用 PowerShell，因为那是这台机器的默认终端。如果开的是 Git Bash：
+
+```bash
+cd /d/tasks/summer-intern/vn/VN-agent
+VN_AGENT_MOCK=1 .venv/Scripts/python.exe -m uvicorn vn_agent.web.app:app --port 8000
+
+cd /d/tasks/summer-intern/vn/VN-agent/frontend && npm run dev
+
+curl -s -o /dev/null -w "backend:%{http_code}\n" http://127.0.0.1:8000/jobs
+curl -s -o /dev/null -w "frontend:%{http_code}\n" http://localhost:5173/
+curl -s "http://127.0.0.1:8000/api/projects/<job_id>/token-usage"
+unset ANTHROPIC_API_KEY GOOGLE_API_KEY OPENAI_API_KEY
+```
+
+启动 banner 与 §1 相同，两种 shell 都会打印。
+
+---
+
+_运行手册结束。话术见 `docs/v4/INTERVIEW_PACK_v4_CN.md`（面试主用）与 `docs/v4/INTERVIEW_PREP_v4_CN.md`（STAR 详版），事实核对见 `docs/v4/RESUME_BRIEF_v4_CN.md`。_

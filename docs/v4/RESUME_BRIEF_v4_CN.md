@@ -45,7 +45,7 @@
 | 6-Agent LangGraph DAG（Director / StructureReviewer / StateOrch / Thinking / Writer / DialogueReviewer / Assets） | 单 prompt 生成会被截断且 JSON 易损坏 | 条件边、3 轮修订循环；素材阶段使用 `asyncio.gather` + `return_exceptions=True` 隔离故障 | `src/vn_agent/agents/graph.py` |
 | 两层 Reviewer + 智能路由 | Reviewer 过去遇到每个 FAIL 都会“退回 Writer”，但图结构类失败（如场景不可达）并非 Writer 能解决 | 增加 `ReviewResult.can_writer_fix` 字段；纯函数 `decide_retry_target` 分发至 Director/Writer/Accept | `src/vn_agent/agents/reviewer.py:30`、`src/vn_agent/agents/routing.py`、commit `8a2ac88` |
 | 符号化 World State + StateOrchestrator | 长篇视觉小说会发生状态漂移（“Mira 在 ch2 已读过手稿，之后却再次阅读”） | Director 声明 boolean/int 变量；Haiku 将其翻译为自然语言约束并注入 Writer prompt | `src/vn_agent/agents/state_orchestrator.py`（Sprint 9-6） |
-| 面向长篇的三层记忆（Character Bible + Haiku 递归摘要 + 滑动窗口） | Sonnet 上下文并非无限；简单注入全部历史会浪费缓存 | Character Bible → `cache_control=ephemeral`（首次 1.25×，5 分钟内复用 0.1×）；Summarizer 在 ≥15 scenes 时启用；滑动窗口默认 N=2 | `src/vn_agent/agents/summarizer.py`、`state_orchestrator.py`、Sprint 11-1/11-2/11-3 |
+| 面向长篇的三层记忆（**全局缓存 + 章节折叠 + 局部检索**） | Sonnet 上下文并非无限；简单注入全部历史会浪费缓存 | ① 全局缓存：Character Bible → `cache_control=ephemeral`（`enable_prompt_caching=True`，首次 1.25×，5 分钟内复用 0.1×）；② 章节折叠：`enable_chapter_rollup=True`（每 10 scenes 异步 rollup，200–800 词动态长度，<10 scenes 跳过），另有逐场景摘要 `enable_scene_summarization=False` 需 ≥15 scenes 手动开；③ 局部检索：`use_lore_retrieval=True`、`lore_k=4`（`eval/lore.py`，always/chapter/scene 三 scope）。**滑动窗口 `writer_context_window` 是第四个开关，默认 0（关）**——早期文档误记为「三层之一、默认 N=2」，以代码为准 | `config.py:166/199-223`、`src/vn_agent/agents/summarizer.py`、`eval/lore.py`、`state_orchestrator.py`、Sprint 11-1/11-2/11-3 |
 | 双 Judge 交叉验证（Sonnet + GPT-4o） | Sonnet 评审 Sonnet 会形成回音室；4.17 的自评分缺乏说服力 | Sonnet 3.68 vs GPT-4o 3.66，**Pearson r=0.643，±1 分一致率=87%** | `docs/PRODUCT.md` §关键指标、commit `4f1228f` |
 | 8-cell `writer_mode` 扫描实验（数据驱动切换默认值） | `writer_mode=action`（few-shot RAG）原为默认值，但缺少数据验证 | 8-cell 扫描 {literary, action, baseline_self_refine, baseline_single} × {lighthouse, dragon} → **literary 4.17 > action 3.92 > self_refine 3.45 > baseline 3.25**，默认值由此切换为 literary | Sprint 8-5、扫描结果 JSONL 日志、`config.py` 的 writer_mode 注释 |
 | RAG 转向（对话 → 世界观/实体检索） | literary 模式禁用对话 few-shot 后，“RAG 成了花瓶” | 复用 FAISS + sentence-transformers 基础设施，改为检索角色/地点/世界变量实体；每次运行使用内存索引，不增加 LLM | `src/vn_agent/eval/lore.py`、Sprint 10-2 |
@@ -162,7 +162,11 @@
 ### 真实运行测量值（M）
 - **6-scene demo 端到端**：真实 API 约 $1.7，墙钟时间约 30 分钟（`docs/PRODUCT.md` 关键指标 line 429；使用 Sonnet + Nano Banana + Haiku 的 Phase 12-3 Showcase demo）
 - **Continue-outline（创作者模式后半段）**：约 $0.46，约 9 分钟（同上来源）
-- **M0 baseline（6-scene，真实 API，纯文本）**：38.1 分钟，$2.04（`docs/v3/SHOWCASE_v3.md` §6，2026-04-26）
+- **M0 baseline（6-scene，真实 API，含素材）**：38.1 分钟，$2.04（`docs/v3/SHOWCASE_v3.md` §6，2026-04-26）
+  > ⚠️ **$1.7 与 $2.04 的口径**（面试官容易当场发现「两个 6-scene 成本不一样」）：两次都是**含素材**的真实运行，不是文本 vs 素材的差别。$2.04 是 2026-04-26 的 M0 baseline，`SHOWCASE_v3.md` §6 明写它的目的就是「**揭示路由优化空间**」；$1.7 是路由优化之后 Phase 12-3 的 Showcase demo。
+  > **标准答法**：「两次真实运行，中间落了 `can_writer_fix` 路由优化，顺序是对得上的。但它们不是受控 A/B——主题和配置都不同，所以我不会把 $0.34 的差额说成路由省下来的钱；路由那条单独的测量是 §4.1 的约 $1.10/run。」
+  > **绝不要说**：$2.04 − $1.10 = $1.7。数字对不上，而且那是两件事。
+  > 另注：早期文档把这次运行标为「纯文本」，实为误记——`SHOWCASE_v3.md:45` 的产出是 6 scenes / 3 characters / **4 BGM cues**。
 - **mini smoke #1（3-scene）**：10.4 分钟，$0.57——验证路由优化（相较修复前成本下降约 70%）
 - **mini smoke #2（3-scene）**：20.5 分钟，$1.13——验证上限/schema 长度行为（Sonnet 将 `max_tokens=8000` 当作目标：3/3 均触及上限，输出 tokens 为 7999/8000/8000 → **单场景成本 +54%**；负向结论：提高上限**不是**质量杠杆）
 - **跨 Judge Pearson r = 0.643，±1 分一致率 = 87%**（8-cell 扫描中 Sonnet 3.68 / GPT-4o 3.66，commit `4f1228f`）
