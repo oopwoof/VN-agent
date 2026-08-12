@@ -15,6 +15,26 @@
 
 ## [Unreleased]
 
+### 2026-08-13 | 实现 - 2026-08-13 00:35
+
+**变更文件** (2 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/eval/embedder.py`
+
+**测试变更** (1 文件):
+  - `tests/test_eval/test_embedder.py`
+
+**变更统计**:
+```
+src/vn_agent/eval/embedder.py    | 25 ++++++++++++++++++++++++-
+ tests/test_eval/test_embedder.py | 40 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 64 insertions(+), 1 deletion(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-12 | 文档 - 2026-08-12 02:04
 
 **变更文件** (5 个):

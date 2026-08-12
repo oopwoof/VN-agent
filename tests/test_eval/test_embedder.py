@@ -172,3 +172,43 @@ class TestEmbeddingIndex:
 
         with pytest.raises(FileNotFoundError):
             EmbeddingIndex.load(tmp_path / "nonexistent")
+
+
+class TestModelIsSharedAcrossIndexes:
+    """One SentenceTransformer per model name per process, not per index.
+
+    A web server builds a fresh index per job; without sharing, each job
+    left another ~90MB model resident. `encode` doesn't mutate the model,
+    so one instance can back many indexes.
+    """
+
+    def test_two_indexes_share_one_model(self):
+        from vn_agent.eval.embedder import EmbeddingIndex
+
+        a = EmbeddingIndex()
+        b = EmbeddingIndex()
+        assert a._model is b._model
+
+    def test_a_different_model_name_is_not_served_from_cache(self):
+        """Cache is keyed by name — asking for another model must not hand
+        back whichever one loaded first (the bug an unkeyed cache invites)."""
+        from vn_agent.eval.embedder import _load_model
+
+        m1 = _load_model("all-MiniLM-L6-v2")
+        m2 = _load_model("all-MiniLM-L6-v2")
+        assert m1 is m2, "same name must hit the cache"
+        assert _load_model.cache_info().hits >= 1
+
+    def test_persisted_index_reloads_under_its_own_model_name(self, corpus, tmp_path):
+        """`load()` goes through __init__, so it must key the cache on the
+        model recorded in metadata rather than the default."""
+        from vn_agent.eval.embedder import EmbeddingIndex
+
+        index = EmbeddingIndex()
+        index.build(corpus)
+        save_dir = tmp_path / "idx"
+        index.save(save_dir)
+
+        loaded = EmbeddingIndex.load(save_dir)
+        assert loaded._model_name == index._model_name
+        assert loaded._model is index._model

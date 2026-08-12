@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -45,6 +46,28 @@ _DEFAULT_FAISS_WEIGHT = 0.7
 _DEFAULT_BM25_WEIGHT = 0.3
 
 
+@lru_cache(maxsize=4)
+def _load_model(model_name: str):
+    """Return a process-wide shared SentenceTransformer for `model_name`.
+
+    Every `EmbeddingIndex` used to construct its own, so a long-running web
+    server accumulated one full model (~90MB resident) per job and paid the
+    load again each time. `encode` does not mutate the model, so sharing one
+    instance across indexes is safe; the per-index state that actually
+    matters (embeddings, FAISS, BM25, sessions) stays on the instance.
+
+    Cached by name so a caller asking for a different model still gets that
+    model rather than whichever one happened to load first. maxsize is small
+    because the repo only ever references one or two.
+
+    Measured 2026-08-12: this is hygiene, not a speed fix — a cold server
+    ran a 3-scene mock in 95s versus 90s warm, so model loading was never
+    the bottleneck it was briefly documented as. The win is bounded memory
+    in a server that serves many jobs.
+    """
+    return SentenceTransformer(model_name)
+
+
 class EmbeddingIndex:
     """Semantic search index over annotated corpus sessions.
 
@@ -62,7 +85,7 @@ class EmbeddingIndex:
                 "Install with: uv sync --extra rag"
             )
         self._model_name = model_name
-        self._model = SentenceTransformer(model_name)
+        self._model = _load_model(model_name)
         self._embeddings: np.ndarray | None = None
         self._faiss_index: object | None = None  # faiss.IndexFlatIP
         self._bm25: object | None = None  # BM25Okapi
