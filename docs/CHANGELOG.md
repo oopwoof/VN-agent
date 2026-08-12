@@ -15,6 +15,24 @@
 
 ## [Unreleased]
 
+### 2026-08-13 | 杂项 - 2026-08-13 00:38
+
+**变更文件** (2 个):
+**其他变更** (2 文件):
+  - `data/autopilot/runs.jsonl`
+  - `scripts/update_docs.py`
+
+**变更统计**:
+```
+data/autopilot/runs.jsonl |  6 ++++
+ scripts/update_docs.py    | 85 +++++++++++++++--------------------------------
+ 2 files changed, 33 insertions(+), 58 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-13 | 测试 - 2026-08-13 00:35
 
 **变更文件** (9 个):

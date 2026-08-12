@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """
 pre-commit 文档更新脚本
-在每次 git commit 前自动更新 DEV_LOG.md 和 PRODUCT.md
+在每次 git commit 前自动向 docs/CHANGELOG.md 的 [Unreleased] 区块顶部追加条目。
 
 用法：python scripts/update_docs.py
+
+2026-04-23 重构：原脚本同时追加 DEV_LOG.md + 更新 PRODUCT.md 时间戳；
+文档切分（DEV_LOG 归档、新建 CHANGELOG/ARCHITECTURE/AUDITS/DESIGN_DECISIONS）后，
+机器流水只追 CHANGELOG，稳定区文档由人工维护，不再触碰 PRODUCT.md 时间戳。
 """
 
 import io
@@ -18,8 +22,8 @@ if sys.platform == "win32":
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 ROOT = Path(__file__).parent.parent
-DEV_LOG = ROOT / "docs" / "DEV_LOG.md"
-PRODUCT = ROOT / "docs" / "PRODUCT.md"
+CHANGELOG = ROOT / "docs" / "CHANGELOG.md"
+UNRELEASED_MARKER = "## [Unreleased]\n"
 
 
 def run(cmd: list[str], **kwargs) -> str:
@@ -36,16 +40,6 @@ def get_staged_diff_stat() -> str:
     return run(["git", "diff", "--cached", "--stat"])
 
 
-def get_staged_diff_summary() -> str:
-    """返回简短的 diff 摘要（每个文件改动行数）"""
-    stat = get_staged_diff_stat()
-    return stat if stat else "（无变更）"
-
-
-def get_recent_commits(n: int = 3) -> str:
-    return run(["git", "log", f"-{n}", "--oneline", "--no-decorate"])
-
-
 def today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
@@ -54,16 +48,22 @@ def now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M")
 
 
-def update_dev_log(staged_files: list[str], diff_stat: str) -> None:
-    """在 DEV_LOG.md 的"开发记录"区块顶部插入新条目"""
-    content = DEV_LOG.read_text(encoding="utf-8")
+def update_changelog(staged_files: list[str], diff_stat: str) -> None:
+    """在 CHANGELOG.md 的 [Unreleased] 区块下方插入新条目。"""
+    content = CHANGELOG.read_text(encoding="utf-8")
 
     # 分类文件
     src_files = [f for f in staged_files if f.startswith("src/")]
     test_files = [f for f in staged_files if f.startswith("tests/")]
-    config_files = [f for f in staged_files if f.startswith("config/") or f.endswith(".toml") or f.endswith(".yaml")]
+    config_files = [
+        f for f in staged_files
+        if f.startswith("config/") or f.endswith(".toml") or f.endswith(".yaml")
+    ]
     doc_files = [f for f in staged_files if f.startswith("docs/")]
-    other_files = [f for f in staged_files if f not in src_files + test_files + config_files + doc_files]
+    other_files = [
+        f for f in staged_files
+        if f not in src_files + test_files + config_files + doc_files
+    ]
 
     # 推断提交类型
     if test_files and not src_files:
@@ -111,42 +111,14 @@ def update_dev_log(staged_files: list[str], diff_stat: str) -> None:
 ---
 """
 
-    # 插入到"开发记录"标题之后
-    marker = "## 开发记录\n"
-    if marker in content:
-        insert_pos = content.index(marker) + len(marker)
+    if UNRELEASED_MARKER in content:
+        insert_pos = content.index(UNRELEASED_MARKER) + len(UNRELEASED_MARKER)
         content = content[:insert_pos] + new_entry + content[insert_pos:]
     else:
         content += "\n" + new_entry
 
-    # 更新底部时间戳
-    if "_最后更新:" in content:
-        lines = content.splitlines()
-        for i in range(len(lines) - 1, -1, -1):
-            if "_最后更新:" in lines[i]:
-                lines[i] = f"_最后更新: {today()}_"
-                break
-        content = "\n".join(lines)
-
-    DEV_LOG.write_text(content, encoding="utf-8")
-    print(f"✅ DEV_LOG.md 已更新（新增 {today()} 条目）")
-
-
-def update_product_doc(staged_files: list[str]) -> None:
-    """更新 PRODUCT.md 的最后更新时间和进行中的状态"""
-    content = PRODUCT.read_text(encoding="utf-8")
-
-    # 更新底部时间戳
-    if "_最后更新:" in content:
-        lines = content.splitlines()
-        for i in range(len(lines) - 1, -1, -1):
-            if "_最后更新:" in lines[i]:
-                lines[i] = f"_最后更新: {today()}_"
-                break
-        content = "\n".join(lines)
-
-    PRODUCT.write_text(content, encoding="utf-8")
-    print(f"✅ PRODUCT.md 时间戳已更新")
+    CHANGELOG.write_text(content, encoding="utf-8")
+    print(f"✅ CHANGELOG.md 已更新（新增 {today()} 条目）")
 
 
 def main() -> int:
@@ -156,23 +128,20 @@ def main() -> int:
     non_doc_staged = [f for f in staged if not f.startswith("docs/")]
 
     if not non_doc_staged:
-        # 只有文档变更，不触发更新（避免无限循环）
-        print("ℹ️  仅文档变更，跳过文档更新")
+        print("ℹ️  仅文档变更，跳过 CHANGELOG 更新")
         return 0
 
-    print(f"\n📝 更新项目文档（{len(staged)} 个文件变更中）...")
+    print(f"\n📝 更新 CHANGELOG（{len(staged)} 个文件变更中）...")
 
     diff_stat = get_staged_diff_stat()
-    update_dev_log(staged, diff_stat)
-    update_product_doc(staged)
+    update_changelog(staged, diff_stat)
 
-    # 将文档加入本次 commit
     subprocess.run(
-        ["git", "add", "docs/DEV_LOG.md", "docs/PRODUCT.md"],
+        ["git", "add", "docs/CHANGELOG.md"],
         cwd=ROOT,
         check=True,
     )
-    print("✅ docs/ 已加入暂存区\n")
+    print("✅ docs/CHANGELOG.md 已加入暂存区\n")
 
     return 0
 
