@@ -182,9 +182,11 @@
 - **Prompt caching 系数**：首次 1.25×，5 分钟内复用 0.1×（Anthropic ephemeral cache 规范 + Sprint 8-4 验证）
 - **`can_writer_fix` 路由节省**：每次 6-scene 运行约减少 $1.10 的无效 Writer 循环（`docs/v3/SHOWCASE_v3.md` §4.1）
 - **真实 API smoke 总支出**：3 次已验证运行合计约 $3.74（M0 + mini #1 + mini #2）
-- **957 passed / 959 collected**（2026-08-12 `main` 上实跑，按目录分批；1 个已知 flaky `test_graph_routing.py::TestWarningsDedup`，1 个 skipped）。历史：939（2026-07-29）→ 947（2026-08-10）→ 959。
-  > ⚠️ **口径**：939/947 都是 `--collect-only` 的**收集数**，不是通过数，早期文档写成「947 passed」是错的。959 是收集数，957 是实测通过数。**面试时说「约 950 个测试，实跑 957 通过」，别把两个口径混用。**
-  > 另注：整套 suite 在单进程里跑到中途会触发 torch/transformers 的 Windows access violation（`eval/embedder.py` 建索引时）；**按目录分批跑则全部通过**，说明是单进程累积状态的问题，不是测试本身坏了。这是本机环境问题，已用 stash 对照验证与代码改动无关。
+- **971 passed / 1 skipped / 0 failed，共 972 collected**（2026-08-13 `main` 上单进程全量实跑）。唯一 skip 是 `test_real_api.py`，无 key 时按设计跳过。历史：939（2026-07-29）→ 947（2026-08-10）→ 959 → 972。
+  > ⚠️ **口径**：939/947/959 都是 `--collect-only` 的**收集数**，不是通过数，早期文档写成「947 passed」是错的。**面试时说「约 970 个测试，最近一次全量实跑 971 通过、0 失败」。**
+  > **两个之前记在这里的问题现已修复，值得当故事讲**：
+  > ① 整套 suite 单进程跑到中途会触发 torch 的 Windows access violation。根因是 `EmbeddingIndex` 每次实例化都重新构造 SentenceTransformer，崩在 transformers 的 `_materialize_copy`。改为按 model_name 共享后不再复现（commit `9ac84ae`）。
+  > ② 长期挂在「已知 flaky」名单上的 `TestWarningsDedup` **根本不是 flaky——它在真实调 Anthropic**：`ainvoke_with_pending_debug` 在函数体内重新 import `ainvoke_llm`，绕开了测试对 `structure_reviewer.ainvoke_llm` 的 patch，模型每次返回的 findings 数量不同（4 vs 5）才导致「时好时坏」。已用 conftest 两层地板堵死（commit `f1dd956`），`test_agents` 也因此从 945s 降到 556s。
 - **P6 分支 195 个 commit / `main` 176 个**（2026-08-11 `git rev-list --count`）。⚠️ 本文件旧的"166 个 commit"与 `docs/v3/SHOWCASE_v3.md` §6、`docs/v4/PRODUCT_v4.md` §7.3 的"170 个 commit"彼此矛盾且都已过期；请引用当前计数，或笼统说"约 190 个 commit"
 - **P6 流水线标签**：10 个图节点中有标签的从 4 个补到 10 个（`git show 6f7a285:src/vn_agent/web/app.py` 对比当前 `src/vn_agent/web/app.py:1342`），完备性由 `tests/test_web/test_pipeline_labels.py` 强制
 - **P6 i18n 覆盖**：zh 209 个 key / en 209 个 key，集合完全一致，其中 10 个是 `nodeLabel.*`（解析 `frontend/src/i18n/dict.ts` 得到）；对齐靠 `tsc` 保证，不靠人的纪律

@@ -429,7 +429,7 @@ Phase 11 就是对这批批评的系统化响应（Sprint 9/10 deferred 处理 s
 - API 成本（每次生成的花费）— 现通过 TokenTracker 精确追踪。Showcase demo Writer+Reviewer+Assets ≈ $1.7 / 30 min 全流程；continue-outline ≈ $0.46 / 9 min（仅后半程）
 - 策略分类准确率 — `vn-agent eval strategy` 量化
 - 管线质量指标 — literary 4.17 > action 3.92 > baseline_self_refine 3.45 > baseline_single 3.25（8-cell sweep，multi-agent 效果验证）
-- 测试通过率 — **957 passed / 959 collected**（2026-08-12 实跑，按目录分批；1 个已知 flaky `test_graph_routing.py::TestWarningsDedup`，1 个 skipped）。此前本行长期停留在 352，且「947」是 `--collect-only` 的**收集数**被误当成通过数——收集数和通过数是两个口径
+- 测试通过率 — **971 passed / 1 skipped / 0 failed，共 972 collected**（2026-08-13 单进程全量实跑）。唯一 skip 是 `test_real_api.py`（无 key 时按设计跳过）。此前本行长期停留在 352，且「947」是 `--collect-only` 的**收集数**被误当成通过数——收集数和通过数是两个口径
 
 ---
 
