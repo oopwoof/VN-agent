@@ -420,8 +420,14 @@ class TestWarningsDedup:
         )
         mock_settings.return_value.llm_structure_reviewer_model = "claude-sonnet-4-6"
         mock_settings.return_value.structure_review_strict = False
+        # Patch what structure_reviewer awaits, not a name it never reads.
+        # This test used to patch `structure_reviewer.ainvoke_llm`, which
+        # `ainvoke_with_pending_debug` bypasses via its own function-local
+        # import — so it was calling the live model, and "flaking" purely
+        # because the model returned a different number of findings each
+        # run (4 vs 5). See tests/conftest.py.
         mocker.patch(
-            "vn_agent.agents.structure_reviewer.ainvoke_llm",
+            "vn_agent.services.pending_debug.ainvoke_with_pending_debug",
             AsyncMock(return_value=_Resp()),
         )
 

@@ -7,6 +7,11 @@ import pytest
 
 from vn_agent.services.llm import ainvoke_llm, mock_mode_var
 
+# This module exists to test mock_mode_var itself — including that it
+# defaults to OFF. The conftest floor sets it ON, which would invert the
+# assertions, so this module drives the var by hand.
+pytestmark = pytest.mark.no_mock_floor
+
 
 @pytest.mark.asyncio
 async def test_default_off_does_not_short_circuit(monkeypatch):

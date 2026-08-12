@@ -14,6 +14,11 @@ from vn_agent.services.llm import (
     get_llm,
 )
 
+# Key-pool rotation and retry behaviour are the subject here; the conftest
+# floor's forced mock_mode_var would short-circuit ainvoke_llm before any
+# of it runs. Keys are still stripped and the transport is patched.
+pytestmark = pytest.mark.no_mock_floor
+
 
 def test_retriable_includes_base_types():
     assert TimeoutError in _RETRIABLE

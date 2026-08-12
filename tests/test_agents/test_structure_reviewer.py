@@ -325,7 +325,8 @@ class TestRunStructureReviewerStateOutput:
         mock_ainvoke = AsyncMock(return_value=_FakeResponse(llm_response))
 
         with patch("vn_agent.agents.structure_reviewer.get_settings") as mock_s, \
-             patch("vn_agent.agents.structure_reviewer.ainvoke_llm", mock_ainvoke):
+             patch("vn_agent.services.pending_debug.ainvoke_with_pending_debug",
+                   mock_ainvoke):
             mock_s.return_value.llm_structure_reviewer_model = "claude-sonnet-4-6"
             mock_s.return_value.structure_review_strict = False
             result = await run_structure_reviewer(state)
@@ -370,8 +371,13 @@ class TestRunStructureReviewerStateOutput:
             "summary": "mixed",
         })
 
+        # Patch the wrapper structure_reviewer actually awaits. Patching
+        # `structure_reviewer.ainvoke_llm` rebinds a name this code path
+        # never reads — `ainvoke_with_pending_debug` re-imports ainvoke_llm
+        # inside its own body — so the canned response below was being
+        # ignored and the assertions were passing on live model output.
         with patch("vn_agent.agents.structure_reviewer.get_settings") as mock_s, \
-             patch("vn_agent.agents.structure_reviewer.ainvoke_llm",
+             patch("vn_agent.services.pending_debug.ainvoke_with_pending_debug",
                    AsyncMock(return_value=_FakeResponse(llm_response))):
             mock_s.return_value.llm_structure_reviewer_model = "claude-sonnet-4-6"
             mock_s.return_value.structure_review_strict = False

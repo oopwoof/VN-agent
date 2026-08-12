@@ -14,6 +14,12 @@ from vn_agent.agents.state import initial_state
 
 pytestmark = [
     pytest.mark.slow,
+    # Exempt from the suite-wide mock floor in tests/conftest.py. Without
+    # this the floor would strip ANTHROPIC_API_KEY and force mock_mode_var
+    # on, so this file would quietly pass against canned fixtures while
+    # claiming to exercise the real provider — worse than not running.
+    # The skipif below stays the actual gate: no key, no run.
+    pytest.mark.real_api,
     pytest.mark.skipif(
         not os.environ.get("ANTHROPIC_API_KEY"),
         reason="ANTHROPIC_API_KEY not set — skipping real API test",

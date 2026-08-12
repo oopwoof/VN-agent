@@ -15,6 +15,34 @@
 
 ## [Unreleased]
 
+### 2026-08-13 | 测试 - 2026-08-13 00:35
+
+**变更文件** (9 个):
+**测试变更** (9 文件):
+  - `tests/conftest.py`
+  - `tests/test_agents/test_graph_routing.py`
+  - `tests/test_agents/test_structure_reviewer.py`
+  - `tests/test_cli/test_mock_patch.py`
+  - `tests/test_integration/test_real_api.py`
+
+**变更统计**:
+```
+tests/conftest.py                                  | 102 ++++++++++++++
+ tests/test_agents/test_graph_routing.py            |   8 +-
+ tests/test_agents/test_structure_reviewer.py       |  10 +-
+ tests/test_cli/test_mock_patch.py                  |   7 +
+ tests/test_integration/test_real_api.py            |   6 +
+ tests/test_services/test_image_gen.py              |   6 +
+ tests/test_services/test_llm.py                    |   5 +
+ tests/test_services/test_llm_mock_context.py       |   5 +
+ .../test_no_billable_calls_in_tests.py             | 153 +++++++++++++++++++++
+ 9 files changed, 299 insertions(+), 3 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-13 | 实现 - 2026-08-13 00:35
 
 **变更文件** (2 个):

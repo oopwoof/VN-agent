@@ -15,9 +15,16 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 from vn_agent.cli import _patch_mock_llm, _unpatch_mock_llm
 from vn_agent.services.llm import mock_mode_var
 from vn_agent.services.pending_debug import ainvoke_with_pending_debug
+
+# Asserts that _patch_mock_llm is what sets mock_mode_var, and that
+# _unpatch resets it. The conftest floor pre-setting the var would make
+# both assertions vacuous.
+pytestmark = pytest.mark.no_mock_floor
 
 # No shared autouse fixture here: pytest-asyncio runs each async test body in
 # its own task context, and a ContextVar token set in that context can't be

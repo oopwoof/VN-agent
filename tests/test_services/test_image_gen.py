@@ -8,6 +8,12 @@ import pytest
 from vn_agent.services import image_gen
 from vn_agent.services.llm import mock_mode_var
 
+# Provider dispatch and the mock gate are what's under test here, so the
+# conftest floor must not pre-set mock_mode_var — it would short-circuit
+# before the routing branch these assert on. Keys are still stripped, and
+# every provider call is patched, so nothing here can bill.
+pytestmark = pytest.mark.no_mock_floor
+
 
 class _FakeSettings:
     def __init__(self, provider="openai", model="dall-e-3", google_key=""):
