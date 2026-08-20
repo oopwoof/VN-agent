@@ -15,6 +15,22 @@
 
 ## [Unreleased]
 
+### 2026-08-20 | 测试 - 2026-08-20 11:11
+
+**变更文件** (1 个):
+**测试变更** (1 文件):
+  - `tests/test_integration/test_longform_mock.py`
+
+**变更统计**:
+```
+tests/test_integration/test_longform_mock.py | 113 +++++++++++++++++++++++++++
+ 1 file changed, 113 insertions(+)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-20 | 实现 - 2026-08-20 11:11
 
 **变更文件** (3 个):
