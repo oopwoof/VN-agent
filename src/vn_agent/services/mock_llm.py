@@ -183,6 +183,42 @@ _SCENE_ARTIST_RESPONSE = """{
   "prompt": "painterly anime background, lighthouse on rocky cliff at night, massive storm approaching, dramatic lightning, crashing waves far below, atmospheric fog, wide landscape composition"
 }"""
 
+# ── Long-form fixtures (thinking / resync / rollup / arbitrate) ───────────────
+# Before caller-tag routing these four callers keyword-collided into other
+# fixtures: THINKING_SYSTEM mentions "director" (→ step1 outline, validating
+# into an all-defaults SceneThinking), ROLLUP_SYSTEM mentions "RAW DIALOGUE"
+# (→ writer dialogue array stored as Chapter.summary). Both failed silently
+# while logging success — the worst mode for a long-form dry run.
+
+_THINKING_RESPONSE = """{
+  "writing_intent": "mock: land this scene's declared emotional pivot while honoring its context deps",
+  "key_beats_expanded": [
+    "mock beat 1 — establish the location and who is present",
+    "mock beat 2 — surface the scene's central tension",
+    "mock beat 3 — exit on the declared hook toward the next scene"
+  ],
+  "callback_plan": [],
+  "opening_hook": "mock: open on the declared location, mid-motion",
+  "closing_beat": "mock: close on the exit hook, unresolved",
+  "voice_notes": {},
+  "risks": ["mock: do not over-explain — subtext only"]
+}"""
+
+_ARBITRATE_RESPONSE = '{"decisions": []}'
+
+
+def _rollup_response(caller: str) -> str:
+    """Prose chapter summary; embeds the caller's chapter range so each
+    rollup is distinct (the dry run asserts summaries differ across chapters)."""
+    span = caller.removeprefix("rollup_chapter/")
+    return (
+        f"Chapter summary ({span}): the chapter opens on the cast's declared "
+        "situation, escalates through its scenes' assigned narrative "
+        "strategies, and closes on the final scene's exit hook. State changes "
+        "declared by these scenes are canon going forward; no new named "
+        "entities are introduced beyond the existing roster."
+    )
+
 # ── Chinese fixtures ─────────────────────────────────────────────────────────
 
 DIRECTOR_STEP1_CN = """{
@@ -414,6 +450,72 @@ def _mock_intent_classification(user_prompt: str) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
+def _writer_response(user_prompt: str, caller: str, is_chinese: bool) -> str:
+    """Writer dialogue lookup: match a known scene id in caller/user prompt,
+    else fall back to the first scene's dialogue (pinned by
+    test_dispatch_writer_fallback)."""
+    scene_map = _WRITER_SCENE_MAP_CN if is_chinese else _WRITER_SCENE_MAP
+    for scene_id, response in scene_map.items():
+        if scene_id in caller or scene_id in user_prompt:
+            return response
+    return next(iter(scene_map.values()))
+
+
+def _route_by_caller(caller: str, user_prompt: str, is_chinese: bool) -> str | None:
+    """Caller-tag routing table — the one dispatch key that can't drift when
+    a system prompt is reworded, because our own agents set the tags.
+
+    Returns None for callers not in the table (baseline_*, eval/strategy,
+    web/stream, preflight/ping, ...) so they keep hitting the keyword ladder.
+
+    Long-form callers first consult mock_synth (VN_MOCK_SYNTH=1, off by
+    default): with the gate off every try_* returns None and the fixtures
+    serve byte-identical, which is what the 971-test baseline pins. CN
+    themes always stay on the CN fixtures — the dry run is EN-only.
+    """
+    from vn_agent.services import mock_synth
+
+    if caller.startswith(("director/step1", "director/repair")):
+        if not is_chinese:
+            synth = mock_synth.try_step1(user_prompt)
+            if synth is not None:
+                return synth
+        return DIRECTOR_STEP1_CN if is_chinese else DIRECTOR_STEP1
+    if caller.startswith("director/step2"):
+        if not is_chinese:
+            synth = mock_synth.try_step2(user_prompt)
+            if synth is not None:
+                return synth
+        return DIRECTOR_STEP2_CN if is_chinese else DIRECTOR_STEP2
+    if caller.startswith("writer/"):
+        if not is_chinese:
+            synth = mock_synth.try_writer(user_prompt, caller)
+            if synth is not None:
+                return synth
+        return _writer_response(user_prompt, caller, is_chinese)
+    if caller.startswith(("thinking/", "resync/")):
+        synth = mock_synth.try_thinking(user_prompt, caller)
+        return synth if synth is not None else _THINKING_RESPONSE
+    if caller == "director_arbitrate":
+        return _ARBITRATE_RESPONSE
+    if caller.startswith("rollup_chapter/"):
+        return _rollup_response(caller)
+    if caller.startswith("summarizer/"):
+        synth = mock_synth.try_summary(caller)
+        return synth if synth is not None else _SUMMARIZER_RESPONSE
+    if caller == "state_orchestrator":
+        return _STATE_ORCHESTRATOR_RESPONSE
+    if caller == "structure_reviewer":
+        return _STRUCTURE_REVIEWER_RESPONSE
+    if caller == "reviewer":
+        return _REVIEWER_RESPONSE
+    if caller.startswith("character_designer/"):
+        return _CHARACTER_DESIGNER_RESPONSE
+    if caller.startswith("scene_artist/"):
+        return _SCENE_ARTIST_RESPONSE
+    return None
+
+
 def _dispatch(sys_lower: str, user_prompt: str, caller: str) -> str:
     is_chinese = _has_cjk(user_prompt)
 
@@ -437,6 +539,15 @@ def _dispatch(sys_lower: str, user_prompt: str, caller: str) -> str:
             "(mock answer) Based on the current setting, the answer depends on the specific scene "
             "details — a real run would cite the actual script content here."
         )
+
+    # 50-scene dry run P0: caller-tag routing, consulted before every keyword
+    # match. The keyword ladder collides on exactly the long-form callers
+    # (THINKING_SYSTEM mentions "director", ROLLUP_SYSTEM mentions "RAW
+    # DIALOGUE"), and both failures were silent-positive. The ladder below
+    # stays as fallback for tests and direct calls without a real caller tag.
+    routed = _route_by_caller(caller, user_prompt, is_chinese)
+    if routed is not None:
+        return routed
 
     # Director step2: detected by caller tag or system prompt content
     if "director" in sys_lower and (
@@ -470,12 +581,7 @@ def _dispatch(sys_lower: str, user_prompt: str, caller: str) -> str:
 
     # Writer: try to match scene id in caller (e.g. "writer/ch1_arrival")
     if "writer" in sys_lower or "dialogue" in sys_lower:
-        scene_map = _WRITER_SCENE_MAP_CN if is_chinese else _WRITER_SCENE_MAP
-        for scene_id, response in scene_map.items():
-            if scene_id in caller or scene_id in user_prompt:
-                return response
-        # fallback: return first scene dialogue
-        return next(iter(scene_map.values()))
+        return _writer_response(user_prompt, caller, is_chinese)
 
     # Character designer
     if "character" in sys_lower and "designer" in sys_lower:

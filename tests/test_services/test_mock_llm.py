@@ -1,4 +1,6 @@
 """Tests for mock LLM dispatch logic."""
+import json
+
 import pytest
 
 from vn_agent.services.mock_llm import mock_ainvoke
@@ -137,3 +139,77 @@ class TestChatOpsMockDispatch:
             "You answer questions", "Question: why?", caller="chat_ops/explain",
         )
         assert r.content  # non-empty text, not schema-validated
+
+
+# ── 50-scene dry run P0: caller-tag routing ────────────────────────────────
+#
+# The keyword ladder misroutes exactly the long-form callers, and it fails
+# *silently and positively*: THINKING_SYSTEM mentions "director" so thinking
+# workers got the step1 outline back — which validates into an all-defaults
+# SceneThinking while the node logs "produced thinking for N/N scenes".
+# ROLLUP_SYSTEM says "RAW DIALOGUE" and its user prompt embeds scene ids, so
+# chapter rollups got a writer dialogue array stored as Chapter.summary.
+# These tests call through the REAL system prompts (imported, not paraphrased)
+# so a prompt rewording that reintroduces a collision fails here, not in a
+# 50-scene run's silent output.
+
+class TestCallerTagRouting:
+    @pytest.mark.asyncio
+    async def test_thinking_caller_returns_nonvacuous_scene_thinking(self):
+        from vn_agent.agents.thinking import THINKING_SYSTEM
+        from vn_agent.schema.script import SceneThinking
+
+        r = await mock_ainvoke(
+            THINKING_SYSTEM,
+            "## Scene being planned: ch1_arrival — Storm's Eve\n"
+            "Characters present: ['char_mara', 'char_voice']",
+            caller="thinking/ch1_arrival",
+        )
+        thinking = SceneThinking.model_validate(json.loads(r.content))
+        assert thinking.writing_intent
+        assert thinking.key_beats_expanded
+
+    @pytest.mark.asyncio
+    async def test_resync_caller_returns_scene_thinking_not_dialogue(self):
+        from vn_agent.agents.thinking import RESYNC_SYSTEM
+        from vn_agent.schema.script import SceneThinking
+
+        r = await mock_ainvoke(
+            RESYNC_SYSTEM,
+            "Your current thinking for ch1_signal, plus peer plans.",
+            caller="resync/ch1_signal",
+        )
+        data = json.loads(r.content)
+        assert isinstance(data, dict)  # not a writer dialogue array
+        assert SceneThinking.model_validate(data).writing_intent
+
+    @pytest.mark.asyncio
+    async def test_rollup_caller_returns_prose_not_dialogue_json(self):
+        from vn_agent.agents.summarizer import ROLLUP_SYSTEM
+
+        r = await mock_ainvoke(
+            ROLLUP_SYSTEM,
+            "Chapter has 2 scenes. Target length: 200-800 words.\n\n"
+            "=== Scene ch1_arrival: Storm's Eve ===\nDialogue:\n  ...\n\n"
+            "=== Scene ch1_signal: Distress Signal ===\nDialogue:\n  ...",
+            caller="rollup_chapter/ch_ch1_arrival-ch1_signal",
+        )
+        content = r.content.strip()
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            parsed = None
+        assert not isinstance(parsed, list)  # prose summary, not dialogue JSON
+        assert len(content) > 40
+
+    @pytest.mark.asyncio
+    async def test_director_arbitrate_returns_decisions_list(self):
+        from vn_agent.agents.thinking import DIRECTOR_ARBITRATE_SYSTEM
+
+        r = await mock_ainvoke(
+            DIRECTOR_ARBITRATE_SYSTEM,
+            "Unresolved callback conflicts to arbitrate: []",
+            caller="director_arbitrate",
+        )
+        data = json.loads(r.content)
+        assert isinstance(data.get("decisions"), list)

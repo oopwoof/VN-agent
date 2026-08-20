@@ -15,6 +15,30 @@
 
 ## [Unreleased]
 
+### 2026-08-20 | 实现 - 2026-08-20 11:11
+
+**变更文件** (4 个):
+**源码变更** (2 文件):
+  - `src/vn_agent/services/mock_llm.py`
+  - `src/vn_agent/services/mock_synth.py`
+
+**测试变更** (2 文件):
+  - `tests/test_services/test_mock_llm.py`
+  - `tests/test_services/test_mock_synth.py`
+
+**变更统计**:
+```
+src/vn_agent/services/mock_llm.py      | 118 +++++++++-
+ src/vn_agent/services/mock_synth.py    | 383 +++++++++++++++++++++++++++++++++
+ tests/test_services/test_mock_llm.py   |  76 +++++++
+ tests/test_services/test_mock_synth.py | 266 +++++++++++++++++++++++
+ 4 files changed, 837 insertions(+), 6 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-13 | 文档 - 2026-08-13 00:54
 
 **变更文件** (5 个):
