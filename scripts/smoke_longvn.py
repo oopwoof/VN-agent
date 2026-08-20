@@ -16,6 +16,15 @@ USAGE:
   uv run python scripts/smoke_longvn.py --scenes 20  # stress test
   uv run python scripts/smoke_longvn.py --scenes 50  # north star
 
+ZERO-COST STRUCTURAL DRY RUN (50-scene dry run round):
+  uv run python scripts/smoke_longvn.py --mock --scenes 50 --concurrent 5 --text-only
+      Runs the same graph end-to-end against the VN_MOCK_SYNTH mock
+      synthesizer: no keys, no --confirm, no spend. Validates the
+      ORCHESTRATION (chapters, state_timeline, DAG waves, thinking,
+      rollups, parallel writer overlap) — it cannot validate context
+      degradation, output quality, cost, or rate-limit behavior; those
+      still need the real-API tiers above.
+
 PARALLEL WRITER (Phase 13-2 Step 4b-6):
   --concurrent N
       Set writer_max_concurrent. N>1 auto-enables thinking_fanout +
@@ -65,6 +74,7 @@ import asyncio
 import io
 import json
 import logging
+import os
 import sys
 import time
 from datetime import UTC, datetime
@@ -153,6 +163,21 @@ def _compute_health_signals(
     return signals, status
 
 
+def _count_jsonl_lines(path: Path) -> int:
+    """Non-blank line count; 0 for a missing/unreadable file. Used to turn
+    the cumulative api_key_rotations.jsonl into a per-run delta — reading
+    its absolute size attributed every historic run's rotations to the
+    current one (a zero-call mock run read as RED off 47 old rows)."""
+    if not path.exists():
+        return 0
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return sum(1 for line in f if line.strip())
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Could not read {path.name}: {e}")
+        return 0
+
+
 def _apply_concurrency_overrides(settings, concurrent: int) -> None:
     """Phase 13-2 Step 4b-6: in-process Settings override for benchmark
     mode, where we re-run the same theme at different concurrency tiers
@@ -172,6 +197,65 @@ def _apply_concurrency_overrides(settings, concurrent: int) -> None:
         settings.writer_consume_thinking = True
 
 
+def _apply_mock_overrides(settings) -> None:
+    """--mock: flip on the long-form machinery that defaults off, so the
+    dry run exercises it instead of silently skipping it. Same
+    post-construction-mutation pattern (and caveat) as
+    _apply_concurrency_overrides above."""
+    settings.enable_cross_ref_sync = True
+    settings.enable_scene_summarization = True
+
+
+def _mock_structural_issues(script, *, expect_thinking: bool) -> list[str]:
+    """Structural FAIL predicates for --mock runs.
+
+    Mock tiers can't assert on cost or cache ratio (both zero), so they
+    assert on structure. Each predicate targets a specific silent failure
+    this round actually found: the one-fixture-for-every-scene writer
+    fallback, the thinking misroute that validated into all-defaults
+    SceneThinking, and the rollup misroute that stored dialogue JSON as
+    Chapter.summary. Pure function; unit-tested in test_smoke_longvn.py.
+    """
+    issues: list[str] = []
+    if script is None:
+        return ["FAIL(mock): no script produced"]
+
+    first_lines = [s.dialogue[0].text for s in script.scenes if s.dialogue]
+    if len(set(first_lines)) != len(first_lines):
+        issues.append(
+            "FAIL(mock): identical dialogue across scenes — the writer "
+            "fallback served one fixture for every scene"
+        )
+
+    if expect_thinking:
+        vacuous = [
+            s.id for s in script.scenes
+            if s.thinking is None or not s.thinking.writing_intent
+        ]
+        if vacuous:
+            issues.append(
+                f"FAIL(mock): vacuous/missing thinking on {len(vacuous)} "
+                f"scene(s) (e.g. {vacuous[:3]}) — thinking misroute is back"
+            )
+
+    for ch in getattr(script, "chapters", []) or []:
+        if not ch.summary:
+            issues.append(
+                f"FAIL(mock): chapter {ch.chapter_id} rollup summary empty"
+            )
+            continue
+        try:
+            parsed = json.loads(ch.summary)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list):
+            issues.append(
+                f"FAIL(mock): chapter {ch.chapter_id} rollup summary is a "
+                f"dialogue JSON array — rollup misroute is back"
+            )
+    return issues
+
+
 async def _run(args: argparse.Namespace, *, concurrent: int | None = None,
                output_subdir: Path | None = None) -> dict:
     settings = get_settings()
@@ -186,6 +270,53 @@ async def _run(args: argparse.Namespace, *, concurrent: int | None = None,
         f"consume_thinking={settings.writer_consume_thinking})"
     )
 
+    is_mock = bool(getattr(args, "mock", False))
+    gauge = {"cur": 0, "peak": 0}
+    _orig_mock_ainvoke = None
+    if is_mock:
+        from vn_agent.services import mock_llm
+        from vn_agent.services.llm import mock_mode_var
+
+        mock_mode_var.set(True)
+        os.environ["VN_MOCK_SYNTH"] = "1"
+        # Keep the dry run fully offline: SBERT is loaded from the local HF
+        # cache anyway, but without this the hub revalidates every file over
+        # the network. setdefault so an operator can override on a machine
+        # that genuinely needs a first-time download.
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        _apply_mock_overrides(settings)
+        logger.info(
+            "Mock mode: mock_mode_var=True, VN_MOCK_SYNTH=1, HF offline, "
+            "cross_ref_sync + scene_summarization forced on"
+        )
+
+        # Peak-writer-concurrency gauge. mock_ainvoke never awaits, so each
+        # coroutine runs to completion the first time it's scheduled and a
+        # naive counter would read 1 even under asyncio.gather. The 5ms
+        # sleep yields control inside each call so overlap becomes
+        # observable. llm.ainvoke_llm resolves mock_llm.mock_ainvoke as a
+        # module attribute per call, so this harness-local patch takes
+        # effect without touching production code.
+        _orig_mock_ainvoke = mock_llm.mock_ainvoke
+
+        async def _gauged(system_prompt, user_prompt, schema=None,
+                          model=None, caller="llm", **kwargs):
+            is_writer = caller.startswith("writer/")
+            if is_writer:
+                gauge["cur"] += 1
+                gauge["peak"] = max(gauge["peak"], gauge["cur"])
+            try:
+                await asyncio.sleep(0.005)
+                return await _orig_mock_ainvoke(
+                    system_prompt, user_prompt, schema=schema,
+                    model=model, caller=caller, **kwargs,
+                )
+            finally:
+                if is_writer:
+                    gauge["cur"] -= 1
+
+        mock_llm.mock_ainvoke = _gauged
+
     # Output dir
     if output_subdir is not None:
         output_dir = output_subdir
@@ -195,18 +326,22 @@ async def _run(args: argparse.Namespace, *, concurrent: int | None = None,
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Output: {output_dir}")
 
-    # Preflight
-    logger.info("Running preflight checks…")
-    readiness = await check_readiness(
-        settings=settings,
-        max_scenes=args.scenes,
-        num_characters=args.characters,
-        text_only=text_only,
-        output_dir=output_dir,
-    )
-    if not readiness.passed:
-        logger.error(f"Preflight failed: {readiness.errors}")
-        raise SystemExit(2)
+    # Preflight — skipped in mock: check_readiness hard-fails on a missing
+    # API key (preflight.py) before the mock gate could ever matter.
+    if is_mock:
+        logger.info("Mock mode: skipping preflight (no keys, no spend)")
+    else:
+        logger.info("Running preflight checks…")
+        readiness = await check_readiness(
+            settings=settings,
+            max_scenes=args.scenes,
+            num_characters=args.characters,
+            text_only=text_only,
+            output_dir=output_dir,
+        )
+        if not readiness.passed:
+            logger.error(f"Preflight failed: {readiness.errors}")
+            raise SystemExit(2)
 
     # Reset trace + token tracker
     reset_trace()
@@ -224,8 +359,15 @@ async def _run(args: argparse.Namespace, *, concurrent: int | None = None,
 
     # Build + run graph
     graph = create_pipeline()
+    rotations_path = Path.cwd() / "api_key_rotations.jsonl"
+    rotations_before = _count_jsonl_lines(rotations_path)
     t0 = time.perf_counter()
-    final_state = await graph.ainvoke(state, {"recursion_limit": 100})
+    try:
+        final_state = await graph.ainvoke(state, {"recursion_limit": 100})
+    finally:
+        if _orig_mock_ainvoke is not None:
+            from vn_agent.services import mock_llm
+            mock_llm.mock_ainvoke = _orig_mock_ainvoke
     wall = time.perf_counter() - t0
     logger.info(f"Pipeline complete in {wall:.1f}s ({wall/60:.1f} min)")
 
@@ -245,7 +387,10 @@ async def _run(args: argparse.Namespace, *, concurrent: int | None = None,
         # findings now flow to warnings instead of errors so [PASS] runs
         # don't read as failures in run_metrics.json.
         "warnings": final_state.get("warnings", []),
+        "mock": is_mock,
     }
+    if is_mock:
+        report["peak_writer_concurrency"] = gauge["peak"]
     if hasattr(tracker, "total_cost_usd"):
         report["total_cost_usd"] = round(tracker.total_cost_usd(), 2)
     if hasattr(tracker, "cache_read_ratio"):
@@ -269,20 +414,35 @@ async def _run(args: argparse.Namespace, *, concurrent: int | None = None,
         total_cost = report.get("total_cost_usd", 0.0)
         if total_cost > 15.0:
             assertions.append(f"FAIL: total_cost_usd={total_cost} > $15")
+    if is_mock:
+        assertions.extend(_mock_structural_issues(
+            script,
+            expect_thinking=(
+                settings.enable_thinking_fanout
+                and args.scenes >= settings.thinking_fanout_min_scenes
+            ),
+        ))
+        if effective_concurrent > 1 and gauge["peak"] <= 1:
+            assertions.append(
+                f"FAIL(mock): peak_writer_concurrency={gauge['peak']} — "
+                f"requested concurrent={effective_concurrent} but scene "
+                f"writes never overlapped"
+            )
+        if (
+            settings.enable_cross_ref_sync
+            and args.scenes >= settings.cross_ref_sync_min_scenes
+            and not (output_dir / "cross_ref_conflicts.jsonl").exists()
+        ):
+            assertions.append(
+                "FAIL(mock): cross_ref_conflicts.jsonl missing — shared "
+                "context_deps never collided, cross_ref_sync validated nothing"
+            )
     report["assertions"] = assertions
 
     # Phase 13-3 M0-4: stability/health signals so M1's tiered stress runner
-    # (12 → 25 → 50) can gate on cumulative dirtiness across runs.
-    rotations_path = Path.cwd() / "api_key_rotations.jsonl"
-    n_rotations = 0
-    if rotations_path.exists():
-        try:
-            with rotations_path.open("r", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        n_rotations += 1
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"Could not read api_key_rotations.jsonl: {e}")
+    # (12 → 25 → 50) can gate on this run's dirtiness. Delta, not absolute:
+    # the jsonl is cumulative across every run in this CWD.
+    n_rotations = max(0, _count_jsonl_lines(rotations_path) - rotations_before)
     report["key_rotation_count"] = n_rotations
 
     degradation_signals, health_status = _compute_health_signals(
@@ -434,6 +594,12 @@ def main() -> None:
         "--benchmark", action="store_true",
         help="Run 3 trials at concurrent=1,2,5 back-to-back. 3x the spend.",
     )
+    parser.add_argument(
+        "--mock", action="store_true",
+        help="Zero-cost structural dry run against the VN_MOCK_SYNTH mock "
+             "synthesizer. No keys, no --confirm, no spend. Validates "
+             "orchestration only — not quality, cost, or rate limits.",
+    )
     parser.add_argument("--confirm", action="store_true",
                         help="Actually run. Without this, prints cost estimate and exits.")
     parser.add_argument(
@@ -447,9 +613,17 @@ def main() -> None:
 
     if args.concurrent < 1:
         raise SystemExit("--concurrent must be >= 1")
+    if args.mock and args.benchmark:
+        raise SystemExit(
+            "--benchmark is real-API-only: mock wall-clock speedups are "
+            "fiction. Use --mock alone — the peak_writer_concurrency gauge "
+            "answers the did-it-parallelize question."
+        )
 
     multiplier = len(_BENCHMARK_TIERS) if args.benchmark else 1
-    est_cost = _estimate_cost(args.scenes, args.text_only) * multiplier
+    est_cost = 0.0 if args.mock else (
+        _estimate_cost(args.scenes, args.text_only) * multiplier
+    )
     print("\n=== smoke_longvn.py ===")
     print(f"  scenes:        {args.scenes}")
     print(f"  characters:    {args.characters}")
@@ -459,10 +633,10 @@ def main() -> None:
               f"concurrent={list(_BENCHMARK_TIERS)})")
     else:
         print(f"  concurrent:    {args.concurrent}")
-    print(f"  est. cost:     ~${est_cost}")
+    print(f"  est. cost:     ~${est_cost}" + ("  (mock: zero spend)" if args.mock else ""))
     print(f"  theme:         {args.theme[:80]}")
 
-    if not args.confirm:
+    if not args.confirm and not args.mock:
         print("\n[DRY RUN] Rerun with --confirm to actually spend money.")
         return
 

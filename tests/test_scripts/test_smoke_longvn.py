@@ -152,3 +152,87 @@ class TestHealthSignals:
         )
         assert len(signals) == 2
         assert status == "red"
+
+
+class TestMockStructuralIssues:
+    """50-scene dry run P4: pure predicate behind the --mock assertions.
+
+    The mock tiers can't assert on cost or cache ratio (both zero), so
+    they assert on structure instead: distinct dialogue per scene,
+    non-vacuous thinking, prose chapter rollups. This helper is the
+    testable core; the script merges its FAIL strings into the standard
+    assertion list."""
+
+    def _script(self, *, duplicate_dialogue=False, vacuous_thinking=False,
+                rollup_is_json=False):
+        from vn_agent.schema.script import (
+            Chapter, DialogueLine, Scene, SceneThinking, VNScript,
+        )
+
+        scenes = []
+        for i in range(3):
+            text = "same line" if duplicate_dialogue else f"line for s{i:02d}"
+            scenes.append(Scene(
+                id=f"s{i:02d}", title=f"S{i}", description="d",
+                background_id="bg",
+                dialogue=[DialogueLine(character_id=None, text=text)],
+                thinking=None if vacuous_thinking else SceneThinking(
+                    writing_intent=f"intent {i}",
+                ),
+            ))
+        chapters = [Chapter(
+            chapter_id="ch01", scene_ids=[s.id for s in scenes],
+            summary='[{"character_id": null}]' if rollup_is_json
+            else "A prose chapter summary long enough to look like prose.",
+        )]
+        return VNScript(
+            title="T", description="d", theme="t", start_scene_id="s00",
+            scenes=scenes, chapters=chapters,
+        )
+
+    def test_clean_script_yields_no_issues(self):
+        smoke = _load_smoke_module()
+        issues = smoke._mock_structural_issues(
+            self._script(), expect_thinking=True,
+        )
+        assert issues == []
+
+    def test_duplicate_dialogue_flagged(self):
+        smoke = _load_smoke_module()
+        issues = smoke._mock_structural_issues(
+            self._script(duplicate_dialogue=True), expect_thinking=True,
+        )
+        assert any("identical" in i for i in issues)
+
+    def test_vacuous_thinking_flagged_only_when_expected(self):
+        smoke = _load_smoke_module()
+        script = self._script(vacuous_thinking=True)
+        with_expect = smoke._mock_structural_issues(script, expect_thinking=True)
+        without_expect = smoke._mock_structural_issues(script, expect_thinking=False)
+        assert any("thinking" in i for i in with_expect)
+        assert not any("thinking" in i for i in without_expect)
+
+    def test_json_rollup_flagged_as_misroute(self):
+        smoke = _load_smoke_module()
+        issues = smoke._mock_structural_issues(
+            self._script(rollup_is_json=True), expect_thinking=True,
+        )
+        assert any("rollup" in i or "summary" in i for i in issues)
+
+
+class TestCountJsonlLines:
+    """Rotation counting must be a per-run delta: api_key_rotations.jsonl is
+    cumulative across every run in the CWD, so reading its absolute size
+    attributed 47 historic rotations to a zero-call mock run and flipped
+    health to RED. The helper is the countable half; _run snapshots it
+    before/after the graph."""
+
+    def test_missing_file_counts_zero(self, tmp_path):
+        smoke = _load_smoke_module()
+        assert smoke._count_jsonl_lines(tmp_path / "nope.jsonl") == 0
+
+    def test_blank_lines_ignored(self, tmp_path):
+        smoke = _load_smoke_module()
+        p = tmp_path / "r.jsonl"
+        p.write_text('{"a":1}\n\n{"b":2}\n   \n', encoding="utf-8")
+        assert smoke._count_jsonl_lines(p) == 2
