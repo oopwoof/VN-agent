@@ -533,7 +533,7 @@ Writer prompt          Writer system prompt suffix
   - ❌ 尚不成立，不要声称：P2-P5 的任何一项 UX 都做过**浏览器手工点击验证**（2026-07-21 起明确延后，截至 2026-07-29 仍未做）——应说"代码完成、测试覆盖，UI 走查待补"，不要说"已现场演示过"。
   - ❌ 尚不成立：Autopilot 自身的 KPI（成功率 ≥ 85%、墙钟 ≤ 8 分钟）**尚未在真实运行上测量过**——只有 mock 模式 + 单元测试。应说"已埋好测量点，首次真实运行验证待做"。
   - ❌ 尚不成立：Chat Ops"每会话 ≥ 8 次操作"和 Vision Judge"≤ $0.20/run"仍是未测量的目标（无真实用户，Vision Judge 也无真实 API 实测）——和下面已有的 50-scene / diversity index 目标同等对待。
-- **50-scene 长篇**：基础设施已具备，但完整 50-scene 的时长/成本声明是**根据 6-scene baseline 推算**，并非实测。应写“正朝 50-scene 成本低于 $15 的目标推进”，不能写“已实现 50-scene 成本 $15”。
+- **50-scene 长篇**：**编排层已零成本实测**（2026-08-20，`smoke_longvn.py --mock --scenes 50 --concurrent 5`：5 chapters、state_timeline 50 条、DAG waves、writer 峰值并发 5、10 条 callback 冲突 Tier-1 解决，全部断言通过）。但 mock 只验证结构与编排——**上下文退化、输出质量、真实成本与限流行为仍未验证**。完整 50-scene 的时长/成本声明依旧是**根据 6-scene baseline 推算**：可写“50-scene 编排已 mock 验证、正朝真实运行成本低于 $15 推进”，不能写“已实现 50-scene 成本 $15”。
 - **多样性指数 ≥ 30%**：这是**目标**，不是实测结果。应写“目标达到 30%+”，不能写“已达到 30%+”。
 - **Vision Judge 有效性**：已构建（P4 M0），但只做过 mock 验证（英文+中文 mock 生成截图的人工视觉检查）。**不得**声称已获得 Vision Judge 的 Pearson r 或真实每次运行成本；只能陈述实测的 Sonnet vs GPT-4o 跨 Judge r=0.643（这是另一组 v3 时代的评审对比，不是同一件事）。
 - **P6 前端改版（2026-08-10）**：同样适用"M0 交付 ≠ 生产验证"的纪律，并且多一条轴——这项工作在一个**尚未合并的分支**上（`feat/frontend-redesign-v4`），而且**默认外壳仍然是旧的**。

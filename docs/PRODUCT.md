@@ -34,9 +34,12 @@
 
 ## 产品状态
 
-**当前阶段**: **Phase 13-1 长篇 VN 生产级**（2026-04-23）— 50+ scene 生产级长篇 VN 的地基全部落地。412 tests pass (+60 from Phase 12-3)。真 50-scene API 验证由用户手动启动（`scripts/smoke_longvn.py`）。
+**当前阶段**: **Phase 13-1 长篇 VN 生产级**（2026-04-23）— 50+ scene 生产级长篇 VN 的地基全部落地。412 tests pass (+60 from Phase 12-3)。真 50-scene API 验证由用户手动启动（`scripts/smoke_longvn.py --confirm`）。
 
 **北极星**：稳定生成 50+ scene 生产级长篇 VN，向下兼容 6-10 scene demo。
+
+**50-scene mock 结构演练（2026-08-20，零 API 花费）**：`scripts/smoke_longvn.py --mock --scenes {10,20,50} --concurrent 5 --text-only` 三档全部 PASS——50 场档产出 5 chapters（=50/10）、state_timeline 50 条、DAG waves 宽度 5、writer 峰值并发 5、10 条 callback 冲突被 Tier-1 确定性解决、逐场对白/thinking/章节摘要两两相异，墙钟 38 秒。运行记录：`demo_output/smoke_longvn_20260820_*/run_metrics.json`。
+**边界（不回避）**：mock 只验证结构与编排——上下文退化、输出质量、真实成本与限流行为只能由真实 API 运行验证（此前外部评审已点名该局限），上表的墙钟/成本/缓存/轮换指标仍属未测。这次演练同时修出 4 个真 bug：mock dispatch 关键词误路由（thinking/rollup 被静默替换成错误 fixture 且报成功）、`_build_from_plan` 丢弃 `context_deps`（DAG 波次与图校验此前在端到端运行中从未真正生效）、Writer 反馈飞轮引用不存在的变量（NameError 被静默吞掉，注入从未运行）、最终 `vn_script.json` 缺 chapters（盘上工件与内存结果不一致）。
 
 **Phase 13-1 验收目标（smoke_longvn.py --scenes 50 手动验证）**：
 | 指标 | 目标 | 来源 |

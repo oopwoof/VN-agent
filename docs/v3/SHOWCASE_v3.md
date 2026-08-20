@@ -18,8 +18,8 @@ VN-Agent 解决的是创作者面临的一个具体问题：写一部交互式 V
 
 | 指标 | 目标 | 现状 |
 |---|---|---|
-| 50+ scene 长篇 VN 端到端 | wall ≤ 30 min | 6-scene baseline 38 min；50-scene 待 M1 阶梯验证 |
-| 总 API 成本（50 scene） | ≤ $15 | 实测外推区间 $13–$19，M1 验证中 |
+| 50+ scene 长篇 VN 端到端 | wall ≤ 30 min | 6-scene baseline 38 min；50-scene **编排已 mock 零成本验证**（2026-08-20，chapters/state_timeline/waves/并发全过），真实 API 墙钟待 M1 阶梯验证 |
+| 总 API 成本（50 scene） | ≤ $15 | 实测外推区间 $13–$19，M1 验证中（mock 验证不产生成本数据） |
 | 提示缓存命中率 | `cache_read_ratio` ≥ 0.5（scene 10+） | 通路已搭建，长篇真跑后产出数据 |
 | 短篇 6–10 scene 向下兼容 | 不退化 | ✅ M0 + 两次 mini smoke 全程验证 |
 
