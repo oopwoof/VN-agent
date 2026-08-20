@@ -394,6 +394,48 @@ class TestBuildFromPlanHydratesSceneBrief:
         assert script.scenes[0].id == "s1"
 
 
+class TestBuildFromPlanHydratesContextDeps:
+    """50-scene dry run regression: step2 emits context_deps and
+    _merge_outline_details carries them into the plan dict, but
+    _build_from_plan silently dropped them — so StructureReviewer's graph
+    validation, writer_orchestrator.compute_waves, and thinking's callback
+    derivation all ran on empty lists in every end-to-end run."""
+
+    def _plan_with_deps(self, deps):
+        return {
+            "title": "T", "description": "d", "start_scene_id": "s1",
+            "scenes": [
+                {"id": "s1", "title": "A", "description": "x", "background_id": "bg"},
+                {"id": "s2", "title": "B", "description": "y", "background_id": "bg",
+                 "context_deps": deps},
+            ],
+            "characters": [{"id": "c1", "name": "C", "role": "p"}],
+        }
+
+    def test_context_deps_hydrated(self):
+        from vn_agent.schema.script import SceneContextRef
+
+        script, _ = _build_from_plan(self._plan_with_deps([{
+            "ref_type": "scene", "ref_id": "s1", "link_type": "callback",
+            "reason": "echoes the opening",
+        }]), theme="t")
+        deps = script.scenes[1].context_deps
+        assert len(deps) == 1
+        assert isinstance(deps[0], SceneContextRef)
+        assert deps[0].ref_id == "s1"
+        assert deps[0].inject_as == "summary"  # schema default
+
+    def test_invalid_dep_dropped_not_crashed(self):
+        """Same log+drop policy as scene_brief: one bad entry drops, the
+        valid one survives, the scene still builds."""
+        script, _ = _build_from_plan(self._plan_with_deps([
+            {"ref_type": "scene", "ref_id": "s1", "link_type": "callback", "reason": "ok"},
+            {"ref_type": "wormhole", "ref_id": "s1", "link_type": "callback", "reason": "bad"},
+        ]), theme="t")
+        assert [d.ref_id for d in script.scenes[1].context_deps] == ["s1"]
+        assert script.scenes[1].id == "s2"
+
+
 # ---------------------------------------------------------------------------
 # Phase 13-2 Step 4f: Director step2 Tool Use migration tests
 #

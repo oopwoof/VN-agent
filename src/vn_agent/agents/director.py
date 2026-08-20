@@ -23,6 +23,7 @@ from vn_agent.schema.script import (
     MacroReference,
     Scene,
     SceneBrief,
+    SceneContextRef,
     VNScript,
     WorldVariable,
 )
@@ -827,6 +828,21 @@ def _build_from_plan(plan: dict, theme: str) -> tuple[VNScript, dict[str, Charac
                     f"dropping: {e}"
                 )
 
+        # Phase 13-1 Step 5: hydrate context_deps — same log+drop policy as
+        # scene_brief. This was missing until the 50-scene dry run: step2
+        # emitted deps and _merge_outline_details carried them, but they
+        # never reached Scene, so graph validation / DAG waves / thinking
+        # callbacks all saw empty lists on every fresh run.
+        context_deps: list[SceneContextRef] = []
+        for dep_raw in s.get("context_deps") or []:
+            try:
+                context_deps.append(SceneContextRef.model_validate(dep_raw))
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    f"context_dep invalid for scene '{s.get('id', '?')}', "
+                    f"dropping: {e}"
+                )
+
         scene = Scene(
             id=s["id"],
             title=s.get("title") or s["id"],
@@ -845,6 +861,8 @@ def _build_from_plan(plan: dict, theme: str) -> tuple[VNScript, dict[str, Charac
             # Sprint 9-1: symbolic state I/O
             state_reads=s.get("state_reads") or [],
             state_writes=s.get("state_writes") or {},
+            # Phase 13-1 Step 5
+            context_deps=context_deps,
             # Phase 13-2 Step 1
             scene_brief=scene_brief_obj,
         )
