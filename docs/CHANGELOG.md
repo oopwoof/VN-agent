@@ -15,6 +15,30 @@
 
 ## [Unreleased]
 
+### 2026-08-20 | 实现 - 2026-08-20 11:11
+
+**变更文件** (3 个):
+**源码变更** (1 文件):
+  - `src/vn_agent/web/app.py`
+
+**测试变更** (1 文件):
+  - `tests/test_web/test_autopilot_flow.py`
+
+**其他变更** (1 文件):
+  - `frontend/src/components/ChatPanel.tsx`
+
+**变更统计**:
+```
+frontend/src/components/ChatPanel.tsx |  5 +++-
+ src/vn_agent/web/app.py               | 16 +++++++++----
+ tests/test_web/test_autopilot_flow.py | 44 +++++++++++++++++++++++++++++++++--
+ 3 files changed, 58 insertions(+), 7 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-20 | 测试 - 2026-08-20 11:11
 
 **变更文件** (2 个):

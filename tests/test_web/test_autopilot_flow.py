@@ -136,6 +136,46 @@ class _FakeGraph:
         yield {"writer": {"vn_script": state["vn_script"], "characters": state["characters"]}}
 
 
+class TestSeededPlanIsNotOverwritten:
+    """50-scene dry run P6 regression: _run_script_generation seeds
+    state['vn_script'] from the user-confirmed plan but ran build_graph()
+    (entry = director). run_director has no skip guard, so it regenerated
+    the outline — discarding any user edits from the setting-confirmation
+    step and double-spending Director in real mode. The fix: use
+    build_writer_graph() (entry = thinking_fanout), the same graph the CLI
+    resume path uses for exactly this seeded-script situation."""
+
+    def test_uses_writer_graph_not_full_graph(self, test_app):
+        app, store = test_app
+        client = TestClient(app)
+
+        with patch("vn_agent.web.app._run_job"):
+            resp = client.post("/generate", json={
+                "theme": "a school romance", "interactive": True, "mock": True,
+                "max_scenes": 4, "num_characters": 2, "text_only": True,
+            })
+        job_id = resp.json()["job_id"]
+        setting_resp = client.post(f"/api/projects/{job_id}/generate-setting")
+        plan = setting_resp.json()["blackboard"]["raw_plan"]
+
+        import asyncio
+
+        import vn_agent.web.app as app_module
+        job = store.get(job_id)
+        with patch(
+            "vn_agent.agents.graph.build_writer_graph",
+            return_value=_FakeGraph(),
+        ) as writer_graph, patch(
+            "vn_agent.agents.graph.build_graph",
+            return_value=_FakeGraph(),
+        ) as full_graph:
+            asyncio.run(app_module._run_script_generation(job_id, job, plan))
+
+        writer_graph.assert_called_once()
+        full_graph.assert_not_called()
+        assert client.get(f"/status/{job_id}").json()["status"] == "completed"
+
+
 class TestAutopilotRunMetaAndOutcomes:
     def test_full_mock_flow_writes_run_meta_and_outcome(self, test_app, tmp_path):
         app, store = test_app
@@ -156,7 +196,7 @@ class TestAutopilotRunMetaAndOutcomes:
 
         import vn_agent.web.app as app_module
         job = store.get(job_id)
-        with patch("vn_agent.agents.graph.build_graph", return_value=_FakeGraph()):
+        with patch("vn_agent.agents.graph.build_writer_graph", return_value=_FakeGraph()):
             asyncio.run(app_module._run_script_generation(job_id, job, plan))
 
         status = client.get(f"/status/{job_id}").json()
@@ -198,7 +238,7 @@ class TestAutopilotRunMetaAndOutcomes:
 
         import vn_agent.web.app as app_module
         job = store.get(job_id)
-        with patch("vn_agent.agents.graph.build_graph", return_value=_FakeGraph()):
+        with patch("vn_agent.agents.graph.build_writer_graph", return_value=_FakeGraph()):
             asyncio.run(app_module._run_script_generation(job_id, job, plan))
 
         output_dir = store.get(job_id)["output_dir"]

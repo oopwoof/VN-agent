@@ -116,7 +116,10 @@ export default function ChatPanel() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2 text-xs">
           <label className="text-gray-400">
             {t('chat.scenes')}: <span className="text-indigo-400">{config.max_scenes}</span>
-            <input type="range" min={2} max={20} value={config.max_scenes}
+            {/* max 50 = the backend's hard cap (GenerateRequest le=50); the
+                UI previously stopped at 20, making 50-scene runs impossible
+                to request from the product at all */}
+            <input type="range" min={2} max={50} value={config.max_scenes}
               onChange={e => setConfig({ max_scenes: +e.target.value })}
               className="w-full accent-indigo-500" />
           </label>

@@ -1163,7 +1163,7 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
     run_start = datetime.now(UTC)
     try:
         from vn_agent.agents.director import _build_from_plan
-        from vn_agent.agents.graph import build_graph
+        from vn_agent.agents.graph import build_writer_graph
         from vn_agent.agents.state import initial_state
         from vn_agent.compiler.project_builder import build_project
 
@@ -1173,8 +1173,16 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
 
         script, characters = _build_from_plan(plan, theme)
 
-        # Run Writer + Reviewer via the graph
-        graph = build_graph()
+        # Run the writer graph (entry = thinking_fanout), the same graph the
+        # CLI resume path uses for a seeded script. Until the 50-scene dry
+        # run round this used build_graph(), whose entry is director —
+        # run_director has no skip guard, so it regenerated the outline and
+        # OVERWROTE the plan the user just confirmed/edited (and, in real
+        # mode, paid for Director twice). Trade-off, same as CLI resume:
+        # this path skips structure_reviewer / state_orchestrator — the
+        # plan was already reviewed when generate-setting produced it, and
+        # run_writer reseeds world_state from script.world_variables itself.
+        graph = build_writer_graph()
         state = initial_state(
             theme=theme,
             output_dir=output_dir,
@@ -1185,7 +1193,7 @@ async def _run_script_generation(job_id: str, job: dict, plan: dict) -> None:
         state["vn_script"] = script
         state["characters"] = characters
 
-        # Stream through writer → reviewer (skip director since we already have plan)
+        # Stream through thinking_fanout → writer → reviewer
         final_state: dict = dict(state)
         async for update in graph.astream(state, stream_mode="updates"):
             for node_name, chunk in update.items():
