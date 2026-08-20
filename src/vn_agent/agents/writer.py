@@ -263,6 +263,20 @@ async def run_writer(state: AgentState) -> dict:
     })
     logger.info(f"Writer completed: dialogue written for {len(updated_scenes)} scenes")
 
+    # Final authoritative checkpoint. The per-scene _flush_partial_vn_script
+    # calls never carry chapters — final rollups can land after the last
+    # scene's flush — so without this rewrite the on-disk vn_script.json
+    # permanently lacks them (the first 50-scene dry run's disk artifact had
+    # chapters: [] while run_metrics counted 5). Everything that loads the
+    # file instead of the graph state (web resume, compiler, run analyzers)
+    # must see the same script the graph returns.
+    try:
+        (Path(output_dir) / "vn_script.json").write_text(
+            updated_script.model_dump_json(indent=2), encoding="utf-8",
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Final vn_script.json checkpoint failed: {e}")
+
     return {
         "vn_script": updated_script,
         "world_state": world_state,
@@ -398,6 +412,7 @@ async def _run_scenes_sequential(
             system_prompt=current_prefix,
             enable_1h_cache=current_enable_cache,
             settings=settings,
+            characters=characters,
         )
         updated_scenes.append(updated_scene)
 
@@ -546,6 +561,7 @@ async def _run_scenes_parallel(
                 embedding_index=embedding_index, lore_index=lore_index,
                 system_prompt=sys_prompt,
                 enable_1h_cache=enable_cache, settings=settings,
+                characters=characters,
             )
 
     for chapter_scenes in chapter_buckets:
@@ -750,6 +766,7 @@ async def _process_scene(
     system_prompt: str,
     enable_1h_cache: bool,
     settings: Any,
+    characters: dict | None = None,
 ) -> Scene:
     """Phase 13-2 Step 4b-3: per-scene Writer worker.
 
@@ -794,6 +811,7 @@ async def _process_scene(
         system_prompt=system_prompt,
         force_cache=enable_1h_cache,
         cache_ttl="1h",
+        characters=characters,
     )
 
     # 3. Compute world_state_after locally so the snapshot file records
@@ -1275,8 +1293,14 @@ async def _write_scene(
     *,
     force_cache: bool = False,
     cache_ttl: str = "5m",
+    characters: dict | None = None,
 ) -> Scene:
-    """Write dialogue for a single scene."""
+    """Write dialogue for a single scene.
+
+    `characters` (keyword-only, optional) is the id→CharacterProfile dict —
+    used only to enrich the flywheel injection query. Keyword-only because
+    existing tests and chat_ops fakes call this positionally.
+    """
     settings = get_settings()
     strategy = get_strategy(scene.narrative_strategy or "")
     strategy_guidance = (

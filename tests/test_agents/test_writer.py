@@ -1784,3 +1784,62 @@ class TestWriterMaxTokensHardCap:
         assert "800-1500 words" in prompt
         _ = chars  # quiet linter
 
+
+
+# ── 50-scene dry run P2: flywheel injection actually reaches the prompt ─────
+
+class TestFlywheelInjectionReachesWriterPrompt:
+    """v4 P1-2 regression: writer's build_injection call referenced a name
+    that doesn't exist in _write_scene's scope (`characters`), so every
+    injection died as a NameError swallowed at debug level — the flywheel
+    never actually ran inside Writer. The flywheel e2e test calls
+    build_injection directly, which is exactly why this survived; this
+    test goes through _write_scene itself."""
+
+    @pytest.mark.asyncio
+    async def test_downvote_avoid_block_reaches_writer_prompt(
+        self, tmp_path, monkeypatch, mocker,
+    ):
+        from types import SimpleNamespace
+
+        from vn_agent.agents.writer import _write_scene
+        from vn_agent.feedback import store as fb_store
+        from vn_agent.schema.script import VNScript
+
+        monkeypatch.setenv(fb_store._DEFAULT_ROOT_ENV, str(tmp_path))
+        fb_store.append(fb_store.FeedbackRecord(
+            verdict="down", job_id="job-a", scene_id="s01",
+            reason="the rooftop conversation dragged",
+        ))
+
+        captured: dict = {}
+        five_lines = (
+            '[' + ','.join(
+                '{"character_id": null, "text": "line %d", "emotion": "neutral"}' % i
+                for i in range(5)
+            ) + ']'
+        )
+
+        async def _capture(system_prompt, user_prompt, **kwargs):
+            captured.setdefault("user", user_prompt)
+            return SimpleNamespace(
+                content=five_lines,
+                response_metadata={
+                    "stop_reason": "end_turn",
+                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                },
+            )
+
+        mocker.patch("vn_agent.agents.writer.ainvoke_llm", _capture)
+
+        scene = Scene(
+            id="s01", title="Rooftop", description="rooftop dialogue at dusk",
+            background_id="bg",
+        )
+        script = VNScript(
+            title="T", description="a rooftop story", theme="rooftop talk",
+            start_scene_id="s01", scenes=[scene],
+        )
+        await _write_scene(scene, script, "cast", "", str(tmp_path))
+
+        assert "AVOID" in captured["user"]

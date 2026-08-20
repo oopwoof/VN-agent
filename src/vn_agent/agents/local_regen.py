@@ -123,6 +123,7 @@ async def regenerate_scene(
         lore_index=None,
         older_summaries=older_summaries,
         system_prompt=run_system_prompt,
+        characters=characters,
     )
     wall = time.perf_counter() - t0
 

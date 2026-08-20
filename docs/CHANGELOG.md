@@ -17,6 +17,28 @@
 
 ### 2026-08-20 | 实现 - 2026-08-20 11:11
 
+**变更文件** (3 个):
+**源码变更** (2 文件):
+  - `src/vn_agent/agents/local_regen.py`
+  - `src/vn_agent/agents/writer.py`
+
+**测试变更** (1 文件):
+  - `tests/test_agents/test_writer.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/local_regen.py |  1 +
+ src/vn_agent/agents/writer.py      | 26 ++++++++++++++++-
+ tests/test_agents/test_writer.py   | 59 ++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 85 insertions(+), 1 deletion(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
+### 2026-08-20 | 实现 - 2026-08-20 11:11
+
 **变更文件** (2 个):
 **源码变更** (1 文件):
   - `src/vn_agent/agents/director.py`
