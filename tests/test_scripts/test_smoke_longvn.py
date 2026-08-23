@@ -160,23 +160,34 @@ class TestHealthSignals:
         assert status == "yellow"
 
     def test_wall_blowout_is_red(self):
-        """>2x expected wall time = red. 12 scenes expected ~3.6 min;
-        20 min is way past 7.2 min cutoff."""
+        """>2x expected wall time = red. 12 scenes expected 15 min, so
+        the red line is 30 min and 35 is past it."""
         smoke = _load_smoke_module()
         signals, status = smoke._compute_health_signals(
-            n_rotations=0, scene_count=12, wall_minutes=20.0,
+            n_rotations=0, scene_count=12, wall_minutes=35.0,
         )
         assert any("> 2x expected" in s for s in signals)
         assert status == "red"
 
+    def test_measured_real_throughput_is_green(self):
+        """The one real run on record — 6 scenes, 6.2 min (61s/scene) —
+        scored RED under the original 18s/scene guess. With
+        --abort-on-degradation that would have killed the expensive tier
+        over ordinary throughput, so the baseline now covers it."""
+        smoke = _load_smoke_module()
+        signals, status = smoke._compute_health_signals(
+            n_rotations=0, scene_count=6, wall_minutes=6.2,
+        )
+        assert all("> 2x expected" not in s for s in signals)
+        assert status == "green"
+
     def test_short_run_minimum_floor_for_wall_threshold(self):
-        """For tiny runs (1-2 scenes) the minimum expected wall is 1.5 min,
-        so a 2-min run shouldn't trip 2x rule."""
+        """Tiny runs are dominated by fixed setup cost, so the expected
+        wall floors at 5 min — a 2-min single-scene run is fine."""
         smoke = _load_smoke_module()
         signals, status = smoke._compute_health_signals(
             n_rotations=0, scene_count=1, wall_minutes=2.0,
         )
-        # 2.0 < 1.5 * 2 = 3.0, so no signal
         assert all("> 2x expected" not in s for s in signals)
         assert status == "green"
 

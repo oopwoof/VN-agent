@@ -15,6 +15,26 @@
 
 ## [Unreleased]
 
+### 2026-08-24 | 测试 - 2026-08-24 01:30
+
+**变更文件** (2 个):
+**测试变更** (1 文件):
+  - `tests/test_scripts/test_smoke_longvn.py`
+
+**其他变更** (1 文件):
+  - `scripts/smoke_longvn.py`
+
+**变更统计**:
+```
+scripts/smoke_longvn.py                 | 27 +++++++++++++++++++++------
+ tests/test_scripts/test_smoke_longvn.py | 23 +++++++++++++++++------
+ 2 files changed, 38 insertions(+), 12 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-24 | 测试 - 2026-08-24 01:29
 
 **变更文件** (2 个):
