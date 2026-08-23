@@ -613,6 +613,15 @@ def main() -> None:
              "wall_minutes > 2x expected. Used by M1 stress-test tier-runner "
              "to skip subsequent tiers when the current one shows instability.",
     )
+    parser.add_argument(
+        "--output-dir", type=Path, default=None,
+        help="Override the output directory. When unset, auto-generates "
+             "demo_output/smoke_longvn_<UTC_timestamp>/. Pass an explicit "
+             "path to keep a multi-tier run's artifacts under one root "
+             "(e.g. demo_output/real_20260824/tier_12) instead of scattered "
+             "timestamp siblings. Benchmark mode ignores this flag — it "
+             "generates its own per-trial root.",
+    )
     args = parser.parse_args()
 
     if args.concurrent < 1:
@@ -656,7 +665,7 @@ def main() -> None:
         print("\n[PASS] Benchmark complete.")
         return
 
-    report = asyncio.run(_run(args))
+    report = asyncio.run(_run(args, output_subdir=args.output_dir))
     print("\n=== Results ===")
     print(json.dumps(report, indent=2, ensure_ascii=False))
     # Phase 13-3 M0-4: surface degradation signals visibly so M1 tier-runner

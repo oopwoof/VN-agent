@@ -220,6 +220,51 @@ class TestMockStructuralIssues:
         assert any("rollup" in i or "summary" in i for i in issues)
 
 
+class TestOutputDirArg:
+    """--output-dir lets a multi-tier run keep its artifacts under one
+    root (demo_output/real_<date>/tier_12, tier_50) instead of scattered
+    timestamp siblings. _run() already accepted an output_subdir kwarg
+    (benchmark mode uses it); this exposes it on the CLI.
+
+    These drive the real main() rather than a hand-rolled parser, so a
+    flag that parses but never reaches _run still fails the test.
+    """
+
+    def _run_main(self, monkeypatch, argv):
+        """Call main() with _run faked out, returning the captured kwargs.
+
+        main() rewraps sys.stdout/stderr for UTF-8 on win32, which would
+        corrupt pytest's capture bookkeeping for the rest of the process
+        (the same hazard that keeps that block out of module scope), so
+        we make the platform check fall through for the call.
+        """
+        smoke = _load_smoke_module()
+        monkeypatch.setattr(sys, "platform", "linux")
+        captured: dict = {}
+
+        async def _fake_run(args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return {"assertions": [], "health_status": "green"}
+
+        monkeypatch.setattr(smoke, "_run", _fake_run)
+        monkeypatch.setattr(sys, "argv", ["smoke_longvn.py", *argv])
+        smoke.main()
+        return captured
+
+    def test_output_dir_reaches_run(self, monkeypatch, tmp_path):
+        target = tmp_path / "real_20260824" / "tier_12"
+        captured = self._run_main(
+            monkeypatch, ["--mock", "--scenes", "12", "--output-dir", str(target)],
+        )
+        assert captured["kwargs"]["output_subdir"] == target
+
+    def test_omitted_flag_leaves_auto_timestamp_path(self, monkeypatch):
+        """None keeps the existing demo_output/smoke_longvn_<UTC>/ behavior."""
+        captured = self._run_main(monkeypatch, ["--mock", "--scenes", "12"])
+        assert captured["kwargs"]["output_subdir"] is None
+
+
 class TestCountJsonlLines:
     """Rotation counting must be a per-run delta: api_key_rotations.jsonl is
     cumulative across every run in the CWD, so reading its absolute size
