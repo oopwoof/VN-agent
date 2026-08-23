@@ -131,6 +131,15 @@ class Settings(BaseSettings):
     # Rubric average (1-5 scale) below which the Reviewer fails the script
     # and triggers a Writer revision round. Matches the prompt's stated bar.
     reviewer_pass_threshold: float = 3.5
+    # Chat Ops L2 fallback: the intent router reports a confidence with
+    # every classification, and until now nothing read it — a 0.3-confidence
+    # guess produced the same confirm card as a 0.95 certainty, so the only
+    # thing standing between a misread message and a rewritten scene was the
+    # creator noticing. Below this, a mutating intent turns into a
+    # clarifying question instead of a confirm card. 0.6 sits under the
+    # 0.75-0.9 band clear intents land in, so it catches genuine ambiguity
+    # without nagging on ordinary requests.
+    chat_intent_confidence_threshold: float = 0.6
     # v4 P0-review-hang: hard wall-clock ceiling on the Reviewer /
     # StructureReviewer LLM calls. Job 3cbbf260 hung for 52 minutes with
     # zero on-disk artifacts because there was no per-call timeout and
