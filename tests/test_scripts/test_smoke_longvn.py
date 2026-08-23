@@ -7,9 +7,12 @@ a wrong-tier run that costs real money.
 """
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import sys
 from pathlib import Path
+
+import pytest
 
 
 def _load_smoke_module():
@@ -266,6 +269,85 @@ class TestMockStructuralIssues:
             self._script(rollup_is_json=True), expect_thinking=True,
         )
         assert any("rollup" in i or "summary" in i for i in issues)
+
+
+class _FakeTracker:
+    """Stands in for TokenTracker: a scripted spend curve the watchdog
+    reads on each poll."""
+
+    def __init__(self, costs):
+        self._costs = list(costs)
+        self.reads = 0
+
+    def estimated_cost(self):
+        self.reads += 1
+        # Hold the last value once the script runs out.
+        idx = min(self.reads - 1, len(self._costs) - 1)
+        return self._costs[idx]
+
+    def cache_read_ratio(self):
+        return 0.0
+
+
+class TestBudgetWatchdog:
+    """Every other cost control in this harness fires after the run, when
+    the money is already gone. This one cancels mid-flight."""
+
+    def test_no_ceiling_awaits_directly(self):
+        smoke = _load_smoke_module()
+
+        async def _work():
+            return "done"
+
+        tracker = _FakeTracker([0.0])
+        result = asyncio.run(smoke._run_graph_with_budget(
+            _work(), tracker, max_budget_usd=None,
+        ))
+        assert result == "done"
+        assert tracker.reads == 0, "no ceiling should mean no polling at all"
+
+    def test_under_ceiling_returns_result(self):
+        smoke = _load_smoke_module()
+
+        async def _work():
+            await asyncio.sleep(0.02)
+            return "done"
+
+        result = asyncio.run(smoke._run_graph_with_budget(
+            _work(), _FakeTracker([1.0]), max_budget_usd=6.0,
+            poll_seconds=0.005,
+        ))
+        assert result == "done"
+
+    def test_breach_cancels_and_raises(self):
+        smoke = _load_smoke_module()
+        cancelled = {"yes": False}
+
+        async def _work():
+            try:
+                await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                cancelled["yes"] = True
+                raise
+            return "should not finish"
+
+        # First poll is under, second is over.
+        tracker = _FakeTracker([1.0, 9.0])
+        with pytest.raises(smoke.BudgetExceeded) as exc:
+            asyncio.run(smoke._run_graph_with_budget(
+                _work(), tracker, max_budget_usd=6.0, poll_seconds=0.005,
+            ))
+        assert cancelled["yes"], "the graph task must actually be cancelled"
+        assert "9.00" in str(exc.value) and "6.00" in str(exc.value)
+
+    def test_salvage_hint_names_both_recovery_commands(self, tmp_path):
+        """An aborted long run is resumable — the operator has to be told
+        how, in the same breath as the abort."""
+        smoke = _load_smoke_module()
+        hint = smoke._salvage_hint(tmp_path)
+        assert "vn-agent salvage" in hint
+        assert "--resume" in hint
+        assert str(tmp_path) in hint
 
 
 class TestOutputDirArg:

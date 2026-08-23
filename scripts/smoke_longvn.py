@@ -170,6 +170,60 @@ def _compute_health_signals(
     return signals, status
 
 
+class BudgetExceeded(RuntimeError):
+    """Raised when the mid-flight cost watchdog trips."""
+
+
+async def _run_graph_with_budget(
+    coro, tracker, *, max_budget_usd: float | None, poll_seconds: float = 20.0,
+):
+    """Await `coro`, cancelling it if estimated spend passes the ceiling.
+
+    Everything else in this harness reacts to cost AFTER the run — the
+    acceptance assertions and --abort-on-degradation both read a report
+    that only exists once all the money is gone. That is fine for
+    catching a tier that ran expensive; it is useless against a run that
+    goes wrong at scene 5 of 50 and keeps paying. This samples the live
+    tracker instead.
+
+    Cancellation lands between samples, so worst case we lose the
+    in-flight wave — Writer flushes vn_script.json and snapshots/ per
+    scene and per wave, so the partial run stays salvageable.
+
+    With no ceiling set this is a plain await, no extra task, no polling.
+    """
+    if max_budget_usd is None:
+        return await coro
+
+    task = asyncio.ensure_future(coro)
+    while True:
+        done, _ = await asyncio.wait({task}, timeout=poll_seconds)
+        if done:
+            return task.result()
+        spent = tracker.estimated_cost()
+        if spent > max_budget_usd:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+            raise BudgetExceeded(
+                f"estimated spend ${spent:.2f} passed the --max-budget-usd "
+                f"ceiling of ${max_budget_usd:.2f}; run cancelled"
+            )
+
+
+def _salvage_hint(output_dir: Path) -> str:
+    """What to run to recover a partial run. Writer checkpoints every
+    scene and every wave, so an aborted long run is usually resumable
+    rather than lost."""
+    return (
+        f"Partial artifacts are in {output_dir}. To recover:\n"
+        f"  vn-agent salvage --output {output_dir}      # fold snapshots/ into vn_script.json\n"
+        f"  vn-agent generate --resume --output {output_dir}   # continue from there"
+    )
+
+
 def _count_jsonl_lines(path: Path) -> int:
     """Non-blank line count; 0 for a missing/unreadable file. Used to turn
     the cumulative api_key_rotations.jsonl into a per-run delta — reading
@@ -386,7 +440,45 @@ async def _run(args: argparse.Namespace, *, concurrent: int | None = None,
     rotations_before = _count_jsonl_lines(rotations_path)
     t0 = time.perf_counter()
     try:
-        final_state = await graph.ainvoke(state, {"recursion_limit": 100})
+        final_state = await _run_graph_with_budget(
+            graph.ainvoke(state, {"recursion_limit": 100}),
+            tracker,
+            max_budget_usd=getattr(args, "max_budget_usd", None),
+        )
+    except BaseException as e:  # noqa: BLE001
+        # A crash at scene 47 of 50 used to lose the whole record of the
+        # run: no run_metrics.json, just a traceback. Write what we know
+        # (including spend, which is real money already gone) and point
+        # at the salvage path before re-raising.
+        wall = time.perf_counter() - t0
+        aborted = {
+            "wall_seconds": round(wall, 1),
+            "wall_minutes": round(wall / 60, 2),
+            "writer_max_concurrent": effective_concurrent,
+            "scene_count": args.scenes,
+            "theme": theme,
+            "output_dir": str(output_dir),
+            "mock": is_mock,
+            "total_cost_usd": round(tracker.estimated_cost(), 2),
+            "cache_read_ratio": round(tracker.cache_read_ratio(), 3),
+            "aborted_reason": (
+                "budget_exceeded" if isinstance(e, BudgetExceeded)
+                else type(e).__name__
+            ),
+            "error": str(e),
+        }
+        try:
+            (output_dir / "run_metrics.json").write_text(
+                json.dumps(aborted, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception as write_err:  # noqa: BLE001
+            logger.warning(f"Could not write aborted run_metrics: {write_err}")
+        logger.error(
+            f"Run aborted after {wall/60:.1f} min and "
+            f"~${aborted['total_cost_usd']}: {e}\n{_salvage_hint(output_dir)}"
+        )
+        raise
     finally:
         if _orig_mock_ainvoke is not None:
             from vn_agent.services import mock_llm
@@ -643,6 +735,15 @@ def main() -> None:
              "signals tripped: retry_count > 5, key_rotation_density > 1, or "
              "wall_minutes > 2x expected. Used by M1 stress-test tier-runner "
              "to skip subsequent tiers when the current one shows instability.",
+    )
+    parser.add_argument(
+        "--max-budget-usd", type=float, default=None,
+        help="Mid-flight spend ceiling. The tracker is sampled every ~20s "
+             "and the run is cancelled once estimated cost passes this "
+             "value — the acceptance assertions and --abort-on-degradation "
+             "only fire after the money is already spent. Partial artifacts "
+             "stay salvageable (Writer checkpoints per scene and per wave). "
+             "Unset means no ceiling.",
     )
     parser.add_argument(
         "--output-dir", type=Path, default=None,
