@@ -41,10 +41,16 @@
 **50-scene mock 结构演练（2026-08-20，零 API 花费）**：`scripts/smoke_longvn.py --mock --scenes {10,20,50} --concurrent 5 --text-only` 三档全部 PASS——50 场档产出 5 chapters（=50/10）、state_timeline 50 条、DAG waves 宽度 5、writer 峰值并发 5、10 条 callback 冲突被 Tier-1 确定性解决、逐场对白/thinking/章节摘要两两相异，墙钟 38 秒。运行记录：`demo_output/smoke_longvn_20260820_*/run_metrics.json`。
 **边界（不回避）**：mock 只验证结构与编排——上下文退化、输出质量、真实成本与限流行为只能由真实 API 运行验证（此前外部评审已点名该局限），上表的墙钟/成本/缓存/轮换指标仍属未测。这次演练同时修出 4 个真 bug：mock dispatch 关键词误路由（thinking/rollup 被静默替换成错误 fixture 且报成功）、`_build_from_plan` 丢弃 `context_deps`（DAG 波次与图校验此前在端到端运行中从未真正生效）、Writer 反馈飞轮引用不存在的变量（NameError 被静默吞掉，注入从未运行）、最终 `vn_script.json` 缺 chapters（盘上工件与内存结果不一致）。
 
+**付费运行前的 harness 加固（2026-08-24，仍零 API 花费）**：为真实 12/50 场运行清掉了四个会让"验证"本身失真的问题。
+- **成本与缓存指标此前是死代码**：`run_metrics.json` 从来没有 `total_cost_usd` / `cache_read_ratio`（守卫写的是 TokenTracker 上不存在的方法名），下表 $15 上限那一行读到的永远是 0.0，**从未真正生效过**。现已接上缓存感知计价（cache read ×0.1、cache write ×1.25）。
+- **真实路径此前比 mock 验证得更少**：`cross_ref_sync` 与 `scene_summarization` 只在 `--mock` 分支里打开，付费运行反而跑在库默认关闭状态。现已两路共用同一覆盖函数。
+- **健康墙钟阈值按 18s/场校准，而唯一真实运行实测 61s/场**：12 场必然误判 RED，配合 `--abort-on-degradation` 会直接掐掉后续档位。现按 75s/场（红线 150s/场）重新校准。
+- **无中途预算熔断、无崩溃兜底**：新增 `--max-budget-usd`（每 ~20 秒采样实时花费，超限取消并写盘）；任何异常也会写出带 `aborted_reason` 的 `run_metrics.json` 并打印 `salvage` / `--resume` 恢复指引。真实运行现在还会落 `trace.json` 与 `run_meta.json`。
+
 **Phase 13-1 验收目标（smoke_longvn.py --scenes 50 手动验证）**：
 | 指标 | 目标 | 来源 |
 |---|---|---|
-| 端到端墙钟 | ≤ 30 min | Step 6 async rollup + Step 1 key pool |
+| 端到端墙钟 | ≤ 30 min（**目标，非断言**：按实测 61s/场推算 50 场约 50 分钟，脚本改为对校准红线 125 分钟断言，原先那条 30 分钟硬断言会让每一次健康运行都判 FAIL） | Step 6 async rollup + Step 1 key pool |
 | 总 API 成本 | ≤ $15 | Step 4 dedup + Step 3 cache |
 | `chapters` 条目 | 5 (= 50/10) | Step 6 |
 | `state_timeline` 条目 | 50 | Step 2 |

@@ -102,7 +102,7 @@
 | `local_regen` 真执行器（唯一完整接线的意图） | M0 范围内的诚实取舍——与其 4 个都做假执行器，不如先做实 1 个 | 复用 `agents/local_regen.py::regenerate_scene`（未重造轮子）；`regenerate_scene` 直接写 `vn_script.json`（绕过 web 层 JobStore），所以 `chat_execute` 要重新从磁盘读取、同步回 SQLite blackboard——真实存在的一致性坑，由 `test_execute_local_regen_syncs_blackboard_from_disk` 专门盯着 | commit `47d59e4` |
 | 每个已解决 turn 的审计轨迹 | 需要项目状态可审计，而非全量 UI 埋点 | 每个"已解决"turn 落一行 JSONL 到 `<output_dir>/chat_ops/turns.jsonl`（mutating 意图只在 confirm 后落盘，被取消的 turn 不落盘），与已有的 `rag_retrievals.jsonl` 同一套约定 | commit `47d59e4` |
 
-**M0 范围内的诚实取舍**：4 个意图全部能正确分类，但只有 `local_regen` 接了真执行器；`add_character`/`edit_asset` 返回诚实的"M0 未实现"提示，不是静默失败。L2 置信度阈值 / L3 top-K 选项 / L4 反馈飞轮回 P1 仍是路线图，未开始。浏览器点击验证未做。
+**M1（2026-08-24）**：4 个意图现在全部可执行。`add_character` 合成角色档案、过一遍 CharacterDesigner、原子写入 characters.json 与剧本 cast——**刻意不改写既有场景**，因为"进 cast"和"上台"是两回事，回复里明说发生的是哪一件。`edit_asset` 先查开源素材库（命中即零调用、许可干净的换图），未命中再重生成。L2 置信度阈值已落地（`chat_intent_confidence_threshold=0.6`）：低置信度的改动型意图变成澄清提问而不是确认卡片——L1 只在创作者认真读卡片时才有用，而 0.3 置信度的卡片和 0.95 的长得一模一样。L3 top-K 选项 / L4 反馈飞轮回 P1 仍是路线图。浏览器点击验证仍未做。
 
 ### 2.6 v4 P4（PlaytestAgent + Vision LLM Judge M0）——已交付
 
@@ -534,6 +534,7 @@ Writer prompt          Writer system prompt suffix
   - ❌ 尚不成立：Autopilot 自身的 KPI（成功率 ≥ 85%、墙钟 ≤ 8 分钟）**尚未在真实运行上测量过**——只有 mock 模式 + 单元测试。应说"已埋好测量点，首次真实运行验证待做"。
   - ❌ 尚不成立：Chat Ops"每会话 ≥ 8 次操作"和 Vision Judge"≤ $0.20/run"仍是未测量的目标（无真实用户，Vision Judge 也无真实 API 实测）——和下面已有的 50-scene / diversity index 目标同等对待。
 - **50-scene 长篇**：**编排层已零成本实测**（2026-08-20，`smoke_longvn.py --mock --scenes 50 --concurrent 5`：5 chapters、state_timeline 50 条、DAG waves、writer 峰值并发 5、10 条 callback 冲突 Tier-1 解决，全部断言通过）。但 mock 只验证结构与编排——**上下文退化、输出质量、真实成本与限流行为仍未验证**。完整 50-scene 的时长/成本声明依旧是**根据 6-scene baseline 推算**：可写“50-scene 编排已 mock 验证、正朝真实运行成本低于 $15 推进”，不能写“已实现 50-scene 成本 $15”。
+  - **到 2026-08-24 为止，度量本身是坏的**——这件事值得当作一个独立故事讲，而不是藏起来。harness 把成本与缓存字段挡在 `hasattr` 后面，而检查的方法名 TokenTracker 上从来不存在，于是 `run_metrics.json` 一直没有这两个字段，$15 上限断言读到缺失的 key 当作 0.0——**它根本不可能触发**。健康门是同一类问题的另一个方向：墙钟基线按 18s/场设定，而唯一真实运行实测 61s/场，于是健康的运行会被判 RED，配合 `--abort-on-degradation` 直接掐掉昂贵档位。两处都已修复，另加中途 `--max-budget-usd` 熔断（跑完才断言，救不了在第 5/50 场就跑偏还在持续付费的运行）和崩溃时仍写运行记录的兜底。**可以讲的教训：验证用的 harness 自己也需要被验证——"断言通过了"和"断言跑了"是两回事。**
 - **多样性指数 ≥ 30%**：这是**目标**，不是实测结果。应写“目标达到 30%+”，不能写“已达到 30%+”。
 - **Vision Judge 有效性**：已构建（P4 M0），但只做过 mock 验证（英文+中文 mock 生成截图的人工视觉检查）。**不得**声称已获得 Vision Judge 的 Pearson r 或真实每次运行成本；只能陈述实测的 Sonnet vs GPT-4o 跨 Judge r=0.643（这是另一组 v3 时代的评审对比，不是同一件事）。
 - **P6 前端改版（2026-08-10）**：同样适用"M0 交付 ≠ 生产验证"的纪律，并且多一条轴——这项工作在一个**尚未合并的分支**上（`feat/frontend-redesign-v4`），而且**默认外壳仍然是旧的**。
