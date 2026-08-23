@@ -15,6 +15,46 @@
 
 ## [Unreleased]
 
+### 2026-08-24 | 实现 - 2026-08-24 02:20
+
+**变更文件** (11 个):
+**源码变更** (5 文件):
+  - `src/vn_agent/chat_ops/executors/add_character.py`
+  - `src/vn_agent/chat_ops/executors/edit_asset.py`
+  - `src/vn_agent/chat_ops/run_context.py`
+  - `src/vn_agent/services/token_tracker.py`
+  - `src/vn_agent/web/app.py`
+
+**测试变更** (5 文件):
+  - `tests/test_chat_ops/test_orchestrator.py`
+  - `tests/test_chat_ops/test_run_context.py`
+  - `tests/test_scripts/test_smoke_longvn.py`
+  - `tests/test_services/test_token_tracker.py`
+  - `tests/test_web/test_chat_endpoints.py`
+
+**其他变更** (1 文件):
+  - `scripts/smoke_longvn.py`
+
+**变更统计**:
+```
+scripts/smoke_longvn.py                          |  49 +++++++++--
+ src/vn_agent/chat_ops/executors/add_character.py |  55 ++++++++----
+ src/vn_agent/chat_ops/executors/edit_asset.py    |  48 ++++++++---
+ src/vn_agent/chat_ops/run_context.py             |  34 ++++++++
+ src/vn_agent/services/token_tracker.py           |   6 +-
+ src/vn_agent/web/app.py                          |  22 +++++
+ tests/test_chat_ops/test_orchestrator.py         | 101 +++++++++++++++++++++++
+ tests/test_chat_ops/test_run_context.py          |  58 +++++++++++++
+ tests/test_scripts/test_smoke_longvn.py          |  34 ++++++++
+ tests/test_services/test_token_tracker.py        |   5 +-
+ tests/test_web/test_chat_endpoints.py            |  17 ++++
+ 11 files changed, 392 insertions(+), 37 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-24 | 实现 - 2026-08-24 01:48
 
 **变更文件** (1 个):

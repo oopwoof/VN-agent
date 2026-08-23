@@ -270,6 +270,44 @@ class TestExecuteAddCharacter:
         assert after[victim] == existing[victim]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("proposed,expected", [
+        # A Python keyword as a Ren'Py `define` is a compile error...
+        ("class", "char_class"),
+        # ...and `narrator` is worse than an error: defining it replaces the
+        # engine's own narrator, so every narration line in the game renders
+        # under this character's name and colour.
+        ("narrator", "char_narrator"),
+    ])
+    async def test_reserved_ids_are_prefixed(
+        self, tmp_path, monkeypatch, proposed, expected,
+    ):
+        run = _copy_fixture(tmp_path)
+        payload = json.loads(_NEW_CHARACTER_JSON)
+        payload["id"] = proposed
+        monkeypatch.setattr(
+            "vn_agent.services.llm.ainvoke_llm",
+            _fake_designer_llm(json.dumps(payload)),
+        )
+        async def _no_visual(profile, output_dir, characters):  # noqa: ARG001
+            return profile, ""
+        monkeypatch.setattr(
+            "vn_agent.chat_ops.executors.add_character._fill_visual_profile",
+            _no_visual,
+        )
+
+        preview = ChatTurnResult(
+            turn_id="t5d", message="add someone", intent="add_character",
+            confidence=0.8, target_scene_id=None, target_character_id=None,
+            instruction="add someone", reasoning="", preview_text="...",
+            requires_confirmation=True,
+        )
+        result = await execute_turn(str(run), preview)
+
+        assert result.success is True, result.result_text
+        chars = json.loads((run / "characters.json").read_text(encoding="utf-8"))
+        assert expected in chars
+
+    @pytest.mark.asyncio
     async def test_non_ascii_name_still_yields_a_renpy_safe_id(self, tmp_path, monkeypatch):
         """The id becomes a Ren'Py variable name, so a model that returns
         a Chinese id would break the compile, not just the turn."""
@@ -389,6 +427,69 @@ class TestExecuteEditAsset:
         result = await execute_turn(str(run), preview)
         assert result.success is True
         assert "sprite" in result.result_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_sprite_request_naming_a_scene_is_still_a_sprite_request(
+        self, tmp_path, monkeypatch,
+    ):
+        """"Change Yuki's sprite in the rooftop scene" classifies with BOTH
+        ids. Treating that as a background edit repaints — and bills for —
+        the wrong asset."""
+        run = _copy_fixture(tmp_path)
+        script = VNScript.model_validate_json(
+            (run / "vn_script.json").read_text(encoding="utf-8"))
+
+        def _boom(*a, **k):
+            raise AssertionError("must not touch the background path")
+        monkeypatch.setattr("vn_agent.assets.library.try_library_hit", _boom)
+
+        preview = ChatTurnResult(
+            turn_id="t6d", message="redraw Alice smiling in the arrival scene",
+            intent="edit_asset", confidence=0.8,
+            target_scene_id=script.scenes[0].id, target_character_id="alice",
+            instruction="redraw Alice smiling", reasoning="", preview_text="...",
+            requires_confirmation=True,
+        )
+        result = await execute_turn(str(run), preview)
+        assert result.success is True
+        assert "sprite" in result.result_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_text_only_job_makes_no_image_call(self, tmp_path, monkeypatch):
+        """A text-only project was configured never to spend on images. The
+        executor runs after the pipeline, so it has no conditional edge to
+        follow — without the flag it would bill for an image the project
+        opted out of."""
+        from vn_agent.chat_ops.run_context import text_only_var
+
+        run = _copy_fixture(tmp_path)
+        script = VNScript.model_validate_json(
+            (run / "vn_script.json").read_text(encoding="utf-8"))
+        monkeypatch.setattr(
+            "vn_agent.assets.library.try_library_hit", lambda *a, **k: None,
+        )
+
+        async def _boom(*a, **k):
+            raise AssertionError("text-only job must not regenerate images")
+        monkeypatch.setattr(
+            "vn_agent.chat_ops.executors.edit_asset._regenerate", _boom,
+        )
+
+        preview = ChatTurnResult(
+            turn_id="t6e", message="make it dusk", intent="edit_asset",
+            confidence=0.75, target_scene_id=script.scenes[0].id,
+            target_character_id=None, instruction="make it dusk", reasoning="",
+            preview_text="...", requires_confirmation=True,
+        )
+        token = text_only_var.set(True)
+        try:
+            result = await execute_turn(str(run), preview)
+        finally:
+            text_only_var.reset(token)
+
+        # _boom would have fired if the executor had tried to regenerate.
+        assert result.success is True
+        assert "nothing was regenerated" in result.result_text
 
 
 class TestLowConfidenceFallback:

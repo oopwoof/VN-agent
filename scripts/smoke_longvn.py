@@ -201,16 +201,30 @@ async def _run_graph_with_budget(
         if done:
             return task.result()
         spent = tracker.estimated_cost()
-        if spent > max_budget_usd:
-            task.cancel()
-            try:
-                await task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
+        if spent <= max_budget_usd:
+            continue
+
+        # The task can finish between the wait timing out and the cancel
+        # landing. Reporting that run as budget-aborted would throw away a
+        # completed result, or bury a real crash under the wrong
+        # aborted_reason — a run misreported is worse than one not caught.
+        if task.done():
+            return task.result()
+
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass  # the cancellation we asked for
+        except Exception as e:  # noqa: BLE001 — a real failure that raced us
             raise BudgetExceeded(
                 f"estimated spend ${spent:.2f} passed the --max-budget-usd "
-                f"ceiling of ${max_budget_usd:.2f}; run cancelled"
-            )
+                f"ceiling of ${max_budget_usd:.2f}, and the run also failed"
+            ) from e
+        raise BudgetExceeded(
+            f"estimated spend ${spent:.2f} passed the --max-budget-usd "
+            f"ceiling of ${max_budget_usd:.2f}; run cancelled"
+        )
 
 
 def _salvage_hint(output_dir: Path) -> str:
@@ -515,7 +529,13 @@ async def _run(args: argparse.Namespace, *, concurrent: int | None = None,
             "wall_seconds": round(wall, 1),
             "wall_minutes": round(wall / 60, 2),
             "writer_max_concurrent": effective_concurrent,
-            "scene_count": args.scenes,
+            # Scenes actually finished, counted from the per-scene snapshots.
+            # Recording args.scenes here would put the REQUESTED count under
+            # the same key the success path fills with the DELIVERED one, so
+            # a run that died at scene 5 of 50 would read as complete.
+            "scene_count": len(list((output_dir / "snapshots").glob("*.json")))
+                           if (output_dir / "snapshots").exists() else 0,
+            "scenes_requested": args.scenes,
             "theme": theme,
             "output_dir": str(output_dir),
             "mock": is_mock,
@@ -534,6 +554,11 @@ async def _run(args: argparse.Namespace, *, concurrent: int | None = None,
             )
         except Exception as write_err:  # noqa: BLE001
             logger.warning(f"Could not write aborted run_metrics: {write_err}")
+        # An aborted run is the one you most want per-node timing for.
+        _write_run_artifacts(
+            output_dir, report=aborted, tracker=tracker, args=args,
+            settings=settings, script=None,
+        )
         logger.error(
             f"Run aborted after {wall/60:.1f} min and "
             f"~${aborted['total_cost_usd']}: {e}\n{_salvage_hint(output_dir)}"
@@ -858,6 +883,12 @@ def main() -> None:
             print(f"  hard ceiling:  ${args.max_budget_usd} (--max-budget-usd)")
         else:
             print("  hard ceiling:  none — pass --max-budget-usd to cap spend")
+        if not args.text_only:
+            # The watchdog samples TokenTracker, which only ever sees LLM
+            # calls — image_gen never records anything. Both the estimate
+            # above and the ceiling are text-only figures.
+            print("  NOTE: image spend is NOT tracked — the estimate and the "
+                  "ceiling above cover LLM calls only")
     print(f"  theme:         {args.theme[:80]}")
 
     if not args.confirm and not args.mock:

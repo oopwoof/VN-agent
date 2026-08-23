@@ -7,11 +7,12 @@ through SceneArtist when the job is really generating images.
 
 Two honest boundaries, both surfaced in the turn text rather than hidden:
 
-- Under mock mode there is no image generation at all (image_gen refuses
-  by design), so a library miss can't be fixed here. That turn succeeds
-  with a message pointing at the asset-upload endpoint — a chat-ops turn
-  that reports "no automated option, here's the manual one" is a useful
-  answer, not a failure.
+- When the job can't generate images — mock mode, or a text-only project
+  that was configured never to spend on them — a library miss has no
+  automated fix. That turn succeeds with a message naming the reason and
+  pointing at the asset-upload endpoint; "no automated option, here's the
+  manual one" is a useful answer, and billing for an image the project
+  opted out of would not be.
 - Character sprites are not covered. Re-rendering one emotion out of a
   set breaks visual consistency with the rest; sprite work belongs with
   add_character or a full re-design, and the turn says so.
@@ -39,7 +40,11 @@ async def execute(output_dir: str, preview) -> tuple[bool, str, str | None]:
     if not script_path.exists():
         return False, "No vn_script.json in this project — generate a script first.", None
 
-    if preview.target_character_id and not preview.target_scene_id:
+    # A sprite request often names a scene too ("change Yuki's sprite in the
+    # rooftop scene"). Keying only on "character and NOT scene" would send
+    # those down the background path and repaint — and bill for — the wrong
+    # asset, so any named character means the request is about a sprite.
+    if preview.target_character_id:
         return True, (
             f"Sprite edits for '{preview.target_character_id}' aren't automated: "
             f"re-rendering one emotion out of a set drifts from the others, so "
@@ -60,21 +65,29 @@ async def execute(output_dir: str, preview) -> tuple[bool, str, str | None]:
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Library first: a hit is free, licence-clean, and instant.
+    # try_library_hit copies over the live background, so keep the old bytes
+    # until the script write lands — otherwise a failed write reports "Failed"
+    # while the image on disk has already changed irreversibly.
+    previous_bytes = target_path.read_bytes() if target_path.exists() else None
     hit = _try_library(instruction, scene, target_path, output_dir)
     if hit is not None:
         provenance = f"[library:{hit.id} · {hit.license} · {hit.attribution}]"
         _replace_scene(script, scene, f"{provenance} {instruction}")
-        _atomic_write(script_path, script.model_dump_json(indent=2))
+        try:
+            _atomic_write(script_path, script.model_dump_json(indent=2))
+        except Exception:
+            _restore(target_path, previous_bytes)
+            raise
         return True, (
             f"Swapped the background for '{scene.title}' with a library asset "
             f"({hit.id}, {hit.license}). No generation call needed."
         ), f"- {scene.background_id}: (previous)\n+ {scene.background_id}: {provenance}"
 
-    from vn_agent.services.llm import mock_mode_var
-    if mock_mode_var.get():
+    from vn_agent.chat_ops.run_context import images_allowed, no_images_reason
+    if not images_allowed():
         return True, (
-            f"No library match for '{instruction}', and mock mode makes no "
-            f"image calls, so nothing was regenerated. {_UPLOAD_HINT}"
+            f"No library match for '{instruction}', and {no_images_reason()}, "
+            f"so nothing was regenerated. {_UPLOAD_HINT}"
         ), None
 
     try:
@@ -142,6 +155,19 @@ def _replace_scene(script: VNScript, scene, background_prompt: str) -> None:
                 update={"background_prompt": background_prompt},
             )
             return
+
+
+def _restore(path: Path, previous_bytes: bytes | None) -> None:
+    """Put the old image back after a failed swap, so the turn's failure
+    message stays true. Best-effort: a restore failure must not mask the
+    original error being propagated."""
+    try:
+        if previous_bytes is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(previous_bytes)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Could not restore previous background at {path}: {e}")
 
 
 def _atomic_write(path: Path, text: str) -> None:

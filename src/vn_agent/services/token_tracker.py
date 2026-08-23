@@ -26,7 +26,11 @@ logger = logging.getLogger(__name__)
 # Approximate costs per 1M tokens (USD) — updated for common models
 _COST_PER_M = {
     "claude-sonnet-4-6": {"in": 3.0, "out": 15.0},
-    "claude-haiku-4-5-20251001": {"in": 0.80, "out": 4.0},
+    # Haiku 4.5 is $1/$5 per MTok. This row carried 3.5-Haiku's $0.80/$4.00
+    # until 2026-08-24, under-reporting every Haiku call (summarizer, chapter
+    # rollup, intent router, explain) by 20% — tolerable while the number was
+    # only printed, and not once the budget watchdog started acting on it.
+    "claude-haiku-4-5-20251001": {"in": 1.0, "out": 5.0},
     "gpt-4o": {"in": 2.5, "out": 10.0},
     "gpt-4o-mini": {"in": 0.15, "out": 0.6},
 }

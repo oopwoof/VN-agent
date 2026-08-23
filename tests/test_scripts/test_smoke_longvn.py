@@ -340,6 +340,40 @@ class TestBudgetWatchdog:
         assert cancelled["yes"], "the graph task must actually be cancelled"
         assert "9.00" in str(exc.value) and "6.00" in str(exc.value)
 
+    def test_task_finishing_during_the_cancel_window_is_not_lost(self):
+        """The graph can complete between the poll timing out and the cancel
+        landing. Reporting that as budget-aborted throws away a finished run
+        — all the money spent, the result discarded."""
+        smoke = _load_smoke_module()
+
+        async def _work():
+            await asyncio.sleep(0.01)
+            return "finished just in time"
+
+        # Breach on the first poll, but the work completes during it.
+        tracker = _FakeTracker([9.0])
+        result = asyncio.run(smoke._run_graph_with_budget(
+            _work(), tracker, max_budget_usd=6.0, poll_seconds=0.05,
+        ))
+        assert result == "finished just in time"
+
+    def test_a_crash_racing_the_breach_keeps_its_own_reason(self):
+        """If the run failed for its own reason, that reason has to survive.
+        Recording aborted_reason='budget_exceeded' over a real crash would
+        send whoever reads run_metrics.json after the fact chasing the wrong
+        problem."""
+        smoke = _load_smoke_module()
+
+        async def _work():
+            await asyncio.sleep(0.01)
+            raise RuntimeError("the real failure")
+
+        with pytest.raises(RuntimeError, match="the real failure"):
+            asyncio.run(smoke._run_graph_with_budget(
+                _work(), _FakeTracker([9.0]), max_budget_usd=6.0,
+                poll_seconds=0.05,
+            ))
+
     def test_salvage_hint_names_both_recovery_commands(self, tmp_path):
         """An aborted long run is resumable — the operator has to be told
         how, in the same breath as the abort."""

@@ -160,6 +160,23 @@ class TestChatExecute:
         scene1 = next(s for s in scenes if s["id"] == "scene_1_arrival")
         assert scene1["dialogue"] == [{"character_id": "alice", "text": "Brand new line.", "emotion": "happy"}]
 
+    def test_low_confidence_execute_is_rejected(self, client, seeded_job):
+        """L2 has to hold at execute too. The request carries the client's
+        echo of the classification, so a preview that was gated into a
+        clarification could otherwise just be replayed as an execute — which
+        would leave the whole confidence layer resting on client honesty."""
+        job_id, output_dir = seeded_job
+        before = (output_dir / "vn_script.json").read_bytes()
+
+        resp = client.post(f"/api/projects/{job_id}/chat/execute", json={
+            "turn_id": "t9", "intent": "local_regen", "confidence": 0.2,
+            "target_scene_id": "scene_1_arrival", "instruction": "change it",
+            "preview_text": "...",
+        })
+        assert resp.status_code == 400
+        assert "threshold" in resp.json()["detail"]
+        assert (output_dir / "vn_script.json").read_bytes() == before
+
     def test_execute_add_character_syncs_characters_into_blackboard(self, client, seeded_job):
         """M1: add_character has a real executor, so the endpoint must
         re-sync characters too — the executor writes characters.json

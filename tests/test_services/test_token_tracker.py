@@ -40,9 +40,10 @@ def test_estimated_cost_unknown_model():
 
 def test_estimated_cost_haiku():
     t = TokenTracker()
-    # Haiku: $0.80/MTok in, $4/MTok out
+    # Haiku 4.5: $1/MTok in, $5/MTok out. (Pinned at 3.5-Haiku's $0.80/$4.00
+    # until 2026-08-24 — a 20% under-report the budget watchdog now acts on.)
     t.add("test", "claude-haiku-4-5-20251001", 1_000_000, 1_000_000)
-    assert t.estimated_cost() == 0.80 + 4.0
+    assert t.estimated_cost() == 1.0 + 5.0
 
 
 def test_summary_format():

@@ -6,12 +6,12 @@ existing CharacterDesigner fills the visual profile (and sprites, when
 the job is actually generating images), and both characters.json and
 vn_script.json are updated atomically.
 
-Sprites are the one deliberate scope line. On a mock or text-only job
-image generation raises by design (`image_gen` refuses when
-`mock_mode_var` is set, and text-only jobs never had an asset stage), so
-the executor writes the profile and says so instead of failing the turn
-over an image nobody asked for. The character is playable either way —
-the compiler fills missing sprites with placeholders.
+Sprites are the one deliberate scope line. A mock job can't call an
+image provider at all, and a text-only job was configured never to spend
+on one — in both cases the executor writes the profile and says which
+reason applied, instead of either failing the turn or quietly billing for
+an image the project was set up to avoid. The character is playable
+either way; the compiler fills missing sprites with placeholders.
 
 What this deliberately does NOT do: rewrite existing scenes to include
 the new character. Adding someone to the cast makes them *available*;
@@ -52,6 +52,17 @@ Return JSON only:
 variable name. Never reuse an existing character's id or name."""
 
 _ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+# The id is emitted verbatim as a Ren'Py `define <id> = Character(...)`.
+# A Python keyword there is a compile error, and a Ren'Py built-in is
+# worse than an error: defining `narrator` silently replaces the engine's
+# own narrator, so every line of narration in the game renders under this
+# character's name and colour.
+_RESERVED_IDS = {
+    "narrator", "name_only_text", "centered", "vcentered", "nvl",
+    "config", "store", "gui", "renpy", "style", "persistent", "preferences",
+    "adv", "extend", "menu", "label", "screen", "default", "define",
+}
 
 
 async def execute(output_dir: str, preview) -> tuple[bool, str, str | None]:
@@ -130,11 +141,9 @@ async def _synthesize_profile(
     content = response.content if hasattr(response, "content") else str(response)
     data = _parse_json_object(content)
 
-    char_id = str(data.get("id") or "").strip().lower()
-    if not _ID_RE.match(char_id):
-        # The id becomes a Ren'Py variable name, so a bad one breaks the
-        # compile rather than the chat turn. Derive one from the name.
-        char_id = _slugify(str(data.get("name") or "new_character"))
+    char_id = _safe_id(
+        str(data.get("id") or ""), str(data.get("name") or "new_character"),
+    )
     return CharacterProfile(
         id=char_id,
         name=str(data.get("name") or char_id),
@@ -153,9 +162,9 @@ async def _fill_visual_profile(
     """Visual profile always; sprites only when the job can actually make
     images. Returns (profile, human-readable note about sprites)."""
     from vn_agent.agents.character_designer import _design_character
-    from vn_agent.services.llm import mock_mode_var
+    from vn_agent.chat_ops.run_context import images_allowed, no_images_reason
 
-    want_sprites = not mock_mode_var.get()
+    want_sprites = images_allowed()
     try:
         designed, errors = await _design_character(
             profile, output_dir,
@@ -168,7 +177,7 @@ async def _fill_visual_profile(
         return profile, "No visual profile yet (designer unavailable)."
 
     if not want_sprites:
-        return designed, "Sprites skipped (mock mode — no image calls)."
+        return designed, f"Sprites skipped ({no_images_reason()})."
     if errors:
         return designed, f"Sprites partially failed ({len(errors)} error(s))."
     return designed, "Sprites generated."
@@ -214,6 +223,24 @@ def _parse_json_object(content: str) -> dict:
     if not match:
         raise ValueError("model returned no JSON object")
     return json.loads(match.group(0))
+
+
+def _safe_id(proposed: str, fallback_name: str) -> str:
+    """A Ren'Py-safe identifier, preferring the model's own id.
+
+    Falls back to a slug of the display name when the proposed id isn't
+    usable, then prefixes anything that would collide with a keyword or
+    engine built-in — `char_narrator` is a harmless name, `narrator` is a
+    silent takeover of every narration line in the game.
+    """
+    import keyword
+
+    candidate = proposed.strip().lower()
+    if not _ID_RE.match(candidate):
+        candidate = _slugify(fallback_name)
+    if keyword.iskeyword(candidate) or candidate in _RESERVED_IDS:
+        candidate = f"char_{candidate}"
+    return candidate
 
 
 def _slugify(name: str) -> str:

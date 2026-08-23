@@ -583,7 +583,25 @@ async def chat_execute(job_id: str, req: ChatTurnRequest):
 
     from vn_agent.chat_ops.orchestrator import ChatTurnResult
     from vn_agent.chat_ops.orchestrator import execute_turn as _execute_turn
+    from vn_agent.chat_ops.run_context import text_only_var
+    from vn_agent.config import get_settings
     from vn_agent.services.llm import mock_mode_var
+
+    # L2 is enforced here too, not only in preview. The request carries the
+    # client's echo of the classification, so a preview that was gated into a
+    # clarification could otherwise be replayed as an execute — which would
+    # leave the whole confidence layer resting on client honesty, contrary to
+    # what ChatTurnRequest's docstring promises.
+    threshold = get_settings().chat_intent_confidence_threshold
+    if req.confidence < threshold:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"confidence {req.confidence:.2f} is below the "
+                f"{threshold:.2f} threshold — re-run preview and answer the "
+                f"clarifying question instead of executing"
+            ),
+        )
 
     output_dir = job.get("output_dir", ".")
     preview = ChatTurnResult(
@@ -593,9 +611,13 @@ async def chat_execute(job_id: str, req: ChatTurnRequest):
         preview_text=req.preview_text, requires_confirmation=True,
     )
     mock_token = mock_mode_var.set(_resolve_mock(job.get("config", {}).get("mock", False)))
+    # An executor runs after the pipeline, so it has no conditional edge to
+    # tell it this job never wanted images — the flag has to be handed over.
+    text_token = text_only_var.set(bool(job.get("config", {}).get("text_only", False)))
     try:
         result = await _execute_turn(output_dir, preview)
     finally:
+        text_only_var.reset(text_token)
         mock_mode_var.reset(mock_token)
 
     # Every mutating executor writes vn_script.json, and add_character also
