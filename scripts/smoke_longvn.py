@@ -197,13 +197,28 @@ def _apply_concurrency_overrides(settings, concurrent: int) -> None:
         settings.writer_consume_thinking = True
 
 
-def _apply_mock_overrides(settings) -> None:
-    """--mock: flip on the long-form machinery that defaults off, so the
-    dry run exercises it instead of silently skipping it. Same
+def _apply_longform_overrides(settings, n_scenes: int) -> None:
+    """Flip on the long-form machinery that defaults off, so a long-form
+    run exercises it instead of silently skipping it. Same
     post-construction-mutation pattern (and caveat) as
-    _apply_concurrency_overrides above."""
+    _apply_concurrency_overrides above.
+
+    This used to be mock-only (`_apply_mock_overrides`), which meant the
+    REAL path validated LESS than the mock dry run did: cross-ref sync
+    and per-scene summarization sat at their library defaults (both
+    False) on every paid run, so the paid run couldn't confirm what the
+    free one had. One helper on both paths now, so they can't drift.
+
+    Reviewer timeout scales with scene count because the dialogue rubric
+    pass reads every scene's lines in one call — config.py's own comment
+    says 300s is sized for ~5 scenes and long runs need more. 12 scenes
+    keeps the 300s default; 50 scenes gets 600s.
+    """
     settings.enable_cross_ref_sync = True
     settings.enable_scene_summarization = True
+    settings.reviewer_timeout_seconds = max(
+        settings.reviewer_timeout_seconds, 12.0 * n_scenes,
+    )
 
 
 def _mock_structural_issues(script, *, expect_thinking: bool) -> list[str]:
@@ -264,10 +279,13 @@ async def _run(args: argparse.Namespace, *, concurrent: int | None = None,
 
     effective_concurrent = concurrent if concurrent is not None else args.concurrent
     _apply_concurrency_overrides(settings, effective_concurrent)
+    _apply_longform_overrides(settings, args.scenes)
     logger.info(
         f"Writer concurrency: {settings.writer_max_concurrent} "
         f"(thinking_fanout={settings.enable_thinking_fanout}, "
-        f"consume_thinking={settings.writer_consume_thinking})"
+        f"consume_thinking={settings.writer_consume_thinking}); "
+        f"cross_ref_sync + scene_summarization on, "
+        f"reviewer_timeout={settings.reviewer_timeout_seconds}s"
     )
 
     is_mock = bool(getattr(args, "mock", False))
@@ -284,10 +302,8 @@ async def _run(args: argparse.Namespace, *, concurrent: int | None = None,
         # the network. setdefault so an operator can override on a machine
         # that genuinely needs a first-time download.
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
-        _apply_mock_overrides(settings)
         logger.info(
-            "Mock mode: mock_mode_var=True, VN_MOCK_SYNTH=1, HF offline, "
-            "cross_ref_sync + scene_summarization forced on"
+            "Mock mode: mock_mode_var=True, VN_MOCK_SYNTH=1, HF offline"
         )
 
         # Peak-writer-concurrency gauge. mock_ainvoke never awaits, so each

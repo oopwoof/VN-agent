@@ -79,6 +79,43 @@ class TestApplyConcurrencyOverrides:
         assert smoke._BENCHMARK_TIERS == (1, 2, 5)
 
 
+class _LongformSettingsStub:
+    """Fields _apply_longform_overrides touches, at their library defaults."""
+
+    def __init__(self):
+        self.enable_cross_ref_sync = False
+        self.enable_scene_summarization = False
+        self.reviewer_timeout_seconds = 300.0
+
+
+class TestApplyLongformOverrides:
+    """Long-form machinery that ships off by default. This ran on the mock
+    path only until 2026-08-24, so paid runs exercised LESS than the free
+    dry run — the reason it now applies to both."""
+
+    def test_flags_forced_on(self):
+        smoke = _load_smoke_module()
+        s = _LongformSettingsStub()
+        smoke._apply_longform_overrides(s, 12)
+        assert s.enable_cross_ref_sync is True
+        assert s.enable_scene_summarization is True
+
+    def test_reviewer_timeout_scales_with_scene_count(self):
+        """The dialogue rubric reads every scene in one call, so the
+        default sized for ~5 scenes starves a 50-scene run."""
+        smoke = _load_smoke_module()
+        s = _LongformSettingsStub()
+        smoke._apply_longform_overrides(s, 50)
+        assert s.reviewer_timeout_seconds == 600.0
+
+    def test_short_run_keeps_configured_timeout(self):
+        """12 scenes needs 144s by the formula — never lower the setting."""
+        smoke = _load_smoke_module()
+        s = _LongformSettingsStub()
+        smoke._apply_longform_overrides(s, 12)
+        assert s.reviewer_timeout_seconds == 300.0
+
+
 class TestHealthSignals:
     """Phase 13-3 M0-4: pure-function tests for tier-gating health logic.
     The M1 tiered runner (12 → 25 → 50) breaks on red status; these tests
