@@ -107,6 +107,29 @@ async def preview_turn(output_dir: str, blackboard: dict, message: str, *, llm=N
         _log_turn(output_dir, result)
         return result
 
+    # L2 fallback: a low-confidence mutating intent asks instead of acting.
+    # L1 (the confirm card) only protects the creator if they read it — a
+    # confident-looking card for a 0.3-confidence guess invites a reflexive
+    # yes. Below the threshold we ask what they meant, which is also the
+    # honest thing to render.
+    from vn_agent.config import get_settings
+
+    threshold = get_settings().chat_intent_confidence_threshold
+    if classification.confidence < threshold:
+        clarify = _build_low_confidence_clarification(classification, threshold)
+        result = ChatTurnResult(
+            turn_id=turn_id, message=message, intent=classification.intent,
+            confidence=classification.confidence,
+            target_scene_id=classification.target_scene_id,
+            target_character_id=classification.target_character_id,
+            instruction=classification.instruction,
+            reasoning=classification.reasoning,
+            preview_text=clarify, requires_confirmation=False,
+            executed=False, success=None, result_text=clarify,
+        )
+        _log_turn(output_dir, result)
+        return result
+
     # Mutating intent — build a preview, do not touch disk yet.
     preview_text = _build_mutation_preview(classification, blackboard)
     return ChatTurnResult(
@@ -158,17 +181,48 @@ def _build_mutation_preview(c: IntentClassification, blackboard: dict) -> str:
     if c.intent == "add_character":
         return (
             f"Add a new character — {c.instruction or '(no description given)'}. "
-            "Note: not yet automatable in M0 — confirming will record the request "
-            "and tell you what's missing, but won't generate a character file."
+            "This writes a full profile into characters.json and adds them to "
+            "the cast. Existing scenes are not rewritten: they'll be available "
+            "to put on stage, not on stage yet."
         )
     if c.intent == "edit_asset":
         target = c.target_scene_id or c.target_character_id or "(unspecified)"
         return (
             f"Edit asset for {target} — {c.instruction or '(no description given)'}. "
-            "Note: not yet automatable in M0 — confirming will record the request "
-            "but won't regenerate the asset."
+            "Tries the open-source asset library first (free, licence-clean); "
+            "falls back to regenerating the image when the job generates images."
         )
     return c.instruction or "(no preview available)"
+
+
+def _build_low_confidence_clarification(
+    c: IntentClassification, threshold: float,
+) -> str:
+    """Say what we think was asked and what's missing, so the creator can
+    answer in one reply rather than guess what confused us."""
+    guesses = {
+        "local_regen": "rewrite a scene",
+        "add_character": "add a character",
+        "edit_asset": "change an image",
+    }
+    guess = guesses.get(c.intent, "change the project")
+    missing = []
+    if c.intent in ("local_regen", "edit_asset") and not c.target_scene_id:
+        missing.append("which scene")
+    if c.intent == "edit_asset" and not (c.target_scene_id or c.target_character_id):
+        missing.append("which asset")
+    if not c.instruction:
+        missing.append("what to change")
+
+    text = (
+        f"I think you want to {guess}, but I'm only {c.confidence:.0%} sure "
+        f"(I act on {threshold:.0%} or better)."
+    )
+    if missing:
+        text += " Could you say " + " and ".join(missing) + "?"
+    else:
+        text += " Could you rephrase, naming the scene or character directly?"
+    return text
 
 
 def _scene_title(blackboard: dict, scene_id: str | None) -> str | None:
@@ -264,22 +318,36 @@ def _read_scene_dialogue_text(output_dir: str, scene_id: str) -> str:
     return ""
 
 
-# ── add_character / edit_asset — classified but not yet automatable in M0 ──
+# ── executors ────────────────────────────────────────────────────────────────
 
 async def _handle_unimplemented(output_dir: str, preview: ChatTurnResult) -> tuple[bool, str, str | None]:  # noqa: ARG001
+    """Default for an intent with no executor. Nothing routes here today —
+    it stays as the honest landing spot for a future intent added to the
+    router before its handler exists."""
     return (
         False,
-        f"'{preview.intent}' is classified correctly but not wired to an executor yet in M0 — "
-        "recorded to the chat log for now; ask the maintainer to build the handler, or use "
-        "the existing Asset panel / CLI tools for this in the meantime.",
+        f"'{preview.intent}' is classified correctly but has no executor yet — "
+        "recorded to the chat log; use the Asset panel or CLI tools in the meantime.",
         None,
     )
 
 
+async def _handle_add_character(output_dir: str, preview: ChatTurnResult) -> tuple[bool, str, str | None]:
+    from vn_agent.chat_ops.executors import add_character
+
+    return await add_character.execute(output_dir, preview)
+
+
+async def _handle_edit_asset(output_dir: str, preview: ChatTurnResult) -> tuple[bool, str, str | None]:
+    from vn_agent.chat_ops.executors import edit_asset
+
+    return await edit_asset.execute(output_dir, preview)
+
+
 _HANDLERS: dict[str, Any] = {
     "local_regen": _handle_local_regen,
-    "add_character": _handle_unimplemented,
-    "edit_asset": _handle_unimplemented,
+    "add_character": _handle_add_character,
+    "edit_asset": _handle_edit_asset,
 }
 
 

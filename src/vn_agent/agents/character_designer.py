@@ -53,10 +53,17 @@ async def run_character_designer(state: AgentState) -> dict:
 
 async def _design_character(
     char: CharacterProfile, output_dir: str, art_direction: str = "",
+    *, generate_sprites: bool = True,
 ) -> tuple[CharacterProfile, list[str]]:
     """Design visual profile for a character.
 
     Returns a tuple of (updated_character, errors).
+
+    `generate_sprites=False` produces the written profile without touching
+    image generation — for callers that want a character defined now and
+    illustrated later (chat-ops add_character on a text-only or mock job,
+    where image_gen raises by design). Keyword-only so existing positional
+    callers are unaffected.
     """
     style_note = f"\nProject art direction (MUST follow): {art_direction}" if art_direction else ""
     user_prompt = f"""Create a visual profile for this character:{style_note}
@@ -112,6 +119,9 @@ Return as JSON:
     )
 
     # Generate sprites for key emotions
+    if not generate_sprites:
+        return char.model_copy(update={"visual": visual}), []
+
     sprites, sprite_errors = await _generate_sprites(char, visual, output_dir)
     visual = visual.model_copy(update={"sprites": sprites})
 

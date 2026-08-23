@@ -160,13 +160,36 @@ class TestChatExecute:
         scene1 = next(s for s in scenes if s["id"] == "scene_1_arrival")
         assert scene1["dialogue"] == [{"character_id": "alice", "text": "Brand new line.", "emotion": "happy"}]
 
-    def test_execute_add_character_stub_does_not_sync_blackboard(self, client, seeded_job):
+    def test_execute_add_character_syncs_characters_into_blackboard(self, client, seeded_job):
+        """M1: add_character has a real executor, so the endpoint must
+        re-sync characters too — the executor writes characters.json
+        directly and the UI otherwise keeps rendering the old cast."""
+        import json as _json
+
         job_id, _ = seeded_job
-        resp = client.post(f"/api/projects/{job_id}/chat/execute", json={
-            "turn_id": "t3", "intent": "add_character", "confidence": 0.8,
-            "instruction": "add a rival", "preview_text": "...",
+        profile = _json.dumps({
+            "id": "mira", "name": "Mira", "color": "#8899ff", "role": "rival",
+            "personality": "Competitive.", "background": "Transferred in.",
+            "speech_fingerprint": ["clips sentences short"],
         })
+
+        async def fake_llm(system, user, schema=None, model=None, caller=None):  # noqa: ARG001
+            return type("M", (), {"content": profile})()
+
+        async def no_visual(prof, out_dir, characters):  # noqa: ARG001
+            return prof, "Sprites skipped (test)."
+
+        with patch("vn_agent.services.llm.ainvoke_llm", side_effect=fake_llm), \
+             patch("vn_agent.chat_ops.executors.add_character._fill_visual_profile",
+                   side_effect=no_visual):
+            resp = client.post(f"/api/projects/{job_id}/chat/execute", json={
+                "turn_id": "t3", "intent": "add_character", "confidence": 0.8,
+                "instruction": "add a rival", "preview_text": "...",
+            })
+
         assert resp.status_code == 200
         body = resp.json()
-        assert body["success"] is False
-        assert "M0" in body["result_text"]
+        assert body["success"] is True, body["result_text"]
+
+        bb = client.get(f"/api/projects/{job_id}/blackboard").json()["blackboard"]
+        assert "mira" in bb["characters"]

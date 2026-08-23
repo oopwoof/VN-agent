@@ -598,7 +598,10 @@ async def chat_execute(job_id: str, req: ChatTurnRequest):
     finally:
         mock_mode_var.reset(mock_token)
 
-    if result.success and req.intent == "local_regen":
+    # Every mutating executor writes vn_script.json, and add_character also
+    # rewrites characters.json — without a re-sync the UI keeps rendering
+    # the pre-edit blackboard and the next compile rebuilds from stale data.
+    if result.success and req.intent in ("local_regen", "add_character", "edit_asset"):
         try:
             from vn_agent.schema.script import VNScript
             script_path = Path(output_dir) / "vn_script.json"
@@ -606,6 +609,13 @@ async def chat_execute(job_id: str, req: ChatTurnRequest):
             bb = store.get_blackboard(job_id)
             bb["scene_scripts"] = _scenes_to_blackboard(fresh_script)
             bb["_script_json"] = fresh_script.model_dump()
+
+            chars_path = Path(output_dir) / "characters.json"
+            if req.intent == "add_character" and chars_path.exists():
+                fresh_chars = json.loads(chars_path.read_text(encoding="utf-8"))
+                bb["characters"] = fresh_chars
+                bb["_characters_json"] = fresh_chars
+
             store.update_blackboard(job_id, bb)
         except Exception as e:
             logger.warning(f"chat_execute: blackboard re-sync from disk failed for {job_id}: {e}")

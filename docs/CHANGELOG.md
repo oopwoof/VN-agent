@@ -15,6 +15,38 @@
 
 ## [Unreleased]
 
+### 2026-08-24 | 实现 - 2026-08-24 01:47
+
+**变更文件** (8 个):
+**源码变更** (6 文件):
+  - `src/vn_agent/agents/character_designer.py`
+  - `src/vn_agent/chat_ops/executors/__init__.py`
+  - `src/vn_agent/chat_ops/executors/add_character.py`
+  - `src/vn_agent/chat_ops/executors/edit_asset.py`
+  - `src/vn_agent/chat_ops/orchestrator.py`
+  - `src/vn_agent/web/app.py`
+
+**测试变更** (2 文件):
+  - `tests/test_chat_ops/test_orchestrator.py`
+  - `tests/test_web/test_chat_endpoints.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/character_designer.py        |  10 +
+ src/vn_agent/chat_ops/executors/__init__.py      |   7 +
+ src/vn_agent/chat_ops/executors/add_character.py | 223 ++++++++++++++++++
+ src/vn_agent/chat_ops/executors/edit_asset.py    | 150 ++++++++++++
+ src/vn_agent/chat_ops/orchestrator.py            |  88 ++++++-
+ src/vn_agent/web/app.py                          |  12 +-
+ tests/test_chat_ops/test_orchestrator.py         | 281 +++++++++++++++++++++--
+ tests/test_web/test_chat_endpoints.py            |  35 ++-
+ 8 files changed, 772 insertions(+), 34 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-24 | 杂项 - 2026-08-24 01:36
 
 **变更文件** (1 个):
