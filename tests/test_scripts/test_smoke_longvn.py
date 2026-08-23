@@ -350,6 +350,83 @@ class TestBudgetWatchdog:
         assert str(tmp_path) in hint
 
 
+class _MetaSettingsStub:
+    llm_director_model = "claude-sonnet-4-6"
+    llm_writer_model = "claude-sonnet-4-6"
+    llm_reviewer_model = "claude-sonnet-4-6"
+    writer_max_concurrent = 3
+
+
+class _MetaScriptStub:
+    title = "The Tide Keeper"
+
+
+class TestRunArtifacts:
+    """trace.json and run_meta.json are what the run-analyzer agent reads
+    and the only per-node timing that survives the process. The harness
+    reset the trace every run and then never saved it."""
+
+    def _write(self, tmp_path):
+        import types
+        smoke = _load_smoke_module()
+        args = types.SimpleNamespace(
+            theme="a lighthouse keeper", scenes=12, characters=3,
+            text_only=True, mock=False,
+        )
+        report = {
+            "wall_seconds": 742.0, "scene_count": 12, "chapter_count": 1,
+            "health_status": "green", "errors": [],
+        }
+        smoke._write_run_artifacts(
+            tmp_path, report=report, tracker=_FakeTrackerWithSummary(),
+            args=args, settings=_MetaSettingsStub(), script=_MetaScriptStub(),
+        )
+        return tmp_path
+
+    def test_run_meta_carries_cost_and_models(self, tmp_path):
+        import json as _json
+        out = self._write(tmp_path)
+        meta = _json.loads((out / "run_meta.json").read_text(encoding="utf-8"))
+        # run-analyzer reads actual_cost_usd specifically.
+        assert meta["actual"]["actual_cost_usd"] == 3.42
+        assert meta["models"]["writer"] == "claude-sonnet-4-6"
+        assert meta["max_scenes"] == 12
+        assert meta["script"]["title"] == "The Tide Keeper"
+
+    def test_trace_is_saved(self, tmp_path):
+        out = self._write(tmp_path)
+        assert (out / "trace.json").exists()
+
+    def test_write_failure_does_not_sink_a_finished_run(self, tmp_path, monkeypatch):
+        """A run that already succeeded must not be failed by a bad write."""
+        import types
+        smoke = _load_smoke_module()
+
+        class _Boom:
+            def summary_dict(self):
+                raise OSError("disk gone")
+
+            def estimated_cost(self):
+                return 0.0
+
+        args = types.SimpleNamespace(
+            theme="t", scenes=12, characters=3, text_only=True, mock=False,
+        )
+        # Must not raise.
+        smoke._write_run_artifacts(
+            tmp_path, report={}, tracker=_Boom(), args=args,
+            settings=_MetaSettingsStub(), script=None,
+        )
+
+
+class _FakeTrackerWithSummary(_FakeTracker):
+    def __init__(self):
+        super().__init__([3.42])
+
+    def summary_dict(self):
+        return {"total_input": 1000, "total_output": 500, "calls": 3}
+
+
 class TestOutputDirArg:
     """--output-dir lets a multi-tier run keep its artifacts under one
     root (demo_output/real_<date>/tier_12, tier_50) instead of scattered

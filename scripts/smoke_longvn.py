@@ -86,7 +86,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from vn_agent.agents.graph import create_pipeline  # noqa: E402
 from vn_agent.agents.state import initial_state  # noqa: E402
 from vn_agent.config import get_settings  # noqa: E402
-from vn_agent.observability.tracing import reset_trace  # noqa: E402
+from vn_agent.observability.tracing import get_trace, reset_trace  # noqa: E402
 from vn_agent.services.preflight import check_readiness  # noqa: E402
 from vn_agent.services.token_tracker import TokenTracker, current_tracker  # noqa: E402
 
@@ -221,6 +221,66 @@ def _salvage_hint(output_dir: Path) -> str:
         f"Partial artifacts are in {output_dir}. To recover:\n"
         f"  vn-agent salvage --output {output_dir}      # fold snapshots/ into vn_script.json\n"
         f"  vn-agent generate --resume --output {output_dir}   # continue from there"
+    )
+
+
+def _write_run_artifacts(output_dir: Path, *, report: dict, tracker,
+                         args: argparse.Namespace, settings, script) -> None:
+    """Persist trace.json + run_meta.json alongside run_metrics.json.
+
+    The harness reset the trace on every run but never saved it, and never
+    wrote run_meta at all — both files the run-analyzer agent expects, and
+    the only source of per-node timing once the process exits. Best-effort:
+    a failure here must not sink a run that already succeeded.
+    """
+    try:
+        get_trace().save(output_dir)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Could not save trace.json: {e}")
+
+    try:
+        _write_run_meta(
+            output_dir, report=report, tracker=tracker, args=args,
+            settings=settings, script=script,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Could not write run_meta.json: {e}")
+
+
+def _write_run_meta(output_dir: Path, *, report: dict, tracker,
+                    args: argparse.Namespace, settings, script) -> None:
+    meta = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "source": "scripts/smoke_longvn.py",
+        "theme": args.theme,
+        "max_scenes": args.scenes,
+        "num_characters": args.characters,
+        "text_only": bool(args.text_only),
+        "mock": bool(getattr(args, "mock", False)),
+        "writer_max_concurrent": settings.writer_max_concurrent,
+        "wall_time_seconds": report.get("wall_seconds"),
+        "models": {
+            "director": settings.llm_director_model,
+            "writer": settings.llm_writer_model,
+            "reviewer": settings.llm_reviewer_model,
+        },
+        "actual": {
+            "token_usage": tracker.summary_dict(),
+            # run-analyzer reads actual_cost_usd; keep the run_real_demo
+            # key too so both spellings resolve.
+            "actual_cost_usd": round(tracker.estimated_cost(), 4),
+            "estimated_cost_usd": round(tracker.estimated_cost(), 4),
+        },
+        "script": {
+            "title": getattr(script, "title", None),
+            "scene_count": report.get("scene_count", 0),
+            "chapter_count": report.get("chapter_count", 0),
+        },
+        "health_status": report.get("health_status"),
+        "errors": report.get("errors", []),
+    }
+    (output_dir / "run_meta.json").write_text(
+        json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8",
     )
 
 
@@ -584,6 +644,10 @@ async def _run(args: argparse.Namespace, *, concurrent: int | None = None,
     (output_dir / "run_metrics.json").write_text(
         json.dumps(report, indent=2, ensure_ascii=False),
         encoding="utf-8",
+    )
+    _write_run_artifacts(
+        output_dir, report=report, tracker=tracker, args=args,
+        settings=settings, script=script,
     )
 
     # Phase 13-3 M0-4: respect --abort-on-degradation by exiting non-zero
