@@ -15,6 +15,28 @@
 
 ## [Unreleased]
 
+### 2026-08-24 | 实现 - 2026-08-24 01:24
+
+**变更文件** (3 个):
+**源码变更** (2 文件):
+  - `src/vn_agent/agents/director.py`
+  - `src/vn_agent/schema/script.py`
+
+**测试变更** (1 文件):
+  - `tests/test_agents/test_director.py`
+
+**变更统计**:
+```
+src/vn_agent/agents/director.py    |  2 +-
+ src/vn_agent/schema/script.py      | 23 ++++++++++++++++++-----
+ tests/test_agents/test_director.py | 21 +++++++++++----------
+ 3 files changed, 30 insertions(+), 16 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-24 | 实现 - 2026-08-24 01:23
 
 **变更文件** (5 个):

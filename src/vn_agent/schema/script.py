@@ -437,17 +437,30 @@ class DirectorStep2Output(BaseModel):
     Use would otherwise suppress (PydanticToolsParser discards any text
     content before the tool_use block, so without an in-schema reasoning
     field the model knows its planning text will be thrown away and skips
-    it). Bounded by max_length=800 so it doesn't reintroduce the
-    `<thinking>` token-budget tax we just eliminated.
+    it).
+
+    The hard max_length is gone. History: the cap started at 800, was
+    raised to 2000 after a sanity smoke showed Sonnet writing ~1500 chars
+    of legitimate planning, then fired AGAIN at 3 scenes on the same
+    theme. A Pydantic max_length on a free-text scratchpad saves no
+    tokens — they are already generated and billed by the time the
+    validator rejects them. All the cap bought was an ERROR log and a
+    langchain RunnableWithFallbacks parser cycle (~30s wall) on every
+    Director step2 call. Real budget control is the API-level
+    settings.llm_max_tokens (16000), which still truncates a genuine
+    `<thinking>`-style runaway — just without a ValidationError on the
+    way. The description keeps a soft hint so prompt-following still
+    trims the output.
     """
     reasoning: str = Field(
         default="",
-        max_length=800,
         description=(
-            "Brief planning scratchpad: which scenes are turning points, "
+            "Planning scratchpad: which scenes are turning points, "
             "where to wire branches/state for narrative impact, which "
             "characters appear where. Fill this BEFORE filling `scenes`. "
-            "Keep concise (≤800 chars) — this is planning, not prose."
+            "Prefer concise prose (a few hundred words) — this is "
+            "planning, not prose drafting. No hard schema limit; "
+            "budget is enforced at the API max_tokens level."
         ),
     )
     scenes: list[DirectorStep2SceneOutput] = Field(

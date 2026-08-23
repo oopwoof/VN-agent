@@ -593,18 +593,19 @@ class TestDirectorStep2OutputWrapper:
             f"reasoning must be first field, got order: {field_names}"
         )
 
-    def test_reasoning_field_max_length_800(self):
-        """Bounded scratchpad — without a cap we'd reintroduce the
-        token-budget tax we eliminated in Step 4f."""
-        from pydantic import ValidationError
+    def test_reasoning_field_no_hard_cap(self):
+        """No schema-level length cap on the scratchpad.
 
+        The cap (800, then 2000) fired on real Director step2 calls every
+        time it existed — Sonnet's planning prose legitimately scales with
+        scene count. Rejecting it post-hoc saved zero tokens (already
+        billed) and cost a fallback parser cycle per call. Budget is
+        enforced at the API level via llm_max_tokens instead."""
         from vn_agent.schema.script import DirectorStep2Output
 
-        # 800 chars exact: pass
-        DirectorStep2Output(reasoning="x" * 800)
-        # 801 chars: ValidationError
-        with pytest.raises(ValidationError):
-            DirectorStep2Output(reasoning="x" * 801)
+        # Lengths observed in real runs, plus a deliberately large one.
+        for n in (1500, 2001, 5000):
+            assert len(DirectorStep2Output(reasoning="x" * n).reasoning) == n
 
 
 class _FakeStep2Settings:

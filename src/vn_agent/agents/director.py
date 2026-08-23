@@ -408,7 +408,7 @@ I/O, narrative graph deps, and a creative scene_brief.
 ## Plan first via the `reasoning` field (Phase 13-3 M0-2)
 
 BEFORE filling `scenes`, fill the `reasoning` field with a brief plan
-(≤800 chars, prose paragraph form, NOT bullets):
+(prose paragraph form, NOT bullets — keep it tight, a few hundred words):
 - Which scenes are turning points (need branches), which are linear
 - Where to wire `state_reads` / `state_writes` for narrative impact
 - Which characters appear physically vs by reference in each scene
