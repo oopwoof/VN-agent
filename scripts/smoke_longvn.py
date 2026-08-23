@@ -843,6 +843,21 @@ def main() -> None:
     else:
         print(f"  concurrent:    {args.concurrent}")
     print(f"  est. cost:     ~${est_cost}" + ("  (mock: zero spend)" if args.mock else ""))
+    if not args.mock:
+        # The per-scene envelope above assumes one Writer pass. A Reviewer
+        # FAIL sends the graph back to Writer, which regenerates EVERY
+        # scene — up to max_revision_rounds+1 full passes. Real runs
+        # measured ~$0.30-0.35/scene against this table's $0.247, and
+        # revisions are the difference. Say so before someone types
+        # --confirm against the optimistic number.
+        realistic = round(est_cost * 1.3, 2)
+        print(f"  with revisions: ~${realistic} "
+              f"(Reviewer FAIL rewrites every scene; "
+              f"max_revision_rounds={get_settings().max_revision_rounds})")
+        if getattr(args, "max_budget_usd", None) is not None:
+            print(f"  hard ceiling:  ${args.max_budget_usd} (--max-budget-usd)")
+        else:
+            print("  hard ceiling:  none — pass --max-budget-usd to cap spend")
     print(f"  theme:         {args.theme[:80]}")
 
     if not args.confirm and not args.mock:
