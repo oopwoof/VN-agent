@@ -928,3 +928,52 @@ class TestStep2ObservabilityLogs:
         assert any("reasoning_chars=" in m for m in msgs)
         # And the actual length should match (42 chars for our fixture)
         assert any("reasoning_chars=42" in m for m in msgs)
+
+
+class TestThemeLanguageReachesTheDirector:
+    """The Writer honours a Chinese theme; the Director never saw it.
+
+    The 2026-09-19 re-run delivered Chinese dialogue under the Japanese
+    title 「桜の下で、また会う日まで」 and an English one-line synopsis.
+    Title, description and every scene blurb come from the Director,
+    whose prompt carries no language instruction at all — so a user who
+    asks in Chinese gets a story whose packaging is in two other
+    languages. Ids must stay ASCII: they become Ren'Py identifiers.
+    """
+
+    @staticmethod
+    async def _prompt_for(mocker, tmp_path, theme: str) -> str:
+        from vn_agent.agents.director import _step1_outline
+        from vn_agent.config import get_settings
+
+        seen: dict = {}
+
+        class _Resp:
+            content = "{}"
+
+        async def _capture(system, user_prompt, *a, **kw):
+            seen.setdefault("user", user_prompt)
+            return _Resp()
+
+        mocker.patch("vn_agent.agents.director.ainvoke_llm", side_effect=_capture)
+        try:
+            await _step1_outline(theme, 3, 2, str(tmp_path), get_settings())
+        except Exception:
+            pass  # the canned "{}" fails validation downstream; the prompt is what matters
+        return seen["user"]
+
+    @pytest.mark.asyncio
+    async def test_chinese_theme_asks_for_chinese_prose(self, mocker, tmp_path):
+        prompt = await self._prompt_for(mocker, tmp_path, "樱花树下的转学生")
+        assert "简体中文" in prompt
+
+    @pytest.mark.asyncio
+    async def test_chinese_theme_keeps_ids_ascii(self, mocker, tmp_path):
+        """CJK in an id would break the generated Ren'Py identifiers."""
+        prompt = await self._prompt_for(mocker, tmp_path, "樱花树下的转学生")
+        assert "ASCII" in prompt or "English identifiers" in prompt
+
+    @pytest.mark.asyncio
+    async def test_english_theme_is_untouched(self, mocker, tmp_path):
+        prompt = await self._prompt_for(mocker, tmp_path, "a quiet semester")
+        assert "简体中文" not in prompt

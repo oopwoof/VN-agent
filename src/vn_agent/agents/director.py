@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import cast
 
@@ -56,6 +57,19 @@ _SYSTEM_DETAILS_SIMPLE = (
     "Music moods: peaceful, romantic, tense, melancholic, joyful, mysterious, epic, neutral. "
     "Output ONLY valid JSON, no explanation or commentary."
 )
+
+
+_CJK_RE = re.compile("[" + chr(0x4E00) + "-" + chr(0x9FFF) + "]")
+
+
+def _has_cjk(text: str) -> bool:
+    """Whether the user's own text is Chinese.
+
+    The theme is the only string the user authored, so it is the one
+    honest language signal in the pipeline — see the matching check in
+    `writer._write_scene`.
+    """
+    return bool(_CJK_RE.search(text or ""))
 
 
 def _is_small_model(model_name: str) -> bool:
@@ -287,6 +301,21 @@ cues a parallel Writer worker can read and reproduce
 For short/simple stories (≤6 scenes), set foreshadow_plan=[] and \
 tone_register=""; they don't need this scaffolding and paying for \
 unused tokens is wasteful."""
+
+    # 2026-09-19: the Writer honours a Chinese theme but the Director never
+    # saw the language at all, so a Chinese request came back with Chinese
+    # dialogue wrapped in a Japanese title and an English synopsis. Every
+    # piece of prose the player reads outside the dialogue — title,
+    # description, scene blurbs — originates here. Kept ahead of
+    # retry_feedback so it stays inside the cached prefix.
+    if _has_cjk(theme):
+        user_prompt += (
+            "\n\nIMPORTANT: the theme is written in Chinese. Write the title,"
+            " description, art_direction and every scene title/description in"
+            " Chinese (简体中文). Every `id` field — scene ids, character ids,"
+            " background_id — must stay ASCII English identifiers; they become"
+            " Ren'Py identifiers and CJK there will not compile."
+        )
 
     # Phase 13-2 Step 4e: APPEND retry feedback at the very end so the
     # cached prefix (system + main user_prompt body) stays byte-identical
