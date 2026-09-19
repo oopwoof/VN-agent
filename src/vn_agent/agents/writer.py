@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import re
+from contextvars import ContextVar
 from datetime import UTC
 from pathlib import Path
 from typing import Any
@@ -53,8 +54,34 @@ def _get_rag_lock() -> asyncio.Lock:
     return _rag_lock
 
 
+# Scenes whose Writer response was cut off by the per-scene output cap.
+# A revision round cannot fix these — the rewrite meets the same cap — so
+# routing needs to see them rather than reading a thin scene as a Writer
+# judgment failure. Found by the first real 12-scene run (2026-09-19),
+# which burned all three revision rounds on exactly that mistake.
+_output_capped_var: ContextVar[set[str] | None] = ContextVar(
+    "vn_agent_writer_output_capped", default=None,
+)
+
+
+def _note_output_capped(scene_id: str) -> None:
+    """Record that a scene's Writer response was cut off by the output cap.
+
+    Kept as a ContextVar holding one mutable set: the parallel path's
+    tasks copy the context at creation, but they copy a reference to the
+    same set, so every wave reports into the run's single collection.
+    """
+    capped = _output_capped_var.get()
+    if capped is not None:
+        capped.add(scene_id)
+
+
 async def run_writer(state: AgentState) -> dict:
     """Writer node: fills in dialogue for all scenes."""
+    # Fresh per round: a revision round's truncations are its own.
+    capped_scenes: set[str] = set()
+    _output_capped_var.set(capped_scenes)
+
     script = state["vn_script"]
     characters = state["characters"]
     revision_feedback = state.get("review_feedback", "")
@@ -277,9 +304,24 @@ async def run_writer(state: AgentState) -> dict:
     except Exception as e:  # noqa: BLE001
         logger.warning(f"Final vn_script.json checkpoint failed: {e}")
 
+    if capped_scenes:
+        logger.warning(
+            f"Writer: {len(capped_scenes)} scene(s) hit the per-scene output "
+            f"cap (writer_max_tokens_per_scene="
+            f"{settings.writer_max_tokens_per_scene}) and were truncated "
+            f"mid-response: {sorted(capped_scenes)}. Raise the cap or shorten "
+            f"the planning block — revising these scenes cannot help."
+        )
+
     return {
         "vn_script": updated_script,
         "world_state": world_state,
+        "output_capped_scenes": sorted(capped_scenes),
+        "warnings": state.get("warnings", []) + ([
+            f"Writer[output-cap]: {len(capped_scenes)} scene(s) truncated at "
+            f"writer_max_tokens_per_scene="
+            f"{settings.writer_max_tokens_per_scene}: {sorted(capped_scenes)}"
+        ] if capped_scenes else []),
     }
 
 
@@ -1501,6 +1543,25 @@ async def _write_scene(
     ):
         thinking_block = _format_thinking_block(scene.thinking)
 
+    # The planning block WRITER_SYSTEM asks for and the dialogue share one
+    # output budget (writer_max_tokens_per_scene). The first real 12-scene
+    # run (2026-09-19) spent 66-100% of that budget on <thinking> — six of
+    # twelve scenes emitted no JSON at all before the cap cut them off —
+    # and strip_thinking() discards the planning regardless. When the
+    # thinking phase already handed the Writer a plan, re-deriving it
+    # inline is paid for twice and the dialogue is what gets truncated.
+    if thinking_block:
+        planning_directive = (
+            "\nThe scene plan above IS your planning — do NOT write a "
+            "<thinking> block. Begin your response with the JSON array."
+        )
+    else:
+        planning_directive = (
+            "\nKeep <thinking> planning under 150 words: the same output "
+            "budget pays for the dialogue below, so planning that overruns "
+            "it truncates the scene."
+        )
+
     user_prompt = f"""Write dialogue for this scene:
 
 Scene ID: {scene.id}
@@ -1515,7 +1576,7 @@ Music mood: {scene.music.mood.value if scene.music else 'none'}
 
 Story context: {script.description}
 {older_summaries_block}{prior_context_block}
-{thinking_block}
+{thinking_block}{planning_directive}
 Write {settings.min_dialogue_lines}-{settings.max_dialogue_lines} dialogue/narration lines.
 Target 800-1500 words total dialogue/narration for this scene — aim for the
 shorter end on transitional scenes, the longer end on emotional turning
@@ -1631,6 +1692,13 @@ After dialogue, if branches exist, the player will choose:
         max_tokens=settings.writer_max_tokens_per_scene,
     )
     content = response.content if hasattr(response, 'content') else str(response)
+
+    # A cut-off response is a budget event, not a craft failure. Record it
+    # so routing can tell "the Writer wrote a thin scene" from "the Writer
+    # was cut off mid-JSON" — a revision round cannot fix the latter.
+    _meta = getattr(response, "response_metadata", None) or {}
+    if (_meta.get("stop_reason") or _meta.get("finish_reason")) == "max_tokens":
+        _note_output_capped(scene.id)
 
     _save_debug_raw(output_dir, f"writer_{scene.id}.txt", content)
     content = strip_thinking(content)

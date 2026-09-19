@@ -127,6 +127,18 @@ def _after_structure_review(state: AgentState) -> str:
     return decision.target
 
 
+# 2026-09-19: the first real long-form run FAILed review because ten of
+# twelve Writer responses were cut off mid-JSON by the per-scene output
+# cap, then spent all three revision rounds rewriting every scene against
+# that same cap. The rounds cost ~$1.10 and 22 minutes and could not have
+# succeeded. Surfacing the real cause beats retrying it.
+_OUTPUT_CAP_MESSAGE = (
+    "Reviewer FAILED but {scenes} were truncated by the per-scene output "
+    "cap — a rewrite meets the same cap, so skipping the revision loop. "
+    "Raise writer_max_tokens_per_scene or shorten the planning block."
+)
+
+
 def _should_revise(state: AgentState) -> str:
     """Conditional edge: decide whether to revise or proceed."""
     settings = get_settings()
@@ -148,6 +160,14 @@ def _should_revise(state: AgentState) -> str:
         )
         return "proceed"
 
+    if state.get("output_capped_scenes"):
+        logger.warning(
+            _OUTPUT_CAP_MESSAGE.format(
+                scenes=state["output_capped_scenes"],
+            )
+        )
+        return "proceed"
+
     if state.get("revision_count", 0) >= settings.max_revision_rounds:
         logger.warning(
             f"Max revisions ({settings.max_revision_rounds}) reached - proceeding anyway"
@@ -165,13 +185,18 @@ def _after_review(state: AgentState) -> str:
     # Check if we should revise first
     revision_count = state.get("revision_count", 0)
     can_writer_fix = state.get("review_can_writer_fix", True)
+    capped = state.get("output_capped_scenes") or []
     if (
         not state.get("review_passed")
         and can_writer_fix
+        and not capped
         and revision_count < settings.max_revision_rounds
     ):
         logger.info(f"Reviewer FAILED (round {state.get('revision_count', 0)}) - revising")
         return "revise"
+
+    if not state.get("review_passed") and capped:
+        logger.warning(_OUTPUT_CAP_MESSAGE.format(scenes=capped))
 
     # Phase 13-3 M0 follow-up: graph-class FAIL skips Writer revision —
     # see _should_revise rationale. Surface a distinct log so operators

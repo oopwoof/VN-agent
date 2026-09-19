@@ -1917,3 +1917,140 @@ class TestThemeLanguageReachesTheWriter:
             mocker, tmp_path, theme="transfer student", description="A quiet semester.",
         )
         assert "简体中文" not in prompt
+
+
+class TestPlanningBudgetDirective:
+    """The planning block and the dialogue share one output budget.
+
+    The first real 12-scene run (2026-09-19) spent 66-100% of
+    `writer_max_tokens_per_scene` on <thinking>; six scenes emitted no
+    JSON at all before the cap cut them off, and strip_thinking() throws
+    that planning away regardless. When the thinking phase has already
+    handed the Writer a plan, re-deriving it inline is paid for twice
+    and the dialogue is what gets truncated.
+    """
+
+    @staticmethod
+    async def _prompt(mocker, tmp_path, *, with_thinking: bool) -> str:
+        from unittest.mock import AsyncMock
+
+        from vn_agent.agents.writer import _write_scene
+        from vn_agent.schema.script import Scene, SceneThinking, VNScript
+
+        seen: dict = {}
+
+        class _FakeResp:
+            content = '[{"character_id": null, "text": "x", "emotion": "neutral"}]'
+
+        async def _fake_invoke(*args, **kwargs):
+            seen.setdefault(
+                "user", args[1] if len(args) > 1 else kwargs.get("user_prompt", ""),
+            )
+            return _FakeResp()
+
+        mocker.patch("vn_agent.agents.writer.ainvoke_llm", side_effect=_fake_invoke)
+        mocker.patch("vn_agent.agents.writer._append_rag_record",
+                     new=AsyncMock(return_value=None))
+
+        thinking = SceneThinking(writing_intent="Land the reveal.") if with_thinking else None
+        scene = Scene(
+            id="s1", title="S1", description="x", background_id="bg",
+            characters_present=["a"], thinking=thinking,
+        )
+        script = VNScript(
+            title="T", description="d", theme="th",
+            start_scene_id="s1", scenes=[scene], world_variables=[],
+        )
+
+        if with_thinking:
+            from vn_agent.config import get_settings as _real
+            s = _real()
+            mock_s = mocker.patch("vn_agent.agents.writer.get_settings")
+            mock_s.return_value = s
+            s.writer_consume_thinking = True
+
+        await _write_scene(scene, script, "A: friendly", "", output_dir=str(tmp_path))
+        return seen["user"]
+
+    @pytest.mark.asyncio
+    async def test_injected_plan_suppresses_a_second_planning_pass(self, mocker, tmp_path):
+        prompt = await self._prompt(mocker, tmp_path, with_thinking=True)
+        assert "do NOT write a <thinking> block" in prompt, (
+            "with a plan already injected, re-deriving it inline burns the "
+            "same budget the dialogue needs"
+        )
+
+    @pytest.mark.asyncio
+    async def test_without_a_plan_the_planning_block_is_bounded(self, mocker, tmp_path):
+        prompt = await self._prompt(mocker, tmp_path, with_thinking=False)
+        assert "150 words" in prompt
+
+
+class TestOutputCapIsAFirstClassSignal:
+    """A truncated response is not a Writer judgment failure.
+
+    The same run burned all three revision rounds rewriting every scene
+    because the Reviewer FAILed the thin ones — but each rewrite met the
+    identical cap. Routing has to be able to tell the two apart.
+    """
+
+    @pytest.mark.asyncio
+    async def test_write_scene_records_the_capped_scene(self, mocker, tmp_path):
+        from unittest.mock import AsyncMock
+
+        from vn_agent.agents.writer import (
+            _output_capped_var,
+            _write_scene,
+        )
+        from vn_agent.schema.script import Scene, VNScript
+
+        class _Truncated:
+            content = '[{"character_id": null, "text": "x", "emotion": "neutral"}'
+            response_metadata = {"stop_reason": "max_tokens"}
+
+        mocker.patch("vn_agent.agents.writer.ainvoke_llm",
+                     side_effect=AsyncMock(return_value=_Truncated()))
+        mocker.patch("vn_agent.agents.writer._append_rag_record",
+                     new=AsyncMock(return_value=None))
+
+        scene = Scene(id="s1", title="S1", description="x",
+                      background_id="bg", characters_present=["a"])
+        script = VNScript(title="T", description="d", theme="th",
+                          start_scene_id="s1", scenes=[scene], world_variables=[])
+
+        capped: set = set()
+        token = _output_capped_var.set(capped)
+        try:
+            await _write_scene(scene, script, "A: friendly", "", output_dir=str(tmp_path))
+        finally:
+            _output_capped_var.reset(token)
+
+        assert capped == {"s1"}
+
+    def test_failed_review_with_capped_scenes_skips_the_revision_loop(self):
+        """A rewrite meets the same cap, so the rounds are pure waste."""
+        from vn_agent.agents.graph import _after_review, _should_revise
+
+        state = {
+            "review_passed": False,
+            "review_can_writer_fix": True,
+            "revision_count": 0,
+            "output_capped_scenes": ["s1", "s2"],
+            "text_only": True,
+        }
+        assert _after_review(state) == "end"
+        assert _should_revise(state) == "proceed"
+
+    def test_failed_review_without_capped_scenes_still_revises(self):
+        """The ordinary quality-FAIL path must be untouched."""
+        from vn_agent.agents.graph import _after_review, _should_revise
+
+        state = {
+            "review_passed": False,
+            "review_can_writer_fix": True,
+            "revision_count": 0,
+            "output_capped_scenes": [],
+            "text_only": True,
+        }
+        assert _after_review(state) == "revise"
+        assert _should_revise(state) == "revise"

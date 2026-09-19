@@ -44,6 +44,12 @@ class AgentState(dict):
     # preserves the historical "always retry on FAIL" behavior for
     # mechanical / dialogue / quality failures.
     review_can_writer_fix: bool
+    # 2026-09-19: scene ids whose Writer response was cut off by
+    # writer_max_tokens_per_scene. A revision round rewrites every scene
+    # against the same cap, so a FAIL driven by these is not something the
+    # loop can fix — the first real 12-scene run burned all three rounds
+    # learning that. Empty on a healthy run.
+    output_capped_scenes: list[str]
     # Sprint 7-5: structure-reviewer (pre-Writer audit) results. Informational
     # for Writer context, non-blocking by default.
     # Phase 13-2 Step 4e: structured findings (typed categories) populated
@@ -106,6 +112,7 @@ def initial_state(
         "review_passed": False,
         "review_feedback": "",
         "review_can_writer_fix": True,
+        "output_capped_scenes": [],
         "structure_review_passed": False,
         "structure_review_feedback": "",
         "structure_review_issues": [],
