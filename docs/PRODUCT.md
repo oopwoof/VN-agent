@@ -47,6 +47,13 @@
 - **健康墙钟阈值按 18s/场校准，而唯一真实运行实测 61s/场**：12 场必然误判 RED，配合 `--abort-on-degradation` 会直接掐掉后续档位。现按 75s/场（红线 150s/场）重新校准。
 - **无中途预算熔断、无崩溃兜底**：新增 `--max-budget-usd`（每 ~20 秒采样实时花费，超限取消并写盘）；任何异常也会写出带 `aborted_reason` 的 `run_metrics.json` 并打印 `salvage` / `--resume` 恢复指引。真实运行现在还会落 `trace.json` 与 `run_meta.json`。
 
+**mock 模式并非真的零花费（2026-09-19 发现并修复）**：一次例行的 20 场 `--mock` 演练在日志里出现了 `POST https://api.anthropic.com/v1/messages 200 OK`，`total_cost_usd` 记到 $0.02。根因是 **mock 门只装在了一扇门上**：`ainvoke_llm` 自 v4 P0-7 起就会查 `mock_mode_var`，但 `services/tools.py::ainvoke_with_tools`（工具调用路径）与 `services/streaming.py` 的两个流式函数各自 `get_llm()` 直连提供商，从不查这个门。`use_tool_calling` 默认开，所以 character_designer 与 scene_artist 每次 mock 运行都在真花钱；`/generate/stream` 端点则收了 `GenerateRequest.mock` 却从不 `set()` 那个 ContextVar。
+
+- **影响面**：`--text-only` 的运行在 reviewer 之后直接 END、整段素材生成不走，所以 2026-08-20 那轮 50 场 mock 确实零花费；但 Web 的 `text_only` 默认 False，**专门为了免费而存在的 `VN_AGENT_MOCK=1` 展示路径一直在付费**（`app.py` 那行注释还写着 "Zero API cost"）。
+- **为什么测试没抓到**：conftest 的第一层地板会剥掉所有 provider key，于是未设门的调用在测试里是*失败*后回落到被 mock 的自由文本路径——看起来像 mock 生效了。只有带真 key 的真实运行才会花钱。新测试改为直接打桩 `get_llm`，不再依赖"没有 key"这个副作用。
+- **这是同一类缺陷的第三次**（2026-08-03 image_gen、2026-08-11 `_lifespan` 只覆盖 10 个 agent 中的 5 个）。前两次的修复都是"覆盖 `ainvoke_llm` 的所有调用者"，而工具调用与流式是**另外的门**。新增的守卫因此不再点名文件：它扫描 `services/` 下每个调用 `get_llm(` 的模块，要求其必须引用 `_use_mock_llm`——新增模块重开这个口子会直接测试失败。
+- **验证**：把 key 换成无效值重跑同一条 20 场 mock 命令，零次真实请求、`total_cost_usd: 0.0`、PASS、health green。
+
 **Phase 13-1 验收目标（smoke_longvn.py --scenes 50 手动验证）**：
 | 指标 | 目标 | 来源 |
 |---|---|---|
