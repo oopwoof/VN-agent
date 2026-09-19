@@ -13,6 +13,13 @@ from vn_agent.services.tools import (
 )
 
 
+# These exercise the REAL provider path with a stubbed client, so they
+# must opt out of the conftest mock floor — with the floor on, the mock
+# gate added to tools/streaming short-circuits before the stub is used.
+# Layer one still strips provider keys, so nothing here can spend.
+pytestmark = pytest.mark.no_mock_floor
+
+
 class SimpleResult(BaseModel):
     """A test tool."""
 

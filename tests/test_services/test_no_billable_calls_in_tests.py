@@ -121,6 +121,12 @@ class TestOptingOutIsExplicit:
         "test_services/test_llm.py",
         "test_services/test_llm_mock_context.py",
         "test_cli/test_mock_patch.py",
+        # The other two doors to a live model. These three files stub
+        # get_llm directly instead of leaning on a missing key, which is
+        # what makes them able to prove an ungated entry point spends.
+        "test_services/test_mock_gate_entrypoints.py",
+        "test_services/test_tools.py",
+        "test_services/test_streaming.py",
     }
 
     def test_no_mock_floor_opt_outs_match_the_reviewed_allowlist(self):

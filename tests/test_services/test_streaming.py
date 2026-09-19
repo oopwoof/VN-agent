@@ -8,6 +8,13 @@ import pytest
 from vn_agent.services.streaming import astream_llm, astream_sse
 
 
+# These exercise the REAL provider path with a stubbed client, so they
+# must opt out of the conftest mock floor — with the floor on, the mock
+# gate added to tools/streaming short-circuits before the stub is used.
+# Layer one still strips provider keys, so nothing here can spend.
+pytestmark = pytest.mark.no_mock_floor
+
+
 def _make_chunk(content: str, usage: dict | None = None):
     """Create a mock LangChain AIMessageChunk."""
     chunk = MagicMock()

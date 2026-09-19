@@ -10,10 +10,33 @@ import logging
 from collections.abc import AsyncGenerator, Callable
 
 from vn_agent.config import get_settings
-from vn_agent.services.llm import get_llm
+from vn_agent.services.llm import _use_mock_llm, get_llm
 from vn_agent.services.token_tracker import get_active_tracker
 
 logger = logging.getLogger(__name__)
+
+
+async def _mock_chunks(
+    system_prompt: str,
+    user_prompt: str,
+    model: str | None,
+    caller: str,
+) -> list[str]:
+    """Canned mock text, split into chunks so the streaming shape survives.
+
+    Streaming is a second door to a live model — `get_llm()` here never
+    consulted the mock gate, so a mock-mode SSE request billed real tokens.
+    Chunking keeps every consumer (on_token callbacks, EventSource clients)
+    on the same multi-event path they take against a real provider.
+    """
+    from vn_agent.services.mock_llm import mock_ainvoke
+
+    response = await mock_ainvoke(
+        system_prompt, user_prompt, model=model, caller=caller,
+    )
+    text = getattr(response, "content", None) or str(response)
+    size = 40
+    return [text[i:i + size] for i in range(0, len(text), size)] or [""]
 
 
 async def astream_llm(
@@ -36,6 +59,15 @@ async def astream_llm(
         Complete response text
     """
     from langchain_core.messages import HumanMessage, SystemMessage
+
+    if _use_mock_llm():
+        mocked = await _mock_chunks(system_prompt, user_prompt, model, caller)
+        for token in mocked:
+            if token and on_token:
+                on_token(token)
+        full = "".join(mocked)
+        logger.info(f"[{caller}] streamed {len(mocked)} mock chunks, {len(full)} chars")
+        return full
 
     llm = get_llm(model)
     messages = [
@@ -90,6 +122,13 @@ async def astream_sse(
     Compatible with EventSource / fetch API on the client side.
     """
     from langchain_core.messages import HumanMessage, SystemMessage
+
+    if _use_mock_llm():
+        for token in await _mock_chunks(system_prompt, user_prompt, model, caller):
+            if token:
+                yield f"data: {json.dumps({'token': token})}\n\n"
+        yield "data: [DONE]\n\n"
+        return
 
     llm = get_llm(model)
     messages = [

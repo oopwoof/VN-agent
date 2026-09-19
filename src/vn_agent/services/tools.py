@@ -10,7 +10,12 @@ import logging
 from pydantic import BaseModel, Field
 
 from vn_agent.config import get_settings
-from vn_agent.services.llm import _log_stop_reason, _make_retry_decorator, get_llm
+from vn_agent.services.llm import (
+    _log_stop_reason,
+    _make_retry_decorator,
+    _use_mock_llm,
+    get_llm,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +62,28 @@ async def ainvoke_with_tools(
         Validated Pydantic model instance from the tool call
     """
     from langchain_core.messages import HumanMessage, SystemMessage
+
+    # The mock gate lives here too, not just in ainvoke_llm. This is a
+    # second door to a live model: character_designer and scene_artist come
+    # through it whenever settings.use_tool_calling is on (the default), so
+    # without this check a --mock run still billed real calls. The canned
+    # fixtures for those two callers already match these tool schemas.
+    if _use_mock_llm():
+        from vn_agent.services.mock_llm import mock_ainvoke
+
+        last_err: Exception | None = None
+        for schema in tools:
+            try:
+                return await mock_ainvoke(
+                    system_prompt, user_prompt,
+                    schema=schema, model=model, caller=caller,
+                )
+            except Exception as e:  # noqa: BLE001 — try the next tool schema
+                last_err = e
+        raise ValueError(
+            f"[{caller}] mock content matched none of "
+            f"{[t.__name__ for t in tools]}"
+        ) from last_err
 
     settings = get_settings()
     retrier = _make_retry_decorator(settings.llm_max_retries)

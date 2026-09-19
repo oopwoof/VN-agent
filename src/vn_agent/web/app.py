@@ -301,10 +301,25 @@ async def generate_stream(req: GenerateRequest):
         f"Max scenes: {req.max_scenes}, Characters: {req.num_characters}"
     )
 
-    return StreamingResponse(
-        astream_sse(system, user_prompt, caller="web/stream"),
-        media_type="text/event-stream",
-    )
+    from vn_agent.services.llm import mock_mode_var
+
+    async def _gated_stream():
+        """Apply the mock gate inside the generator.
+
+        A StreamingResponse body is iterated after this handler returns, and
+        an async generator runs in the context of whoever drives it — so a
+        set/reset around the `return` would cover nothing. Setting it here
+        is what makes `mock: true` (and the VN_AGENT_MOCK floor) actually
+        reach `astream_sse`.
+        """
+        token = mock_mode_var.set(_resolve_mock(req.mock))
+        try:
+            async for event in astream_sse(system, user_prompt, caller="web/stream"):
+                yield event
+        finally:
+            mock_mode_var.reset(token)
+
+    return StreamingResponse(_gated_stream(), media_type="text/event-stream")
 
 
 # ── Step-by-step project APIs (Sprint 2) ────────────────────────────────────

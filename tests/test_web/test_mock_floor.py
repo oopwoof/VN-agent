@@ -136,3 +136,48 @@ class TestImageGenerationSharesTheSameGate:
             "image_gen.py must consult mock_mode_var, otherwise VN_AGENT_MOCK "
             "cannot block billable image calls"
         )
+
+
+class TestEveryDoorToAProviderConsultsTheGate:
+    """`ainvoke_llm` is not the only way to reach a live model.
+
+    Found 2026-09-19: a `--mock` smoke run still billed real Haiku calls.
+    `services/tools.ainvoke_with_tools` and both `services/streaming`
+    helpers build their own client with `get_llm()` and never consulted
+    `mock_mode_var`. character_designer and scene_artist take the
+    tool-calling path whenever `use_tool_calling` is on (the default), so
+    every mock pipeline run spent money. Same class as 2026-08-03 and
+    2026-08-11 — a gate that covers most doors, not all of them.
+
+    Derived from disk so a NEW module cannot reopen the gap.
+    """
+
+    def test_every_service_calling_get_llm_also_checks_the_gate(self):
+        services = SRC / "services"
+        offenders = []
+        for path in sorted(services.glob("*.py")):
+            if path.name == "llm.py":  # defines both; checked by its own tests
+                continue
+            text = path.read_text(encoding="utf-8")
+            if "get_llm(" in text and "_use_mock_llm" not in text:
+                offenders.append(path.name)
+        assert not offenders, (
+            "these modules build a provider client without consulting the "
+            f"mock gate, so mock runs would spend real money: {offenders}"
+        )
+
+    def test_streaming_endpoint_sets_the_gate_for_its_generator(self):
+        """A StreamingResponse body runs after the handler returns.
+
+        Setting the ContextVar in the handler and resetting before the
+        return would cover nothing — the generator is iterated later, so
+        the set has to live inside the generator itself.
+        """
+        source = (SRC / "web" / "app.py").read_text(encoding="utf-8")
+        start = source.index("async def generate_stream(")
+        end = source.index(chr(10) + "@app.", start)
+        endpoint = source[start:end]
+        assert "mock_mode_var.set(_resolve_mock(" in endpoint, (
+            "/generate/stream accepts GenerateRequest.mock but never applies "
+            "it — a mock-mode stream would bill real tokens"
+        )

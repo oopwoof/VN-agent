@@ -15,6 +15,38 @@
 
 ## [Unreleased]
 
+### 2026-09-19 | 实现 - 2026-09-19 21:02
+
+**变更文件** (8 个):
+**源码变更** (3 文件):
+  - `src/vn_agent/services/streaming.py`
+  - `src/vn_agent/services/tools.py`
+  - `src/vn_agent/web/app.py`
+
+**测试变更** (5 文件):
+  - `tests/test_services/test_mock_gate_entrypoints.py`
+  - `tests/test_services/test_no_billable_calls_in_tests.py`
+  - `tests/test_services/test_streaming.py`
+  - `tests/test_services/test_tools.py`
+  - `tests/test_web/test_mock_floor.py`
+
+**变更统计**:
+```
+src/vn_agent/services/streaming.py                 |  41 ++++++-
+ src/vn_agent/services/tools.py                     |  29 ++++-
+ src/vn_agent/web/app.py                            |  23 +++-
+ tests/test_services/test_mock_gate_entrypoints.py  | 122 +++++++++++++++++++++
+ .../test_no_billable_calls_in_tests.py             |   6 +
+ tests/test_services/test_streaming.py              |   7 ++
+ tests/test_services/test_tools.py                  |   7 ++
+ tests/test_web/test_mock_floor.py                  |  45 ++++++++
+ 8 files changed, 274 insertions(+), 6 deletions(-)
+```
+
+**待补充**: _（可在此处手动添加技术决策、反思、学习笔记）_
+
+---
+
 ### 2026-08-24 | 实现 - 2026-08-24 02:20
 
 **变更文件** (11 个):
