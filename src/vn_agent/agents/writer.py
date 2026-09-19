@@ -1591,8 +1591,18 @@ After dialogue, if branches exist, the player will choose:
         except Exception as e:
             logger.debug(f"Few-shot injection skipped: {e}")
 
-    # Detect Chinese theme and add language hint
-    is_chinese = bool(re.search(r'[\u4e00-\u9fff]', script.description or ""))
+    # Detect Chinese theme and add language hint.
+    #
+    # The signal must include `theme` — the one string the user actually
+    # wrote. Keying it off `description` alone delivered a 100% English
+    # script for the theme 「樱花树下的转学生」 on 2026-09-19: the Director
+    # writes its description in English, so the hint never fired and 12
+    # scenes came back in the wrong language. Title and description stay
+    # in the check as fallbacks for scripts assembled by other paths.
+    _authored = " ".join(
+        t for t in (script.theme, script.title, script.description) if t
+    )
+    is_chinese = bool(re.search(r'[\u4e00-\u9fff]', _authored))
     if is_chinese:
         user_prompt += (
             "\n\nIMPORTANT: Write ALL dialogue text in Chinese (简体中文)."

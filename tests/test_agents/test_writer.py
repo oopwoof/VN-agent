@@ -1843,3 +1843,77 @@ class TestFlywheelInjectionReachesWriterPrompt:
         await _write_scene(scene, script, "cast", "", str(tmp_path))
 
         assert "AVOID" in captured["user"]
+
+
+class TestThemeLanguageReachesTheWriter:
+    """Found by the real 12-scene run on 2026-09-19.
+
+    The theme was the Chinese phrase for "the transfer student under the
+    cherry tree" and the delivered script was 100% English dialogue. The
+    language hint keyed off `script.description` — which the Director
+    writes in English — so the one piece of text the user actually
+    authored, the theme, never reached the Writer. Mock mode hid it: its
+    fixtures branch on CJK in the prompt and happily serve Chinese.
+    """
+
+    @staticmethod
+    async def _prompt_for(mocker, tmp_path, *, theme: str, description: str) -> str:
+        from unittest.mock import AsyncMock
+
+        from vn_agent.agents.writer import _write_scene
+        from vn_agent.schema.script import Scene, VNScript
+
+        seen: dict = {}
+
+        class _FakeResp:
+            content = '[{"character_id": null, "text": "x", "emotion": "neutral"}]'
+
+        async def _fake_invoke(*args, **kwargs):
+            # Only the first call: a short canned response triggers the
+            # continuation top-up, whose prompt would otherwise overwrite it.
+            seen.setdefault(
+                "user", args[1] if len(args) > 1 else kwargs.get("user_prompt", ""),
+            )
+            return _FakeResp()
+
+        mocker.patch("vn_agent.agents.writer.ainvoke_llm", side_effect=_fake_invoke)
+        mocker.patch("vn_agent.agents.writer._append_rag_record",
+                     new=AsyncMock(return_value=None))
+
+        scene = Scene(
+            id="s1", title="S1", description="x",
+            background_id="bg", characters_present=["a"],
+        )
+        script = VNScript(
+            title="T", description=description, theme=theme,
+            start_scene_id="s1", scenes=[scene], world_variables=[],
+        )
+        await _write_scene(scene, script, "A: friendly", "", output_dir=str(tmp_path))
+        return seen["user"]
+
+    @pytest.mark.asyncio
+    async def test_chinese_theme_survives_an_english_description(self, mocker, tmp_path):
+        prompt = await self._prompt_for(
+            mocker, tmp_path,
+            theme="樱花树下的转学生",
+            description="A girl who has mastered the art of leaving arrives at her eighth school.",
+        )
+        assert "简体中文" in prompt, (
+            "a Chinese theme must reach the Writer even when the Director "
+            "described it in English — otherwise the user asks for a Chinese "
+            "VN and is handed an English one"
+        )
+
+    @pytest.mark.asyncio
+    async def test_chinese_description_alone_still_works(self, mocker, tmp_path):
+        prompt = await self._prompt_for(
+            mocker, tmp_path, theme="transfer student", description="樱花树下的相遇。",
+        )
+        assert "简体中文" in prompt
+
+    @pytest.mark.asyncio
+    async def test_english_throughout_gets_no_hint(self, mocker, tmp_path):
+        prompt = await self._prompt_for(
+            mocker, tmp_path, theme="transfer student", description="A quiet semester.",
+        )
+        assert "简体中文" not in prompt
