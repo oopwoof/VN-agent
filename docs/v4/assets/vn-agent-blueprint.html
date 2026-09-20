@@ -431,10 +431,122 @@
     </div>
   </section>
 
+  <!-- ══════════════ 长程一致性 ══════════════ -->
+  <section>
+    <div class="shead">
+      <p class="eyebrow">03 — 长程一致性</p>
+      <h2>三层记忆与分层 RAG</h2>
+      <p>50 场的一致性不可能靠上下文窗口硬扛。三层各管一件事——
+        <strong>混成一层，先坏掉的是事实层</strong>。</p>
+    </div>
+
+    <div class="cuts">
+      <div class="cut">
+        <span class="n">L1 · 符号状态</span>
+        <h3>事实不能矛盾</h3>
+        <p><code>world_variables</code> 带类型与初值，<code>state_writes</code> 逐场落盘，累积成 <code>state_timeline</code>。</p>
+        <p>确定性、可校验、可回放——<strong>这一层不依赖模型的记性</strong>。</p>
+      </div>
+      <div class="cut">
+        <span class="n">L2 · 分层 RAG</span>
+        <h3>细节可被召回</h3>
+        <p>检索的是<strong>实体与设定</strong>，不是对白范例。按 scope 分三档，最重要的那档根本不走检索。</p>
+        <p>sentence-transformers + FAISS；缺 FAISS 时回落 numpy 暴力余弦。</p>
+      </div>
+      <div class="cut">
+        <span class="n">L3 · 窗口与摘要</span>
+        <h3>语气连续</h3>
+        <p>近场进滑动窗口（原文对白，标注"供语气与连贯参考，不要抄"）；太久远的压成 ≤100 词摘要；再往上是章节 rollup。</p>
+      </div>
+    </div>
+
+    <div class="shead" style="margin-top:32px">
+      <h2 style="font-size:1.1rem">RAG 的 scope 设计：让「不能丢的东西」绕开检索</h2>
+      <p>余弦 top-k 对 premise + 角色 + 地点 + 世界变量一起排序，会在任何一个嵌入不匹配的场景里
+        <strong>把故事前提本身挤出检索结果</strong>。跨 50 场，模型就此失去指南针。</p>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>scope</th><th>装的是什么</th><th>怎么取</th><th>去哪</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="mode"><code style="font-family:var(--mono)">always</code></td>
+            <td>故事前提 + 主要角色<small>immutability≥8；未设时用覆盖率启发式——出现在 ≥50% 场景即为主角</small></td>
+            <td class="verifier"><strong>完全绕过 FAISS</strong>——不参与排序，因此不可能被挤掉</td>
+            <td>系统提示的<strong>缓存前缀</strong><code>cache_control · 1h TTL</code></td>
+          </tr>
+          <tr>
+            <td class="mode"><code style="font-family:var(--mono)">chapter</code></td>
+            <td>世界变量 + 次要角色</td>
+            <td class="verifier">进检索池<code>cap 800 字符</code></td>
+            <td>user message</td>
+          </tr>
+          <tr>
+            <td class="mode"><code style="font-family:var(--mono)">scene</code></td>
+            <td>地点 + 回调钩子</td>
+            <td class="verifier">进检索池<code>cap 300 字符</code></td>
+            <td>user message</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="cuts" style="margin-top:16px">
+      <div class="cut">
+        <span class="n">细节 A</span>
+        <h3>按句子边界截断，不按字符数</h3>
+        <p>原本的 <code>[:240]</code> 会切在词中或从句中间，把半句话喂给 Writer——<strong>可测量地在长程上劣化连贯性</strong>。</p>
+        <p>改为回找最后一个句读（空行 · 。 · <code>.</code> · <code>!</code> · <code>?</code>），下限 <code>cap×0.6</code> 防止砍掉太多，找不到才退回硬切。</p>
+      </div>
+      <div class="cut">
+        <span class="n">细节 B</span>
+        <h3>两套检索，两种命运</h3>
+        <p><strong>实体/设定检索</strong>：注入，承担一致性。</p>
+        <p><strong>对白范例 few-shot</strong>：文学模式下<strong>检索照跑但不注入</strong>——语料偏 action，注入会造成文风污染；结果仍落 <code>rag_retrievals.jsonl</code> 供审计与 reranker 实验。</p>
+      </div>
+      <div class="cut">
+        <span class="n">细节 C</span>
+        <h3>混合检索里一句诚实话</h3>
+        <p>FAISS 向量 + BM25 关键词，用加权 RRF 融合（Cormack 2009）。</p>
+        <p>BM25 默认权重只有 <strong>0.3</strong>，因为本项目语料是对白，而策略标签存在<strong>元数据里、不在文本里</strong>——BM25 在这个语料上贡献有限，权重如实反映这一点。</p>
+      </div>
+    </div>
+
+    <div class="shead" style="margin-top:32px">
+      <h2 style="font-size:1.1rem">上下文装配顺序：按每 token 信息密度排，且全程去重</h2>
+    </div>
+    <div class="chain">
+      <div class="row" data-kind="det">
+        <div class="card">
+          <div class="cardtop"><span class="mod">① graph_block</span><span class="chip det">Director 声明</span></div>
+          <p class="desc">Director 声明的 <code>context_deps</code> 所指向场景的<strong>完整对白</strong>——最先拉进来，因为 Director 声明时拥有全局视野，且每条都带明确的叙事意图</p>
+        </div>
+      </div>
+      <div class="row">
+        <div class="card">
+          <div class="cardtop"><span class="mod">② prior_context_block</span><span class="chip">滑动窗口</span></div>
+          <p class="desc">近 <code>writer_context_window</code> 场的原文对白；<strong>已被 ① 拉进来的场景在此跳过</strong></p>
+        </div>
+      </div>
+      <div class="row">
+        <div class="card">
+          <div class="cardtop"><span class="mod">③ older_summaries_block</span><span class="chip">Haiku 压缩</span></div>
+          <p class="desc">超出窗口的早期场景，压成 ≤100 词摘要按时序排列</p>
+        </div>
+      </div>
+      <div class="row" data-kind="loop">
+        <div class="card"><p class="loopnote"><span class="arrow">⟲</span>
+          <span><b>emitted_scene_ids</b> 贯穿三层去重——同一个场景绝不会以两种形态重复出现在同一个 prompt 里。
+          顺序即优先级：<b>精确引用 &gt; 原文窗口 &gt; 压缩摘要</b>。</span></p></div>
+      </div>
+    </div>
+  </section>
+
   <!-- ══════════════ 评测机制 ══════════════ -->
   <section>
     <div class="shead">
-      <p class="eyebrow">03 — 评测机制</p>
+      <p class="eyebrow">04 — 评测机制</p>
       <h2>七种失效模式，七种判定器</h2>
       <p>把它们混成一次 LLM 打分，是这类系统最常见的设计错误：模型会用同一种模糊语气回答七个性质不同的问题，
         而你分不清它哪一句可信。</p>
@@ -480,7 +592,7 @@
   <!-- ══════════════ 横切设计 ══════════════ -->
   <section>
     <div class="shead">
-      <p class="eyebrow">04 — 横切设计</p>
+      <p class="eyebrow">05 — 横切设计</p>
       <h2>三条贯穿全链路的规则</h2>
     </div>
     <div class="cuts">
@@ -512,7 +624,7 @@
   <!-- ══════════════ 评审的评审 ══════════════ -->
   <section>
     <div class="shead">
-      <p class="eyebrow">05 — 评审的可靠性</p>
+      <p class="eyebrow">06 — 评审的可靠性</p>
       <h2>知道评审有多不准，比让它看起来很准重要</h2>
     </div>
     <div class="judgepanel">
@@ -538,7 +650,7 @@
   <!-- ══════════════ 缺口 ══════════════ -->
   <section>
     <div class="shead">
-      <p class="eyebrow">06 — 已知缺口</p>
+      <p class="eyebrow">07 — 已知缺口</p>
       <h2>这套设计还缺什么</h2>
       <p>主动列出来，因为一个不说边界的评测系统不值得信任。</p>
     </div>
@@ -553,7 +665,7 @@
   <!-- ══════════════ 成品 ══════════════ -->
   <section>
     <div class="shead">
-      <p class="eyebrow">07 — 产出</p>
+      <p class="eyebrow">08 — 产出</p>
       <h2>链路末端长什么样</h2>
     </div>
     <div class="specimen">
