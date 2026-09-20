@@ -1,0 +1,568 @@
+<title>VN-Agent 蓝图</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+  :root{
+    --ground:#eceef0;
+    --surface:#fafbfb;
+    --surface-2:#f2f4f5;
+    --ink:#14181a;
+    --ink-2:#414b50;
+    --muted:#6b767b;
+    --rule:#cdd4d7;
+    --rule-soft:#dee3e5;
+    --node:#2a3236;
+    /* judgment taxonomy — the page's whole thesis lives in these three */
+    --det:#0d6c68;      /* 确定性：有确定答案 */
+    --mech:#9a6206;     /* 机械规则：廉价、可解释 */
+    --judge:#6d3b9e;    /* 模型判断：主观、需量化不确定度 */
+    --ops:#1f5f96;      /* 运行经济性 */
+    --fail:#a82a22;
+    --det-wash:#0d6c6814;
+    --mech-wash:#9a620614;
+    --judge-wash:#6d3b9e14;
+    --ops-wash:#1f5f9614;
+    --sans:"IBM Plex Sans","PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+    --serif:"Source Serif 4","Songti SC","SimSun",Georgia,serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ground:#0e1113; --surface:#151a1c; --surface-2:#1b2124;
+      --ink:#e6eaeb; --ink-2:#b3bdc1; --muted:#89969c;
+      --rule:#2b3438; --rule-soft:#222a2d; --node:#c8d2d6;
+      --det:#4fc8c0; --mech:#e0a44a; --judge:#bb8ee6; --ops:#6fb2e8; --fail:#f28a80;
+      --det-wash:#4fc8c01f; --mech-wash:#e0a44a1f; --judge-wash:#bb8ee61f; --ops-wash:#6fb2e81f;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0e1113; --surface:#151a1c; --surface-2:#1b2124;
+    --ink:#e6eaeb; --ink-2:#b3bdc1; --muted:#89969c;
+    --rule:#2b3438; --rule-soft:#222a2d; --node:#c8d2d6;
+    --det:#4fc8c0; --mech:#e0a44a; --judge:#bb8ee6; --ops:#6fb2e8; --fail:#f28a80;
+    --det-wash:#4fc8c01f; --mech-wash:#e0a44a1f; --judge-wash:#bb8ee61f; --ops-wash:#6fb2e81f;
+  }
+
+  body{background:var(--ground);color:var(--ink);font-family:var(--sans);
+       -webkit-font-smoothing:antialiased;line-height:1.6}
+  .wrap{max-width:1080px;margin:0 auto;padding-inline:20px;padding-block:clamp(28px,5vw,56px)}
+  h1,h2,h3{text-wrap:balance;margin:0;line-height:1.2}
+  p{margin:0}
+  .eyebrow{font-family:var(--mono);font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;
+           color:var(--muted);font-weight:500}
+
+  /* ── masthead ─────────────────────────────────────────── */
+  .masthead{display:grid;gap:14px;padding-bottom:26px;border-bottom:1px solid var(--rule)}
+  .masthead h1{font-size:clamp(2rem,5.5vw,3rem);font-weight:600;letter-spacing:-.02em}
+  .masthead h1 .dim{color:var(--muted);font-weight:400}
+  .thesis{font-size:clamp(1rem,2.1vw,1.16rem);color:var(--ink-2);max-width:62ch}
+  .thesis strong{color:var(--ink);font-weight:600}
+
+  .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(122px,1fr));
+           gap:1px;background:var(--rule-soft);border:1px solid var(--rule-soft);margin-top:8px}
+  .metric{background:var(--surface);padding:13px 15px;display:grid;gap:3px}
+  .metric b{font-family:var(--mono);font-size:1.32rem;font-weight:600;font-variant-numeric:tabular-nums;
+            letter-spacing:-.02em;line-height:1.1}
+  .metric span{font-size:.74rem;color:var(--muted);line-height:1.35}
+  .caveat{font-size:.78rem;color:var(--muted);display:flex;gap:7px;align-items:baseline}
+  .caveat::before{content:"※";color:var(--fail);font-size:.8rem}
+
+  /* ── sections ─────────────────────────────────────────── */
+  section{margin-top:clamp(38px,6vw,60px)}
+  .shead{display:grid;gap:7px;margin-bottom:20px}
+  .shead h2{font-size:clamp(1.28rem,2.8vw,1.6rem);font-weight:600;letter-spacing:-.015em}
+  .shead p{color:var(--ink-2);max-width:66ch;font-size:.94rem}
+
+  /* ── product layer ────────────────────────────────────── */
+  .entries{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+  .entry{background:var(--surface);border:1px solid var(--rule-soft);padding:15px 16px;display:grid;gap:7px;
+         align-content:start}
+  .entry .n{font-family:var(--mono);font-size:.7rem;color:var(--muted);letter-spacing:.08em}
+  .entry h3{font-size:1rem;font-weight:600}
+  .entry p{font-size:.86rem;color:var(--ink-2)}
+  .entry code{font-family:var(--mono);font-size:.78rem;color:var(--muted)}
+  .entry .state{font-family:var(--mono);font-size:.72rem;padding-top:6px;margin-top:2px;
+                border-top:1px dashed var(--rule-soft);color:var(--muted)}
+
+  /* ── legend ───────────────────────────────────────────── */
+  .legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-bottom:18px;
+          padding:12px 14px;background:var(--surface-2);border:1px solid var(--rule-soft)}
+  .lg{display:flex;align-items:center;gap:7px;font-size:.79rem;color:var(--ink-2)}
+  .swatch{width:11px;height:11px;flex:none;border-radius:2px}
+  .lg code{font-family:var(--mono);font-size:.74rem;color:var(--muted)}
+
+  /* ── the chain ────────────────────────────────────────── */
+  .chain{position:relative;display:grid}
+  .row{position:relative;padding-left:34px;padding-block:9px}
+  .row::before{content:"";position:absolute;left:10px;top:0;bottom:0;width:1px;background:var(--rule)}
+  .row:first-child::before{top:22px}
+  .row:last-child::before{bottom:auto;height:22px}
+  .row::after{content:"";position:absolute;left:6.5px;top:18px;width:9px;height:9px;border-radius:50%;
+              background:var(--ground);border:1.5px solid var(--node);box-sizing:border-box}
+  .row[data-kind="det"]::after{border-color:var(--det)}
+  .row[data-kind="mech"]::after{border-color:var(--mech)}
+  .row[data-kind="judge"]::after{border-color:var(--judge)}
+  .row[data-kind="ops"]::after{border-color:var(--ops)}
+  .row[data-kind="loop"]::after{border-style:dashed;border-color:var(--muted)}
+
+  .card{background:var(--surface);border:1px solid var(--rule-soft);padding:12px 14px;display:grid;gap:6px}
+  .row[data-kind="det"] .card{border-left:2px solid var(--det);background:linear-gradient(var(--det-wash),var(--det-wash)),var(--surface)}
+  .row[data-kind="mech"] .card{border-left:2px solid var(--mech);background:linear-gradient(var(--mech-wash),var(--mech-wash)),var(--surface)}
+  .row[data-kind="judge"] .card{border-left:2px solid var(--judge);background:linear-gradient(var(--judge-wash),var(--judge-wash)),var(--surface)}
+  .row[data-kind="ops"] .card{border-left:2px solid var(--ops);background:linear-gradient(var(--ops-wash),var(--ops-wash)),var(--surface)}
+  .row[data-kind="loop"] .card{background:none;border:1px dashed var(--rule);padding:9px 12px}
+  .row[data-kind="io"] .card{background:var(--node);border-color:var(--node)}
+  .row[data-kind="io"] .card .mod,.row[data-kind="io"] .card .desc{color:var(--ground)}
+  .row[data-kind="io"] .card .desc{opacity:.78}
+
+  .cardtop{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}
+  .mod{font-family:var(--mono);font-size:.88rem;font-weight:500;letter-spacing:-.01em}
+  .desc{font-size:.87rem;color:var(--ink-2)}
+  .sub{font-size:.8rem;color:var(--muted)}
+  .sub code{font-family:var(--mono);font-size:.76rem}
+
+  .chip{font-family:var(--mono);font-size:.68rem;padding:1px 7px;border:1px solid var(--rule);
+        color:var(--muted);white-space:nowrap;letter-spacing:.02em}
+  .chip.sonnet{border-color:color-mix(in srgb,var(--node) 40%,transparent)}
+  .chip.det{color:var(--det);border-color:color-mix(in srgb,var(--det) 45%,transparent)}
+  .chip.mech{color:var(--mech);border-color:color-mix(in srgb,var(--mech) 45%,transparent)}
+  .chip.judge{color:var(--judge);border-color:color-mix(in srgb,var(--judge) 45%,transparent)}
+  .chip.ops{color:var(--ops);border-color:color-mix(in srgb,var(--ops) 45%,transparent)}
+  .chip.fail{color:var(--fail);border-color:color-mix(in srgb,var(--fail) 45%,transparent)}
+
+  .gatelist{display:grid;gap:5px;margin-top:2px}
+  .gateline{display:grid;grid-template-columns:auto 1fr;gap:9px;align-items:baseline;font-size:.83rem}
+  .gateline .k{font-family:var(--mono);font-size:.76rem;white-space:nowrap}
+  .gateline .v{color:var(--ink-2)}
+  .k.det{color:var(--det)} .k.mech{color:var(--mech)} .k.judge{color:var(--judge)}
+
+  .loopnote{display:flex;gap:9px;align-items:baseline;font-size:.84rem;color:var(--ink-2)}
+  .loopnote .arrow{font-family:var(--mono);color:var(--muted);flex:none}
+  .loopnote b{color:var(--ink);font-weight:600}
+
+  /* ── failure matrix ───────────────────────────────────── */
+  .tablewrap{overflow-x:auto;border:1px solid var(--rule-soft);background:var(--surface)}
+  table{border-collapse:collapse;width:100%;min-width:640px;font-size:.86rem}
+  th,td{text-align:left;padding:11px 13px;border-bottom:1px solid var(--rule-soft);vertical-align:top}
+  thead th{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+           font-weight:500;font-family:var(--mono);background:var(--surface-2)}
+  tbody tr:last-child td{border-bottom:none}
+  td.idx{font-family:var(--mono);color:var(--muted);width:1%;font-variant-numeric:tabular-nums}
+  td.mode{font-weight:600;width:24%}
+  td.mode small{display:block;font-weight:400;color:var(--muted);font-size:.79rem;margin-top:2px}
+  td.verifier code{font-family:var(--mono);font-size:.78rem;color:var(--muted);display:block;margin-top:3px}
+  td.nature{width:14%}
+  .tag{display:inline-flex;align-items:center;gap:5px;font-size:.76rem;font-family:var(--mono);white-space:nowrap}
+  .tag .swatch{width:8px;height:8px}
+
+  /* ── cross-cutting ────────────────────────────────────── */
+  .cuts{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}
+  .cut{background:var(--surface);border:1px solid var(--rule-soft);padding:16px;display:grid;gap:8px;
+       align-content:start}
+  .cut .n{font-family:var(--mono);font-size:.7rem;color:var(--muted);letter-spacing:.1em}
+  .cut h3{font-size:.98rem;font-weight:600}
+  .cut p{font-size:.86rem;color:var(--ink-2)}
+  .cut code{font-family:var(--mono);font-size:.78rem;color:var(--muted);word-break:break-word}
+
+  /* ── judge panel ──────────────────────────────────────── */
+  .judgepanel{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;background:var(--surface);
+              border:1px solid var(--rule-soft);padding:18px}
+  @media(min-width:720px){.judgepanel{grid-template-columns:1.1fr 1fr;gap:26px}}
+  .jnums{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:1px;
+         background:var(--rule-soft);border:1px solid var(--rule-soft)}
+  .jn{background:var(--surface);padding:11px 12px;display:grid;gap:2px}
+  .jn b{font-family:var(--mono);font-size:1.1rem;font-weight:600;font-variant-numeric:tabular-nums;color:var(--judge)}
+  .jn span{font-size:.72rem;color:var(--muted)}
+  .jread{display:grid;gap:9px;font-size:.87rem;color:var(--ink-2)}
+  .jread b{color:var(--ink)}
+  .verdict{border-left:2px solid var(--judge);padding-left:12px}
+
+  /* ── gaps ─────────────────────────────────────────────── */
+  .gaps{display:grid;gap:9px}
+  .gap{display:grid;grid-template-columns:auto 1fr;gap:11px;align-items:baseline;
+       background:var(--surface);border:1px solid var(--rule-soft);padding:12px 14px;font-size:.87rem}
+  .gap .mark{font-family:var(--mono);color:var(--fail);font-size:.8rem}
+  .gap .t{color:var(--ink-2)}
+  .gap .t b{color:var(--ink);font-weight:600}
+
+  /* ── specimen ─────────────────────────────────────────── */
+  .specimen{background:var(--surface);border:1px solid var(--rule-soft);padding:18px 20px;display:grid;gap:12px}
+  .specimen .lines{font-family:var(--serif);font-size:1rem;line-height:1.85;display:grid;gap:3px}
+  .specimen .lines .who{font-family:var(--mono);font-size:.74rem;color:var(--muted);
+                        display:inline-block;min-width:5.4em}
+  .specimen .meta{font-size:.8rem;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 14px;
+                  padding-top:11px;border-top:1px solid var(--rule-soft)}
+
+  footer{margin-top:clamp(40px,6vw,64px);padding-top:18px;border-top:1px solid var(--rule);
+         font-size:.79rem;color:var(--muted);display:grid;gap:5px}
+  footer code{font-family:var(--mono);font-size:.76rem}
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">一句话主题 → 可玩视觉小说</p>
+    <h1>VN-Agent <span class="dim">蓝图</span></h1>
+    <p class="thesis">生成不是难点。难点是给一个<strong>没有标准答案</strong>的长程任务定义「什么叫写对了」——
+      所以这套系统里最重的部分不是 prompt，是把产出的<strong>七种失效模式</strong>拆开，
+      为每一种选最廉价、最确定的判定器，<strong>只把一种留给模型</strong>。</p>
+
+    <div class="metrics">
+      <div class="metric"><b>$1.65</b><span>12 场真实运行<br>text-only · 并发 3</span></div>
+      <div class="metric"><b>25.7<small style="font-size:.75rem;font-weight:400"> min</small></b><span>端到端墙钟</span></div>
+      <div class="metric"><b>4.2<span style="color:var(--muted)">/5</span></b><span>首轮评审通过<br>阈值 3.5</span></div>
+      <div class="metric"><b>0.643</b><span>跨厂商评审<br>Pearson r</span></div>
+      <div class="metric"><b>1068</b><span>测试通过<br>1 skipped</span></div>
+    </div>
+    <p class="caveat">50 场长篇尚未真实运行（据 12 场外推约 $6.9 / 1.8h）；两次真跑均为 text-only，图像层成本未实测。</p>
+  </header>
+
+  <!-- ══════════════ 产品层 ══════════════ -->
+  <section>
+    <div class="shead">
+      <p class="eyebrow">01 — 产品设计</p>
+      <h2>三个入口，一条管线</h2>
+      <p>同一条生成链路暴露成三种控制粒度：把方向盘交给系统、交给用户、或者交给对话。
+        产出物是一个<strong>可编译运行的 Ren'Py 工程</strong>，不是一段文本。</p>
+    </div>
+    <div class="entries">
+      <div class="entry">
+        <span class="n">ENTRY A</span>
+        <h3>一键 Autopilot</h3>
+        <p>零点击直达：预设解析 → 全链路自动跑 → 首个场景就绪即进入播放器。</p>
+        <code>resolve_preset(theme) → per-job Settings</code>
+        <span class="state">M0：工作台内按钮，非独立 URL 入口；预设恒为 autopilot_best</span>
+      </div>
+      <div class="entry">
+        <span class="n">ENTRY B</span>
+        <h3>分步工作台</h3>
+        <p>大纲确认 → 剧本生成 → 素材 → 编译。每一步的中间产物都可见、可干预。</p>
+        <code>SSE 流式场景 + blackboard 状态板</code>
+        <span class="state">已实现</span>
+      </div>
+      <div class="entry">
+        <span class="n">ENTRY C</span>
+        <h3>对话式修改</h3>
+        <p>生成后用自然语言改：重写某场、加角色、换素材、问为什么这么写。</p>
+        <code>intent_router → 4 个执行器 + 置信度门</code>
+        <span class="state">4 个意图均已真实执行；低置信度转澄清</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 生成链路 ══════════════ -->
+  <section>
+    <div class="shead">
+      <p class="eyebrow">02 — 生成链路</p>
+      <h2>管线与嵌在其中的门</h2>
+      <p>质量门不是流水线末端的一道检查，而是<strong>沿链路分布的多个返回点</strong>。
+        颜色编码判定器的性质——这正是整套评测的方法论。</p>
+    </div>
+
+    <div class="legend">
+      <span class="lg"><span class="swatch" style="background:var(--det)"></span>确定性判定 <code>二元 · ~0% 误报</code></span>
+      <span class="lg"><span class="swatch" style="background:var(--mech)"></span>机械规则 <code>廉价 · 可解释</code></span>
+      <span class="lg"><span class="swatch" style="background:var(--judge)"></span>模型判断 <code>主观 · 需量化不确定度</code></span>
+      <span class="lg"><span class="swatch" style="background:var(--ops)"></span>运行经济性 <code>预算 · 墙钟 · 退化</code></span>
+      <span class="lg"><span class="swatch" style="background:var(--muted);border-radius:50%"></span>回流边 <code>谁该修</code></span>
+    </div>
+
+    <div class="chain">
+
+      <div class="row" data-kind="io">
+        <div class="card"><div class="cardtop"><span class="mod">输入</span></div>
+          <p class="desc">一句话主题 · 场景数 · 角色数 · text_only 开关</p></div>
+      </div>
+
+      <div class="row">
+        <div class="card">
+          <div class="cardtop"><span class="mod">director._step1_outline</span><span class="chip sonnet">Sonnet</span></div>
+          <p class="desc">场景大纲 · 角色表 · 世界变量（带类型与初值）· macro_reference（伏笔计划 / 节奏弧 / 语域）</p>
+          <p class="sub">语言信号取自 <code>theme</code>——用户唯一亲手写的字符串</p>
+        </div>
+      </div>
+
+      <div class="row" data-kind="det">
+        <div class="card">
+          <div class="cardtop"><span class="mod">structure_reviewer</span><span class="chip det">确定性审计</span><span class="chip judge">+ LLM 意图审计</span></div>
+          <div class="gatelist">
+            <div class="gateline"><span class="k det">确定性</span><span class="v">悬空分支目标 · 不可达场景 · 未声明变量/角色的使用 · context_deps 对账</span></div>
+            <div class="gateline"><span class="k judge">模型</span><span class="v">分支意图对齐 · 策略分布缺口 · 语域不一致 · 伏笔未回收</span></div>
+          </div>
+          <p class="sub">类别所有权：LLM <strong>不被允许</strong>发出确定性类别；幻觉出 <code>unreachable_scene</code> 会被强制降级为 <code>advisory</code>，无法触发昂贵重试</p>
+        </div>
+      </div>
+
+      <div class="row" data-kind="loop">
+        <div class="card"><p class="loopnote"><span class="arrow">↰</span>
+          <span><b>routing.decide_retry_target</b> → <code style="font-family:var(--mono)">accept</code> ·
+          <code style="font-family:var(--mono)">step2_only</code> ·
+          <code style="font-family:var(--mono)">step1_step2</code> ——
+          按<b>缺陷归谁管</b>路由：声明层缺陷（角色没登场 / 伏笔没回收）必须重跑 step1，
+          交给 step2 只会硬塞一个客串场景把问题掩盖。</span></p></div>
+      </div>
+
+      <div class="row">
+        <div class="card">
+          <div class="cardtop"><span class="mod">director._step2_details</span><span class="chip sonnet">Sonnet</span></div>
+          <p class="desc">逐场填入分支选项（含 <code style="font-family:var(--mono)">requires</code> 状态守卫）与音乐情绪</p>
+        </div>
+      </div>
+
+      <div class="row" data-kind="det">
+        <div class="card">
+          <div class="cardtop"><span class="mod">_build_from_plan</span><span class="chip det">结构校验</span></div>
+          <p class="desc">分支结构合法性检查；非法分支<strong>外科式降级</strong>——剥离坏分支、把首个目标提升为 next_scene_id，而不是叫 LLM 自由修复</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="card">
+          <div class="cardtop"><span class="mod">state_orchestrator</span><span class="chip sonnet">Sonnet</span></div>
+          <p class="desc">编排逐场世界状态写入，产出 <code style="font-family:var(--mono)">state_timeline</code>——跨场景一致性的承载体</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="card">
+          <div class="cardtop"><span class="mod">thinking_fanout</span><span class="chip sonnet">Sonnet</span><span class="chip">并行</span></div>
+          <p class="desc">逐场创作计划：写作意图 · 开场钩子 · 节拍 · 回调落点 · 每角色语气提示 · 风险</p>
+          <p class="sub">刻意与「写」解耦：让并行 writer 在提笔前先看见彼此的计划</p>
+        </div>
+      </div>
+
+      <div class="row" data-kind="det">
+        <div class="card">
+          <div class="cardtop"><span class="mod">cross_ref_sync</span><span class="chip det">Tier-1 确定性消解</span></div>
+          <p class="desc">跨场回调冲突——两个 worker 打算埋同一个伏笔时，在写之前就消解掉</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="card">
+          <div class="cardtop"><span class="mod">writer</span><span class="chip sonnet">Sonnet</span><span class="chip">波次并行 · concurrency 3</span></div>
+          <p class="desc">逐场写对白。注入：符号状态 + 分层 RAG（lore）+ 场景计划 + 滑动窗口</p>
+          <p class="sub">文学模式下 few-shot <strong>检索照跑但不注入</strong>——语料偏 action，注入会造成文风污染；检索结果仍落 <code>rag_retrievals.jsonl</code> 供审计</p>
+        </div>
+      </div>
+
+      <div class="row" data-kind="ops">
+        <div class="card">
+          <div class="cardtop"><span class="mod">output_capped_scenes</span><span class="chip ops">截断探测</span></div>
+          <p class="desc">响应被 <code style="font-family:var(--mono)">max_tokens</code> 切断 → 记为一等信号，写入 run_metrics</p>
+          <p class="sub">因为一次真跑证明了：成本上限会静默劫持质量，而评审会把账算在 Writer 头上</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="card">
+          <div class="cardtop"><span class="mod">rollup_chapter</span><span class="chip">Haiku</span></div>
+          <p class="desc">异步章节摘要（≥15 场才触发——短篇下这套机制是纯开销）</p>
+        </div>
+      </div>
+
+      <div class="row" data-kind="judge">
+        <div class="card">
+          <div class="cardtop"><span class="mod">reviewer</span><span class="chip det">① 结构</span><span class="chip mech">② 机械</span><span class="chip judge">③ rubric</span></div>
+          <div class="gatelist">
+            <div class="gateline"><span class="k det">_structural_check</span><span class="v">图可达性 · 悬空 next_scene_id · 起始场景缺失</span></div>
+            <div class="gateline"><span class="k mech">_mechanical_check</span><span class="v">行数边界 · 世界变量类型 · 策略关键词一致性 · 分支路径 Jaccard 差异度</span></div>
+            <div class="gateline"><span class="k judge">_quality_check</span><span class="v">五维 1-5：人物语气 · 潜台词 · 情绪弧 · 节奏 · 策略执行；阈值 3.5</span></div>
+          </div>
+          <p class="sub">三层顺序即优先级：能程序验证的绝不交给模型</p>
+        </div>
+      </div>
+
+      <div class="row" data-kind="loop">
+        <div class="card"><p class="loopnote"><span class="arrow">↰</span>
+          <span><b>revise → writer</b>（≤3 轮）。但有<b>两条绕过</b>：<br>
+          <span class="chip fail" style="margin-top:6px;display:inline-block">图类 FAIL</span>
+          Writer 改对白，改不了拓扑——重写只是烧钱；<br>
+          <span class="chip fail" style="margin-top:6px;display:inline-block">预算截断</span>
+          重写会撞上同一个 token 上限——这条是用 $1.10 和 22 分钟买来的。</span></p></div>
+      </div>
+
+      <div class="row" data-kind="io">
+        <div class="card"><div class="cardtop"><span class="mod">text_only ? → END</span></div>
+          <p class="desc">条件边：纯文本作业在此收束，整段素材生成不走</p></div>
+      </div>
+
+      <div class="row">
+        <div class="card">
+          <div class="cardtop"><span class="mod">character_designer · scene_artist</span><span class="chip">Haiku</span><span class="chip">+ 图像 API</span></div>
+          <p class="desc">立绘与背景。<strong>素材库命中优先</strong>——一次命中同时省掉 prompt LLM 调用与图像 API 调用</p>
+          <p class="sub">图像是成本大头（50 场约 $8-12 vs 文本层 $6.9），所以库命中率是毛利杠杆而非附加功能</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="card">
+          <div class="cardtop"><span class="mod">compiler.project_builder</span></div>
+          <p class="desc">产出 Ren'Py 工程；缺失素材以透明占位补齐，保证始终可编译</p>
+        </div>
+      </div>
+
+      <div class="row" data-kind="judge">
+        <div class="card">
+          <div class="cardtop"><span class="mod">playtest</span><span class="chip det">状态门遍历</span><span class="chip judge">Vision Judge</span></div>
+          <div class="gatelist">
+            <div class="gateline"><span class="k det">branch_walker</span><span class="v">只在 <code style="font-family:var(--mono)">requires</code> 于当前路径的 world_state 下<strong>真正满足</strong>时才入队——抓「图上可达但状态上走不到」</span></div>
+            <div class="gateline"><span class="k judge">vision judge</span><span class="v">UI 信息可读性 · 死路风险 · 交互节奏 · 玩家能动性</span></div>
+          </div>
+          <p class="sub">代表帧为 Pillow 合成，非引擎渲染——测不到字体回退、文本溢出、立绘层级、转场时序</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ══════════════ 评测机制 ══════════════ -->
+  <section>
+    <div class="shead">
+      <p class="eyebrow">03 — 评测机制</p>
+      <h2>七种失效模式，七种判定器</h2>
+      <p>把它们混成一次 LLM 打分，是这类系统最常见的设计错误：模型会用同一种模糊语气回答七个性质不同的问题，
+        而你分不清它哪一句可信。</p>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>#</th><th>失效模式</th><th>判定器</th><th>性质</th></tr></thead>
+        <tbody>
+          <tr><td class="idx">1</td>
+            <td class="mode">图结构坏了<small>悬空 next_scene_id · 孤儿场景 · 起始缺失</small></td>
+            <td class="verifier">确定性图算法<code>reviewer._structural_check</code></td>
+            <td class="nature"><span class="tag" style="color:var(--det)"><span class="swatch" style="background:var(--det)"></span>二元</span></td></tr>
+          <tr><td class="idx">2</td>
+            <td class="mode">声明与实现不符<small>角色没登场 · 变量没人写 · 伏笔埋了没回收</small></td>
+            <td class="verifier">确定性对账<code>_local_structural_audit · _check_context_deps</code></td>
+            <td class="nature"><span class="tag" style="color:var(--det)"><span class="swatch" style="background:var(--det)"></span>二元</span></td></tr>
+          <tr><td class="idx">3</td>
+            <td class="mode">分支是假的<small>两条路写出几乎一样的内容</small></td>
+            <td class="verifier">路径签名相似度——向下走 3 层，比对白 token、出场角色集合、情绪分布，<strong>三者同时相似</strong>才判定为装饰性分支<code>_check_branch_divergence · Jaccard</code></td>
+            <td class="nature"><span class="tag" style="color:var(--mech)"><span class="swatch" style="background:var(--mech)"></span>阈值</span></td></tr>
+          <tr><td class="idx">4</td>
+            <td class="mode">策略没执行<small>标了 accumulate 但张力没有爬升</small></td>
+            <td class="verifier">机械信号与模型分交叉——行序号与「能量」的线性相关，正斜率即爬升<code>strategy_metrics · check_strategy_consistency</code></td>
+            <td class="nature"><span class="tag" style="color:var(--mech)"><span class="swatch" style="background:var(--mech)"></span>连续</span></td></tr>
+          <tr><td class="idx">5</td>
+            <td class="mode">写作层不行<small>语气不分 · 没有潜台词 · 节奏塌</small></td>
+            <td class="verifier">LLM rubric 五维打分，阈值 3.5<code>reviewer._quality_check</code></td>
+            <td class="nature"><span class="tag" style="color:var(--judge)"><span class="swatch" style="background:var(--judge)"></span>连续</span></td></tr>
+          <tr><td class="idx">6</td>
+            <td class="mode">玩起来不对<small>这一帧信息不可读 · 走进死路 · 玩家没有能动性</small></td>
+            <td class="verifier">多模态 vision judge，评在合成的代表帧上<code>playtest.vision_judge</code></td>
+            <td class="nature"><span class="tag" style="color:var(--judge)"><span class="swatch" style="background:var(--judge)"></span>连续+分级</span></td></tr>
+          <tr><td class="idx">7</td>
+            <td class="mode">跑不起或太贵<small>超预算 · 超时 · 吞吐退化</small></td>
+            <td class="verifier">harness 断言 + 健康信号；实时采样花费，超限即熔断<code>smoke_longvn · --max-budget-usd</code></td>
+            <td class="nature"><span class="tag" style="color:var(--ops)"><span class="swatch" style="background:var(--ops)"></span>二元+阈值</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ══════════════ 横切设计 ══════════════ -->
+  <section>
+    <div class="shead">
+      <p class="eyebrow">04 — 横切设计</p>
+      <h2>三条贯穿全链路的规则</h2>
+    </div>
+    <div class="cuts">
+      <div class="cut">
+        <span class="n">CUT A</span>
+        <h3>不许模型冒充确定性判定</h3>
+        <p>合法类别之外另有一个 <strong>LLM 被允许发出的子集</strong>。硬图缺陷类别保留给确定性审计，
+          模型若幻觉出其一，强制降级为 advisory。</p>
+        <p><strong>为什么：</strong>这些类别会触发 Director 重跑。<strong>触发昂贵动作的证据，必须来自确定性来源。</strong></p>
+        <code>_LLM_VALID_CATEGORIES</code>
+      </div>
+      <div class="cut">
+        <span class="n">CUT B</span>
+        <h3>输出不是分数，是「谁该修」</h3>
+        <p>多数质量门只回答通过与否。这里的门回答三选一，划分依据是缺陷归哪个组件管。</p>
+        <p><strong>为什么：</strong>不知道谁该修，重试就是随机游走——一次真跑用三轮全场重写证明了这一点。</p>
+        <code>routing.decide_retry_target · review_can_writer_fix · output_capped_scenes</code>
+      </div>
+      <div class="cut">
+        <span class="n">CUT C</span>
+        <h3>评审本身要被评审</h3>
+        <p>跨厂商第二评审对同一批场景独立打分，量化分歧而不是宣称一致。</p>
+        <p><strong>结论的措辞很重要：</strong>这不是「验证了一致性」，是「量化了分歧」。</p>
+        <code>Sonnet × GPT-4o · n=47 场景级配对</code>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 评审的评审 ══════════════ -->
+  <section>
+    <div class="shead">
+      <p class="eyebrow">05 — 评审的可靠性</p>
+      <h2>知道评审有多不准，比让它看起来很准重要</h2>
+    </div>
+    <div class="judgepanel">
+      <div>
+        <div class="jnums">
+          <div class="jn"><b>0.643</b><span>Pearson r</span></div>
+          <div class="jn"><b>44.7%</b><span>完全一致</span></div>
+          <div class="jn"><b>87.2%</b><span>差 ≤ 1 分</span></div>
+          <div class="jn"><b>3.68<span style="color:var(--muted);font-size:.85rem"> / 3.66</span></b><span>Sonnet / GPT-4o 均值</span></div>
+        </div>
+      </div>
+      <div class="jread">
+        <p><b>中等相关，不是高一致。</b>完全一致只有 44.7%——所以能说的是量化了分歧，不能说验证了一致性。</p>
+        <p><b>但分歧是刻度级的，不是方向级的。</b>差 ≤1 分占 87.2%，两个评审很少一个说好一个说坏。</p>
+        <p class="verdict"><b>对产品的直接含义：</b>拿它做<b>二元通过门</b>是稳的；拿它做<b>细粒度排序</b>（比较两个配置差 0.2 分）是不稳的。
+          对照实验的结论因此只能说「方向一致」，不能说「稳定最优」。</p>
+        <p style="font-size:.83rem;color:var(--muted)">自我偏好：两个评审均值几乎相同，无总体级自我抬高证据。
+          但这只存在于离线 eval——管线内的 Reviewer 仍是同族自评。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 缺口 ══════════════ -->
+  <section>
+    <div class="shead">
+      <p class="eyebrow">06 — 已知缺口</p>
+      <h2>这套设计还缺什么</h2>
+      <p>主动列出来，因为一个不说边界的评测系统不值得信任。</p>
+    </div>
+    <div class="gaps">
+      <div class="gap"><span class="mark">GAP 1</span><span class="t"><b>没有人工校准。</b>零条人工标注参照——严格讲只知道两个模型之间分歧多大，<b>不知道它们对不对</b>。这是最大的缺口。</span></div>
+      <div class="gap"><span class="mark">GAP 2</span><span class="t"><b>生产路径上没有第二评审。</b>跨模型交叉验证只在离线 eval 脚本；管线内的 Reviewer 与 Writer 默认是同一个模型。</span></div>
+      <div class="gap"><span class="mark">GAP 3</span><span class="t"><b>第 6 层评的是合成帧。</b>字体回退、文本溢出、立绘层级、转场时序——凡是渲染期才出现的问题，这一层测不到。</span></div>
+      <div class="gap"><span class="mark">GAP 4</span><span class="t"><b>零个真实创作者用过。</b>产品判断全部来自自身作为 VN 读者与创作者的经验，需求侧一个假设都没验证。</span></div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 成品 ══════════════ -->
+  <section>
+    <div class="shead">
+      <p class="eyebrow">07 — 产出</p>
+      <h2>链路末端长什么样</h2>
+    </div>
+    <div class="specimen">
+      <div class="lines">
+        <div><span class="who">旁白</span>樱花树在午后的阳光里静止着，像一把撑开的伞，将操场的喧嚣隔在另一个世界。</div>
+        <div><span class="who">水岛花</span>还是这里啊。你每天都在这棵树底下，难道不腻吗。</div>
+        <div><span class="who">朝比奈怜</span>腻的话早就换地方了。</div>
+        <div><span class="who">水岛花</span>说得好像你有别的地方可去一样。</div>
+        <div><span class="who">朝比奈怜</span>没有。所以不换。</div>
+      </div>
+      <div class="meta">
+        <span>主题「樱花树下的转学生」</span>
+        <span>场景 <code style="font-family:var(--mono)">ch1_opening</code></span>
+        <span>策略 <code style="font-family:var(--mono)">drift</code>——无决定性转折，靠氛围与潜台词推进</span>
+        <span>潜台词维度 5/5</span>
+      </div>
+      <p style="font-size:.86rem;color:var(--ink-2)">这五行里没有一个字直接说孤独——这正是五维里「潜台词」那一维要打的东西。</p>
+    </div>
+  </section>
+
+  <footer>
+    <p>数据来源：<code>demo_output/real_20260919/tier_12_rerun/run_metrics.json</code>（成本 · 墙钟 · 缓存 · 轮换）、
+      <code>demo_output/sweep/*/scored.json</code>（n=47 跨评审配对，当场重算）、
+      <code>pytest tests/</code>（1068 passed · 1 skipped）。</p>
+    <p>凡标注为「未实测 / 未运行」之处均为真实状态，未以模糊措辞掩盖。</p>
+  </footer>
+
+</div>
