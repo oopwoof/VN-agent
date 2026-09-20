@@ -328,8 +328,12 @@
 
       <div class="row">
         <div class="card">
-          <div class="cardtop"><span class="mod">state_orchestrator</span><span class="chip sonnet">Sonnet</span></div>
-          <p class="desc">编排逐场世界状态写入，产出 <code style="font-family:var(--mono)">state_timeline</code>——跨场景一致性的承载体</p>
+          <div class="cardtop"><span class="mod">state_orchestrator</span><span class="chip">Haiku</span><span class="chip">1 次调用 · ~$0.002</span></div>
+          <p class="desc">把符号状态<strong>编译成自然语言约束</strong>：读 world_variables + 当前值 + 每场 <code>state_reads</code>，
+            产出 <code>state_constraints</code> 拼进 Writer prompt</p>
+          <p class="sub">用人物层面的话而非变量层面的话——「她已经读过手稿，别让她再第一次发现」而不是「manuscript_read=True」；
+            好感度定性表述（「已过了直呼其名的阶段」）而非数值。把<strong>解释状态</strong>从<strong>写对白</strong>里剥出来、用便宜模型只做一次，
+            否则每个并行 writer 都要各自重新解释同一批变量，重复计费且各自漂移。<code>world_state</code> 为空则整节点跳过。</p>
         </div>
       </div>
 
@@ -351,7 +355,8 @@
       <div class="row">
         <div class="card">
           <div class="cardtop"><span class="mod">writer</span><span class="chip sonnet">Sonnet</span><span class="chip">波次并行 · concurrency 3</span></div>
-          <p class="desc">逐场写对白。注入：符号状态 + 分层 RAG（lore）+ 场景计划 + 滑动窗口</p>
+          <p class="desc">逐场写对白，并逐场累积产出 <code>state_timeline</code>——<strong>跨场景一致性的承载体</strong>。
+            注入：原始状态值 + Director 声明的 state_writes + 上一步编译的自然语言约束 + 分层 RAG（lore）+ 场景计划 + 滑动窗口</p>
           <p class="sub">文学模式下 few-shot <strong>检索照跑但不注入</strong>——语料偏 action，注入会造成文风污染；检索结果仍落 <code>rag_retrievals.jsonl</code> 供审计</p>
         </div>
       </div>
