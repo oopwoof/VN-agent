@@ -318,8 +318,11 @@
 
       <div class="row" data-kind="det">
         <div class="card">
-          <div class="cardtop"><span class="mod">_build_from_plan</span><span class="chip det">结构校验</span></div>
-          <p class="desc">分支结构合法性检查；非法分支<strong>外科式降级</strong>——剥离坏分支、把首个目标提升为 next_scene_id，而不是叫 LLM 自由修复</p>
+          <div class="cardtop"><span class="mod">_validate_branch_structure → _degrade_invalid_branches</span><span class="chip det">纯代码 · 无 LLM</span></div>
+          <p class="desc">两条规则判定「假分支」：同场景多个分支指向<strong>同一目标</strong>；或各分支下游 3 层内<strong>没有独属于自己的场景</strong>——立刻汇合即选择无意义</p>
+          <p class="sub">命中即<strong>外科式降级</strong>：清空该场分支、把首个目标提升为 <code>next_scene_id</code>，其余脚本原样保留，Reviewer 后续仍会报警——降级可见，不是悄悄抹掉。
+            不交给 LLM 修，是因为自由文本修复曾把整个 <code>characters</code> 字段弄丢、发明过不存在的策略标签；
+            <code>_attempt_repair</code> 只保留给 Pydantic 构建失败那种真需要创造性的场合。</p>
         </div>
       </div>
 
