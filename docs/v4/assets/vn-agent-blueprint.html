@@ -117,6 +117,7 @@
   .cardtop{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}
   .mod{font-family:var(--mono);font-size:.88rem;font-weight:500;letter-spacing:-.01em}
   .desc{font-size:.87rem;color:var(--ink-2)}
+  .desc code,.loopnote code{font-family:var(--mono);font-size:.82rem;color:var(--muted)}
   .sub{font-size:.8rem;color:var(--muted)}
   .sub code{font-family:var(--mono);font-size:.76rem}
 
@@ -303,8 +304,15 @@
 
       <div class="row">
         <div class="card">
-          <div class="cardtop"><span class="mod">director._step2_details</span><span class="chip sonnet">Sonnet</span></div>
-          <p class="desc">逐场填入分支选项（含 <code style="font-family:var(--mono)">requires</code> 状态守卫）与音乐情绪</p>
+          <div class="cardtop"><span class="mod">director._step2_details</span><span class="chip sonnet">Sonnet</span><span class="chip">Tool Use</span></div>
+          <p class="desc">把彼此独立的场景卡片<strong>接成一张带状态语义的有向图</strong>——
+            走向 <code>next_scene_id</code> · 分支（选项文案 · 跳转 · <code>requires</code> 状态守卫）·
+            状态读写 <code>state_reads</code> / <code>state_writes</code> ·
+            叙事依赖 <code>context_deps</code>（回调 / 伏笔回收，≤5）·
+            进出场衔接 <code>entry_context</code> / <code>exit_hook</code> · 情绪轨迹 · BGM</p>
+          <p class="sub"><strong>step1 声明，step2 接线</strong>：step1 声明的世界变量被拼进本步 prompt，
+            确保状态读写与分支守卫接到真实存在的变量上。后续 <code>branch_target_invalid</code> 校验、
+            <code>branch_walker</code> 状态门遍历、分支差异度比对，吃的都是这一步的产出。</p>
         </div>
       </div>
 
